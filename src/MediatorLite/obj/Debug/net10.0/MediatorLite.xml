@@ -1,0 +1,817 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>MediatorLite</name>
+    </assembly>
+    <members>
+        <member name="T:MediatorLite.NotificationExecutionStrategy">
+            <summary>
+            Defines how notification handlers should be executed.
+            </summary>
+        </member>
+        <member name="F:MediatorLite.NotificationExecutionStrategy.Sequential">
+            <summary>
+            Execute handlers one after another in order.
+            This is the default strategy.
+            </summary>
+        </member>
+        <member name="F:MediatorLite.NotificationExecutionStrategy.Parallel">
+            <summary>
+            Execute all handlers concurrently using Task.WhenAll.
+            </summary>
+        </member>
+        <member name="F:MediatorLite.NotificationExecutionStrategy.StopOnFirst">
+            <summary>
+            Stop execution after the first handler completes successfully.
+            Useful for "first handler wins" scenarios.
+            </summary>
+        </member>
+        <member name="T:MediatorLite.NotificationErrorStrategy">
+            <summary>
+            Defines how errors should be handled during notification publishing.
+            </summary>
+        </member>
+        <member name="F:MediatorLite.NotificationErrorStrategy.StopOnFirstError">
+            <summary>
+            Stop execution immediately when a handler throws an exception.
+            The exception is propagated to the caller.
+            </summary>
+        </member>
+        <member name="F:MediatorLite.NotificationErrorStrategy.ContinueAndAggregate">
+            <summary>
+            Continue executing all handlers even if some throw exceptions.
+            All exceptions are collected and thrown as an <see cref="T:System.AggregateException"/>.
+            </summary>
+        </member>
+        <member name="T:MediatorLite.NotificationHandlerOrderAttribute">
+            <summary>
+            Specifies the execution order of a notification handler.
+            </summary>
+            <remarks>
+            Lower values execute first. Handlers without this attribute default to order 0.
+            </remarks>
+        </member>
+        <member name="M:MediatorLite.NotificationHandlerOrderAttribute.#ctor(System.Int32)">
+            <summary>
+            Specifies the execution order of a notification handler.
+            </summary>
+            <remarks>
+            Lower values execute first. Handlers without this attribute default to order 0.
+            </remarks>
+        </member>
+        <member name="P:MediatorLite.NotificationHandlerOrderAttribute.Order">
+            <summary>
+            Gets the execution order. Lower values execute first.
+            </summary>
+        </member>
+        <member name="T:MediatorLite.NotificationOptionsAttribute">
+            <summary>
+            Specifies notification-specific execution options that override global settings.
+            </summary>
+            <remarks>
+            Apply this attribute to a notification class to override the global
+            <see cref="T:MediatorLite.NotificationExecutionStrategy"/> and <see cref="T:MediatorLite.NotificationErrorStrategy"/>.
+            </remarks>
+        </member>
+        <member name="P:MediatorLite.NotificationOptionsAttribute.ExecutionStrategy">
+            <summary>
+            Gets or sets the execution strategy for this notification type.
+            If not set, the global strategy from MediatorOptions is used.
+            </summary>
+        </member>
+        <member name="P:MediatorLite.NotificationOptionsAttribute.ErrorStrategy">
+            <summary>
+            Gets or sets the error handling strategy for this notification type.
+            If not set, the global strategy from MediatorOptions is used.
+            </summary>
+        </member>
+        <member name="P:MediatorLite.NotificationOptionsAttribute.OverrideGlobal">
+            <summary>
+            Gets or sets whether this attribute's values should override the global settings.
+            Default is true.
+            </summary>
+        </member>
+        <member name="T:MediatorLite.BehaviorOrderAttribute">
+            <summary>
+            Specifies the execution order of a pipeline behavior.
+            </summary>
+            <remarks>
+            Lower values execute first (outer behaviors wrap inner behaviors).
+            Behaviors without this attribute default to order 0.
+            </remarks>
+        </member>
+        <member name="M:MediatorLite.BehaviorOrderAttribute.#ctor(System.Int32)">
+            <summary>
+            Specifies the execution order of a pipeline behavior.
+            </summary>
+            <remarks>
+            Lower values execute first (outer behaviors wrap inner behaviors).
+            Behaviors without this attribute default to order 0.
+            </remarks>
+        </member>
+        <member name="P:MediatorLite.BehaviorOrderAttribute.Order">
+            <summary>
+            Gets the execution order. Lower values execute first.
+            </summary>
+        </member>
+        <member name="T:MediatorLite.MediatorLoggingAttribute">
+            <summary>
+            Controls logging behavior for a specific request type.
+            </summary>
+            <remarks>
+            Use this attribute to override global logging settings for specific requests.
+            </remarks>
+        </member>
+        <member name="P:MediatorLite.MediatorLoggingAttribute.Enabled">
+            <summary>
+            Gets or sets whether logging is enabled for this request type.
+            Default is true.
+            </summary>
+        </member>
+        <member name="P:MediatorLite.MediatorLoggingAttribute.IncludePayload">
+            <summary>
+            Gets or sets whether to include the request payload in logs.
+            Default is false for security reasons.
+            </summary>
+        </member>
+        <member name="P:MediatorLite.MediatorLoggingAttribute.LogLevel">
+            <summary>
+            Gets or sets the log level for this request type.
+            Uses Microsoft.Extensions.Logging.LogLevel values as integers.
+            Default is Information (2).
+            </summary>
+        </member>
+        <member name="T:MediatorLite.MediatorGenerationAttribute">
+            <summary>
+            Controls source generation behavior for a specific type.
+            </summary>
+            <remarks>
+            Use this attribute to skip automatic source generation for specific handlers
+            when you need custom registration logic.
+            </remarks>
+        </member>
+        <member name="P:MediatorLite.MediatorGenerationAttribute.Skip">
+            <summary>
+            Gets or sets whether to skip source generation for this type.
+            Default is false.
+            </summary>
+        </member>
+        <member name="T:MediatorLite.IMediator">
+            <summary>
+            Main interface for sending requests and publishing notifications through the mediator.
+            </summary>
+            <remarks>
+            The mediator acts as a dispatcher that routes requests to their handlers
+            and publishes notifications to all registered handlers.
+            </remarks>
+            <example>
+            <code>
+            public class MyService
+            {
+                private readonly IMediator _mediator;
+                
+                public MyService(IMediator mediator)
+                {
+                    _mediator = mediator;
+                }
+                
+                public async Task&lt;User&gt; GetUserAsync(int id, CancellationToken ct)
+                {
+                    return await _mediator.SendAsync(new GetUserQuery(id), ct);
+                }
+                
+                public async Task NotifyUserCreatedAsync(int userId, CancellationToken ct)
+                {
+                    await _mediator.PublishAsync(new UserCreatedNotification(userId), ct);
+                }
+            }
+            </code>
+            </example>
+        </member>
+        <member name="M:MediatorLite.IMediator.SendAsync``1(MediatorLite.IRequest{``0},System.Threading.CancellationToken)">
+            <summary>
+            Sends a request to a single handler and returns the response.
+            </summary>
+            <typeparam name="TResponse">The type of response expected from the handler.</typeparam>
+            <param name="request">The request to send.</param>
+            <param name="cancellationToken">Cancellation token for the operation.</param>
+            <returns>A <see cref="T:System.Threading.Tasks.ValueTask`1"/> representing the response from the handler.</returns>
+            <exception cref="T:System.InvalidOperationException">Thrown when no handler is registered for the request type.</exception>
+        </member>
+        <member name="M:MediatorLite.IMediator.PublishAsync``1(``0,System.Threading.CancellationToken)">
+            <summary>
+            Publishes a notification to all registered handlers.
+            </summary>
+            <typeparam name="TNotification">The type of notification to publish.</typeparam>
+            <param name="notification">The notification to publish.</param>
+            <param name="cancellationToken">Cancellation token for the operation.</param>
+            <returns>A <see cref="T:System.Threading.Tasks.ValueTask"/> representing the asynchronous operation.</returns>
+        </member>
+        <member name="T:MediatorLite.INotification">
+            <summary>
+            Marker interface for notifications that can be published to multiple handlers.
+            </summary>
+            <remarks>
+            Unlike requests, notifications can have zero or more handlers.
+            All handlers are invoked when a notification is published.
+            </remarks>
+            <example>
+            <code>
+            public record UserCreatedNotification(int UserId, string Email) : INotification;
+            </code>
+            </example>
+        </member>
+        <member name="T:MediatorLite.INotificationHandler`1">
+            <summary>
+            Defines a handler for notifications of type <typeparamref name="TNotification"/>.
+            </summary>
+            <typeparam name="TNotification">The type of notification being handled.</typeparam>
+            <remarks>
+            Multiple handlers can be registered for the same notification type.
+            All handlers are invoked when a notification is published.
+            The execution order can be controlled via the <see cref="T:MediatorLite.NotificationHandlerOrderAttribute"/>.
+            </remarks>
+            <example>
+            <code>
+            public class SendWelcomeEmailHandler : INotificationHandler&lt;UserCreatedNotification&gt;
+            {
+                public async ValueTask HandleAsync(UserCreatedNotification notification, CancellationToken cancellationToken = default)
+                {
+                    await _emailService.SendWelcomeEmailAsync(notification.Email, cancellationToken);
+                }
+            }
+            </code>
+            </example>
+        </member>
+        <member name="M:MediatorLite.INotificationHandler`1.HandleAsync(`0,System.Threading.CancellationToken)">
+            <summary>
+            Handles a notification asynchronously.
+            </summary>
+            <param name="notification">The notification to handle.</param>
+            <param name="cancellationToken">Cancellation token for the operation.</param>
+            <returns>A <see cref="T:System.Threading.Tasks.ValueTask"/> representing the asynchronous operation.</returns>
+        </member>
+        <member name="T:MediatorLite.RequestHandlerDelegate`1">
+            <summary>
+            Delegate representing the next handler or behavior in the request pipeline.
+            </summary>
+            <typeparam name="TResponse">The type of response from the handler.</typeparam>
+            <returns>A <see cref="T:System.Threading.Tasks.ValueTask`1"/> representing the response.</returns>
+        </member>
+        <member name="T:MediatorLite.IPipelineBehavior`2">
+            <summary>
+            Defines a pipeline behavior that wraps request handling with cross-cutting concerns.
+            </summary>
+            <typeparam name="TRequest">The type of request being handled.</typeparam>
+            <typeparam name="TResponse">The type of response from the handler.</typeparam>
+            <remarks>
+            Pipeline behaviors are executed in order of registration, wrapping the actual handler.
+            Use behaviors for cross-cutting concerns like logging, validation, caching, etc.
+            The execution order can be controlled via the <see cref="T:MediatorLite.BehaviorOrderAttribute"/>.
+            </remarks>
+            <example>
+            <code>
+            public class LoggingBehavior&lt;TRequest, TResponse&gt; : IPipelineBehavior&lt;TRequest, TResponse&gt;
+                where TRequest : IRequest&lt;TResponse&gt;
+            {
+                private readonly ILogger&lt;LoggingBehavior&lt;TRequest, TResponse&gt;&gt; _logger;
+                
+                public LoggingBehavior(ILogger&lt;LoggingBehavior&lt;TRequest, TResponse&gt;&gt; logger)
+                {
+                    _logger = logger;
+                }
+                
+                public async ValueTask&lt;TResponse&gt; HandleAsync(
+                    TRequest request,
+                    RequestHandlerDelegate&lt;TResponse&gt; next,
+                    CancellationToken cancellationToken = default)
+                {
+                    _logger.LogInformation("Handling {RequestType}", typeof(TRequest).Name);
+                    var response = await next();
+                    _logger.LogInformation("Handled {RequestType}", typeof(TRequest).Name);
+                    return response;
+                }
+            }
+            </code>
+            </example>
+        </member>
+        <member name="M:MediatorLite.IPipelineBehavior`2.HandleAsync(`0,MediatorLite.RequestHandlerDelegate{`1},System.Threading.CancellationToken)">
+            <summary>
+            Handles the request by optionally performing work before/after invoking the next handler.
+            </summary>
+            <param name="request">The request being handled.</param>
+            <param name="next">The delegate to invoke the next behavior or the actual handler.</param>
+            <param name="cancellationToken">Cancellation token for the operation.</param>
+            <returns>A <see cref="T:System.Threading.Tasks.ValueTask`1"/> representing the response.</returns>
+        </member>
+        <member name="T:MediatorLite.IRequest`1">
+            <summary>
+            Marker interface for requests that return a response of type <typeparamref name="TResponse"/>.
+            </summary>
+            <typeparam name="TResponse">The type of response returned by the request handler.</typeparam>
+            <remarks>
+            Implement this interface on your request/command/query types.
+            Each request type should have exactly one corresponding <see cref="T:MediatorLite.IRequestHandler`2"/>.
+            </remarks>
+            <example>
+            <code>
+            public record GetUserQuery(int Id) : IRequest&lt;User&gt;;
+            public record CreateUserCommand(string Name, string Email) : IRequest&lt;int&gt;;
+            </code>
+            </example>
+        </member>
+        <member name="T:MediatorLite.IRequest">
+            <summary>
+            Marker interface for requests that don't return a meaningful response.
+            </summary>
+            <remarks>
+            This is a convenience interface that inherits from <see cref="T:MediatorLite.IRequest`1"/>
+            with <see cref="T:MediatorLite.Unit"/> as the response type. Use this for commands that don't need
+            to return a value.
+            </remarks>
+            <example>
+            <code>
+            public record DeleteUserCommand(int Id) : IRequest;
+            </code>
+            </example>
+        </member>
+        <member name="T:MediatorLite.IRequestHandler`2">
+            <summary>
+            Defines a handler for a request of type <typeparamref name="TRequest"/>
+            that returns a response of type <typeparamref name="TResponse"/>.
+            </summary>
+            <typeparam name="TRequest">The type of request being handled.</typeparam>
+            <typeparam name="TResponse">The type of response from the handler.</typeparam>
+            <remarks>
+            Each request type should have exactly one handler registered.
+            Handlers are resolved from the dependency injection container.
+            </remarks>
+            <example>
+            <code>
+            public class GetUserQueryHandler : IRequestHandler&lt;GetUserQuery, User&gt;
+            {
+                private readonly IUserRepository _repository;
+                
+                public GetUserQueryHandler(IUserRepository repository)
+                {
+                    _repository = repository;
+                }
+                
+                public async ValueTask&lt;User&gt; HandleAsync(GetUserQuery request, CancellationToken cancellationToken = default)
+                {
+                    return await _repository.GetByIdAsync(request.Id, cancellationToken);
+                }
+            }
+            </code>
+            </example>
+        </member>
+        <member name="M:MediatorLite.IRequestHandler`2.HandleAsync(`0,System.Threading.CancellationToken)">
+            <summary>
+            Handles a request asynchronously.
+            </summary>
+            <param name="request">The request to handle.</param>
+            <param name="cancellationToken">Cancellation token for the operation.</param>
+            <returns>A <see cref="T:System.Threading.Tasks.ValueTask`1"/> representing the asynchronous operation with the response.</returns>
+        </member>
+        <member name="T:MediatorLite.IRequestHandler`1">
+            <summary>
+            Defines a handler for a request of type <typeparamref name="TRequest"/> that doesn't return a value.
+            </summary>
+            <typeparam name="TRequest">The type of request being handled.</typeparam>
+            <remarks>
+            This is a convenience interface for handlers that don't need to return a value.
+            Implement this instead of <see cref="T:MediatorLite.IRequestHandler`2"/> with <see cref="T:MediatorLite.Unit"/>.
+            </remarks>
+            <example>
+            <code>
+            public class DeleteUserCommandHandler : IRequestHandler&lt;DeleteUserCommand&gt;
+            {
+                public async ValueTask HandleAsync(DeleteUserCommand request, CancellationToken cancellationToken = default)
+                {
+                    await _repository.DeleteAsync(request.Id, cancellationToken);
+                }
+            }
+            </code>
+            </example>
+        </member>
+        <member name="M:MediatorLite.IRequestHandler`1.HandleAsync(`0,System.Threading.CancellationToken)">
+            <summary>
+            Handles a request asynchronously without returning a value.
+            </summary>
+            <param name="request">The request to handle.</param>
+            <param name="cancellationToken">Cancellation token for the operation.</param>
+            <returns>A <see cref="T:System.Threading.Tasks.ValueTask"/> representing the asynchronous operation.</returns>
+        </member>
+        <member name="M:MediatorLite.IRequestHandler`1.MediatorLite#IRequestHandler{TRequest,MediatorLite#Unit}#HandleAsync(`0,System.Threading.CancellationToken)">
+            <summary>
+            Explicit implementation that wraps the void HandleAsync to return Unit.
+            </summary>
+        </member>
+        <member name="T:MediatorLite.Unit">
+            <summary>
+            Represents an empty response for requests that don't return a value.
+            Similar to <see cref="T:System.Void"/> but usable as a generic type parameter.
+            </summary>
+            <remarks>
+            Use <see cref="F:MediatorLite.Unit.Value"/> to get the singleton instance.
+            </remarks>
+        </member>
+        <member name="F:MediatorLite.Unit.Value">
+            <summary>
+            Gets the singleton <see cref="T:MediatorLite.Unit"/> value.
+            </summary>
+        </member>
+        <member name="P:MediatorLite.Unit.CompletedTask">
+            <summary>
+            Returns a completed <see cref="T:System.Threading.Tasks.ValueTask`1"/> with the default <see cref="T:MediatorLite.Unit"/> value.
+            </summary>
+        </member>
+        <member name="M:MediatorLite.Unit.CompareTo(MediatorLite.Unit)">
+            <summary>
+            Compares this instance with another <see cref="T:MediatorLite.Unit"/> instance.
+            All <see cref="T:MediatorLite.Unit"/> instances are considered equal.
+            </summary>
+            <param name="other">The other <see cref="T:MediatorLite.Unit"/> instance.</param>
+            <returns>Always returns 0 since all instances are equal.</returns>
+        </member>
+        <member name="M:MediatorLite.Unit.ToString">
+            <summary>
+            Returns a string representation of this <see cref="T:MediatorLite.Unit"/> instance.
+            </summary>
+            <returns>The string "()".</returns>
+        </member>
+        <member name="T:MediatorLite.Configuration.MediatorOptions">
+            <summary>
+            Configuration options for the mediator.
+            </summary>
+        </member>
+        <member name="P:MediatorLite.Configuration.MediatorOptions.Assemblies">
+            <summary>
+            Gets the assemblies to scan for handlers.
+            </summary>
+        </member>
+        <member name="P:MediatorLite.Configuration.MediatorOptions.BehaviorTypes">
+            <summary>
+            Gets the registered pipeline behavior types in order.
+            </summary>
+        </member>
+        <member name="P:MediatorLite.Configuration.MediatorOptions.NotificationExecutionStrategy">
+            <summary>
+            Gets or sets the default execution strategy for notifications.
+            Default is <see cref="F:MediatorLite.NotificationExecutionStrategy.Sequential"/>.
+            </summary>
+        </member>
+        <member name="P:MediatorLite.Configuration.MediatorOptions.NotificationErrorStrategy">
+            <summary>
+            Gets or sets the default error handling strategy for notifications.
+            Default is <see cref="F:MediatorLite.NotificationErrorStrategy.ContinueAndAggregate"/>.
+            </summary>
+        </member>
+        <member name="P:MediatorLite.Configuration.MediatorOptions.EnableBuiltInLogging">
+            <summary>
+            Gets or sets whether built-in logging is enabled.
+            Default is true.
+            </summary>
+        </member>
+        <member name="P:MediatorLite.Configuration.MediatorOptions.DefaultLogLevel">
+            <summary>
+            Gets or sets the default log level for mediator operations.
+            Default is <see cref="F:Microsoft.Extensions.Logging.LogLevel.Debug"/>.
+            </summary>
+        </member>
+        <member name="P:MediatorLite.Configuration.MediatorOptions.EnableTracing">
+            <summary>
+            Gets or sets whether to enable OpenTelemetry tracing.
+            Default is true.
+            </summary>
+        </member>
+        <member name="P:MediatorLite.Configuration.MediatorOptions.HandlerLifetime">
+            <summary>
+            Gets or sets the service lifetime for handlers.
+            Default is <see cref="F:Microsoft.Extensions.DependencyInjection.ServiceLifetime.Transient"/>.
+            </summary>
+        </member>
+        <member name="P:MediatorLite.Configuration.MediatorOptions.MediatorLifetime">
+            <summary>
+            Gets or sets the service lifetime for the mediator.
+            Default is <see cref="F:Microsoft.Extensions.DependencyInjection.ServiceLifetime.Transient"/>.
+            </summary>
+        </member>
+        <member name="M:MediatorLite.Configuration.MediatorOptions.RegisterHandlersFromAssembly(System.Reflection.Assembly)">
+            <summary>
+            Registers handlers from the specified assembly.
+            </summary>
+            <param name="assembly">The assembly to scan for handlers.</param>
+            <returns>The <see cref="T:MediatorLite.Configuration.MediatorOptions"/> instance for chaining.</returns>
+        </member>
+        <member name="M:MediatorLite.Configuration.MediatorOptions.RegisterHandlersFromAssemblyContaining``1">
+            <summary>
+            Registers handlers from the assembly containing the specified type.
+            </summary>
+            <typeparam name="T">A type in the target assembly.</typeparam>
+            <returns>The <see cref="T:MediatorLite.Configuration.MediatorOptions"/> instance for chaining.</returns>
+        </member>
+        <member name="M:MediatorLite.Configuration.MediatorOptions.AddOpenBehavior(System.Type)">
+            <summary>
+            Adds an open generic pipeline behavior type.
+            </summary>
+            <param name="behaviorType">The open generic behavior type (e.g., typeof(LoggingBehavior&lt;,&gt;)).</param>
+            <returns>The <see cref="T:MediatorLite.Configuration.MediatorOptions"/> instance for chaining.</returns>
+            <exception cref="T:System.ArgumentException">Thrown when the type is not an open generic implementing IPipelineBehavior.</exception>
+        </member>
+        <member name="M:MediatorLite.Configuration.MediatorOptions.AddBehavior``1">
+            <summary>
+            Adds a closed pipeline behavior type.
+            </summary>
+            <typeparam name="TBehavior">The behavior type.</typeparam>
+            <returns>The <see cref="T:MediatorLite.Configuration.MediatorOptions"/> instance for chaining.</returns>
+        </member>
+        <member name="T:MediatorLite.ServiceCollectionExtensions">
+            <summary>
+            Extension methods for registering MediatorLite services with the dependency injection container.
+            </summary>
+        </member>
+        <member name="M:MediatorLite.ServiceCollectionExtensions.AddMediatorLite(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.Action{MediatorLite.Configuration.MediatorOptions})">
+            <summary>
+            Adds MediatorLite services to the specified <see cref="T:Microsoft.Extensions.DependencyInjection.IServiceCollection"/>.
+            </summary>
+            <param name="services">The <see cref="T:Microsoft.Extensions.DependencyInjection.IServiceCollection"/> to add services to.</param>
+            <param name="configure">An optional action to configure <see cref="T:MediatorLite.Configuration.MediatorOptions"/>.</param>
+            <returns>The <see cref="T:Microsoft.Extensions.DependencyInjection.IServiceCollection"/> for chaining.</returns>
+            <example>
+            <code>
+            services.AddMediatorLite(options =>
+            {
+                options.RegisterHandlersFromAssembly(typeof(Program).Assembly);
+                options.AddOpenBehavior(typeof(LoggingBehavior&lt;,&gt;));
+            });
+            </code>
+            </example>
+        </member>
+        <member name="M:MediatorLite.ServiceCollectionExtensions.RegisterHandlersFromAssembly(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.Reflection.Assembly,Microsoft.Extensions.DependencyInjection.ServiceLifetime)">
+            <summary>
+            Registers all request handlers and notification handlers from the specified assembly.
+            </summary>
+        </member>
+        <member name="M:MediatorLite.ServiceCollectionExtensions.AddMediatorBehavior``1(Microsoft.Extensions.DependencyInjection.IServiceCollection,Microsoft.Extensions.DependencyInjection.ServiceLifetime)">
+            <summary>
+            Adds a pipeline behavior to the service collection.
+            </summary>
+            <typeparam name="TBehavior">The behavior type.</typeparam>
+            <param name="services">The <see cref="T:Microsoft.Extensions.DependencyInjection.IServiceCollection"/> to add the behavior to.</param>
+            <param name="lifetime">The service lifetime for the behavior.</param>
+            <returns>The <see cref="T:Microsoft.Extensions.DependencyInjection.IServiceCollection"/> for chaining.</returns>
+        </member>
+        <member name="M:MediatorLite.ServiceCollectionExtensions.AddMediatorLiteCore(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.Action{MediatorLite.Configuration.MediatorOptions})">
+            <summary>
+            Adds MediatorLite services using source-generated handler registrations.
+            Call this after calling the generated AddGeneratedHandlers method.
+            </summary>
+            <param name="services">The <see cref="T:Microsoft.Extensions.DependencyInjection.IServiceCollection"/> to add services to.</param>
+            <param name="configure">An optional action to configure <see cref="T:MediatorLite.Configuration.MediatorOptions"/>.</param>
+            <returns>The <see cref="T:Microsoft.Extensions.DependencyInjection.IServiceCollection"/> for chaining.</returns>
+            <remarks>
+            Use this method when you want to use source generators for handler discovery.
+            The source generator will create an extension method that you call before this one.
+            </remarks>
+            <example>
+            <code>
+            services
+                .AddGeneratedHandlers()  // Source-generated
+                .AddMediatorLiteCore(options =>
+                {
+                    options.AddOpenBehavior(typeof(LoggingBehavior&lt;,&gt;));
+                });
+            </code>
+            </example>
+        </member>
+        <member name="T:MediatorLite.Diagnostics.MediatorActivitySource">
+            <summary>
+            Provides OpenTelemetry ActivitySource for distributed tracing in MediatorLite.
+            </summary>
+        </member>
+        <member name="F:MediatorLite.Diagnostics.MediatorActivitySource.SourceName">
+            <summary>
+            The name of the activity source.
+            </summary>
+        </member>
+        <member name="F:MediatorLite.Diagnostics.MediatorActivitySource.Version">
+            <summary>
+            The version of the activity source.
+            </summary>
+        </member>
+        <member name="F:MediatorLite.Diagnostics.MediatorActivitySource.Source">
+            <summary>
+            The ActivitySource for MediatorLite tracing.
+            </summary>
+        </member>
+        <member name="T:MediatorLite.Diagnostics.MediatorActivitySource.ActivityNames">
+            <summary>
+            Activity names for different operations.
+            </summary>
+        </member>
+        <member name="F:MediatorLite.Diagnostics.MediatorActivitySource.ActivityNames.SendRequest">
+            <summary>Send request activity name prefix.</summary>
+        </member>
+        <member name="F:MediatorLite.Diagnostics.MediatorActivitySource.ActivityNames.PublishNotification">
+            <summary>Publish notification activity name prefix.</summary>
+        </member>
+        <member name="F:MediatorLite.Diagnostics.MediatorActivitySource.ActivityNames.PipelineBehavior">
+            <summary>Pipeline behavior activity name prefix.</summary>
+        </member>
+        <member name="F:MediatorLite.Diagnostics.MediatorActivitySource.ActivityNames.NotificationHandler">
+            <summary>Notification handler activity name prefix.</summary>
+        </member>
+        <member name="T:MediatorLite.Diagnostics.MediatorActivitySource.Tags">
+            <summary>
+            Tag names for activity attributes.
+            </summary>
+        </member>
+        <member name="F:MediatorLite.Diagnostics.MediatorActivitySource.Tags.RequestType">
+            <summary>Request type tag.</summary>
+        </member>
+        <member name="F:MediatorLite.Diagnostics.MediatorActivitySource.Tags.ResponseType">
+            <summary>Response type tag.</summary>
+        </member>
+        <member name="F:MediatorLite.Diagnostics.MediatorActivitySource.Tags.NotificationType">
+            <summary>Notification type tag.</summary>
+        </member>
+        <member name="F:MediatorLite.Diagnostics.MediatorActivitySource.Tags.HandlerType">
+            <summary>Handler type tag.</summary>
+        </member>
+        <member name="F:MediatorLite.Diagnostics.MediatorActivitySource.Tags.BehaviorType">
+            <summary>Behavior type tag.</summary>
+        </member>
+        <member name="F:MediatorLite.Diagnostics.MediatorActivitySource.Tags.HandlerCount">
+            <summary>Handler count tag.</summary>
+        </member>
+        <member name="F:MediatorLite.Diagnostics.MediatorActivitySource.Tags.ExecutionStrategy">
+            <summary>Execution strategy tag.</summary>
+        </member>
+        <member name="F:MediatorLite.Diagnostics.MediatorActivitySource.Tags.Error">
+            <summary>Error tag.</summary>
+        </member>
+        <member name="F:MediatorLite.Diagnostics.MediatorActivitySource.Tags.ErrorMessage">
+            <summary>Error message tag.</summary>
+        </member>
+        <member name="T:MediatorLite.Diagnostics.MediatorDiagnostics">
+            <summary>
+            Diagnostic events for MediatorLite operations.
+            </summary>
+        </member>
+        <member name="F:MediatorLite.Diagnostics.MediatorDiagnostics.Listener">
+            <summary>
+            DiagnosticListener for MediatorLite events.
+            </summary>
+        </member>
+        <member name="T:MediatorLite.Diagnostics.MediatorDiagnostics.Events">
+            <summary>
+            Event name constants.
+            </summary>
+        </member>
+        <member name="F:MediatorLite.Diagnostics.MediatorDiagnostics.Events.RequestStarted">
+            <summary>Request started event.</summary>
+        </member>
+        <member name="F:MediatorLite.Diagnostics.MediatorDiagnostics.Events.RequestCompleted">
+            <summary>Request completed event.</summary>
+        </member>
+        <member name="F:MediatorLite.Diagnostics.MediatorDiagnostics.Events.RequestFailed">
+            <summary>Request failed event.</summary>
+        </member>
+        <member name="F:MediatorLite.Diagnostics.MediatorDiagnostics.Events.NotificationPublished">
+            <summary>Notification published event.</summary>
+        </member>
+        <member name="F:MediatorLite.Diagnostics.MediatorDiagnostics.Events.NotificationHandlerStarted">
+            <summary>Notification handler started event.</summary>
+        </member>
+        <member name="F:MediatorLite.Diagnostics.MediatorDiagnostics.Events.NotificationHandlerCompleted">
+            <summary>Notification handler completed event.</summary>
+        </member>
+        <member name="T:MediatorLite.Internal.Mediator">
+            <summary>
+            Internal implementation of the mediator.
+            </summary>
+        </member>
+        <member name="T:MediatorLite.Validation.ValidationResult">
+            <summary>
+            Result of a validation operation.
+            </summary>
+        </member>
+        <member name="P:MediatorLite.Validation.ValidationResult.Success">
+            <summary>
+            Gets a successful validation result.
+            </summary>
+        </member>
+        <member name="P:MediatorLite.Validation.ValidationResult.IsValid">
+            <summary>
+            Gets whether the validation passed.
+            </summary>
+        </member>
+        <member name="P:MediatorLite.Validation.ValidationResult.Errors">
+            <summary>
+            Gets the validation errors, if any.
+            </summary>
+        </member>
+        <member name="M:MediatorLite.Validation.ValidationResult.Failure(MediatorLite.Validation.ValidationError[])">
+            <summary>
+            Creates a failed validation result with the specified errors.
+            </summary>
+            <param name="errors">The validation errors.</param>
+            <returns>A failed <see cref="T:MediatorLite.Validation.ValidationResult"/>.</returns>
+        </member>
+        <member name="M:MediatorLite.Validation.ValidationResult.Failure(System.Collections.Generic.IEnumerable{MediatorLite.Validation.ValidationError})">
+            <summary>
+            Creates a failed validation result with the specified errors.
+            </summary>
+            <param name="errors">The validation errors.</param>
+            <returns>A failed <see cref="T:MediatorLite.Validation.ValidationResult"/>.</returns>
+        </member>
+        <member name="T:MediatorLite.Validation.ValidationError">
+            <summary>
+            Represents a single validation error.
+            </summary>
+            <param name="PropertyName">The name of the property that failed validation.</param>
+            <param name="ErrorMessage">The error message describing the validation failure.</param>
+            <param name="AttemptedValue">The value that was attempted.</param>
+        </member>
+        <member name="M:MediatorLite.Validation.ValidationError.#ctor(System.String,System.String,System.Object)">
+            <summary>
+            Represents a single validation error.
+            </summary>
+            <param name="PropertyName">The name of the property that failed validation.</param>
+            <param name="ErrorMessage">The error message describing the validation failure.</param>
+            <param name="AttemptedValue">The value that was attempted.</param>
+        </member>
+        <member name="P:MediatorLite.Validation.ValidationError.PropertyName">
+            <summary>The name of the property that failed validation.</summary>
+        </member>
+        <member name="P:MediatorLite.Validation.ValidationError.ErrorMessage">
+            <summary>The error message describing the validation failure.</summary>
+        </member>
+        <member name="P:MediatorLite.Validation.ValidationError.AttemptedValue">
+            <summary>The value that was attempted.</summary>
+        </member>
+        <member name="T:MediatorLite.Validation.IValidator`1">
+            <summary>
+            Defines a validator for a specific request type.
+            </summary>
+            <typeparam name="TRequest">The type of request to validate.</typeparam>
+        </member>
+        <member name="M:MediatorLite.Validation.IValidator`1.ValidateAsync(`0,System.Threading.CancellationToken)">
+            <summary>
+            Validates the specified request.
+            </summary>
+            <param name="request">The request to validate.</param>
+            <param name="cancellationToken">Cancellation token for the operation.</param>
+            <returns>The validation result.</returns>
+        </member>
+        <member name="T:MediatorLite.Validation.ValidationException">
+            <summary>
+            Exception thrown when validation fails.
+            </summary>
+        </member>
+        <member name="P:MediatorLite.Validation.ValidationException.Errors">
+            <summary>
+            Gets the validation errors that caused this exception.
+            </summary>
+        </member>
+        <member name="M:MediatorLite.Validation.ValidationException.#ctor(System.Collections.Generic.IEnumerable{MediatorLite.Validation.ValidationError})">
+            <summary>
+            Initializes a new instance of the <see cref="T:MediatorLite.Validation.ValidationException"/> class.
+            </summary>
+            <param name="errors">The validation errors.</param>
+        </member>
+        <member name="M:MediatorLite.Validation.ValidationException.#ctor(System.String,System.Collections.Generic.IEnumerable{MediatorLite.Validation.ValidationError})">
+            <summary>
+            Initializes a new instance of the <see cref="T:MediatorLite.Validation.ValidationException"/> class.
+            </summary>
+            <param name="message">The error message.</param>
+            <param name="errors">The validation errors.</param>
+        </member>
+        <member name="T:MediatorLite.Validation.ValidationBehavior`2">
+            <summary>
+            A pipeline behavior that validates requests using registered validators.
+            </summary>
+            <typeparam name="TRequest">The type of request.</typeparam>
+            <typeparam name="TResponse">The type of response.</typeparam>
+        </member>
+        <member name="M:MediatorLite.Validation.ValidationBehavior`2.#ctor(System.Collections.Generic.IEnumerable{MediatorLite.Validation.IValidator{`0}})">
+            <summary>
+            Initializes a new instance of the <see cref="T:MediatorLite.Validation.ValidationBehavior`2"/> class.
+            </summary>
+            <param name="validators">The validators for the request type.</param>
+        </member>
+        <member name="M:MediatorLite.Validation.ValidationBehavior`2.HandleAsync(`0,MediatorLite.RequestHandlerDelegate{`1},System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="T:MediatorLite.Validation.DataAnnotationsValidator`1">
+            <summary>
+            A simple validator that uses DataAnnotations attributes.
+            </summary>
+            <typeparam name="TRequest">The type of request to validate.</typeparam>
+        </member>
+        <member name="M:MediatorLite.Validation.DataAnnotationsValidator`1.ValidateAsync(`0,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+    </members>
+</doc>

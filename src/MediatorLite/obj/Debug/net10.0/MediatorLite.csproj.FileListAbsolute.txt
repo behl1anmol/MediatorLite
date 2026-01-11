@@ -1,0 +1,14 @@
+/mnt/stuff/RiderProjects/MediatorLite/src/MediatorLite/obj/Debug/net10.0/MediatorLite.csproj.AssemblyReference.cache
+/mnt/stuff/RiderProjects/MediatorLite/src/MediatorLite/obj/Debug/net10.0/MediatorLite.GeneratedMSBuildEditorConfig.editorconfig
+/mnt/stuff/RiderProjects/MediatorLite/src/MediatorLite/obj/Debug/net10.0/MediatorLite.AssemblyInfoInputs.cache
+/mnt/stuff/RiderProjects/MediatorLite/src/MediatorLite/obj/Debug/net10.0/MediatorLite.AssemblyInfo.cs
+/mnt/stuff/RiderProjects/MediatorLite/src/MediatorLite/obj/Debug/net10.0/MediatorLite.csproj.CoreCompileInputs.cache
+/mnt/stuff/RiderProjects/MediatorLite/src/MediatorLite/obj/Debug/net10.0/MediatorLite.xml
+/mnt/stuff/RiderProjects/MediatorLite/src/MediatorLite/bin/Debug/net10.0/MediatorLite.deps.json
+/mnt/stuff/RiderProjects/MediatorLite/src/MediatorLite/bin/Debug/net10.0/MediatorLite.dll
+/mnt/stuff/RiderProjects/MediatorLite/src/MediatorLite/bin/Debug/net10.0/MediatorLite.pdb
+/mnt/stuff/RiderProjects/MediatorLite/src/MediatorLite/bin/Debug/net10.0/MediatorLite.xml
+/mnt/stuff/RiderProjects/MediatorLite/src/MediatorLite/obj/Debug/net10.0/MediatorLite.dll
+/mnt/stuff/RiderProjects/MediatorLite/src/MediatorLite/obj/Debug/net10.0/refint/MediatorLite.dll
+/mnt/stuff/RiderProjects/MediatorLite/src/MediatorLite/obj/Debug/net10.0/MediatorLite.pdb
+/mnt/stuff/RiderProjects/MediatorLite/src/MediatorLite/obj/Debug/net10.0/ref/MediatorLite.dll

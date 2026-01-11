@@ -1,0 +1,81 @@
+{
+  "format": 1,
+  "restore": {
+    "/mnt/stuff/RiderProjects/MediatorLite/src/MediatorLite.SourceGeneration/MediatorLite.SourceGeneration.csproj": {}
+  },
+  "projects": {
+    "/mnt/stuff/RiderProjects/MediatorLite/src/MediatorLite.SourceGeneration/MediatorLite.SourceGeneration.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "/mnt/stuff/RiderProjects/MediatorLite/src/MediatorLite.SourceGeneration/MediatorLite.SourceGeneration.csproj",
+        "projectName": "MediatorLite.SourceGeneration",
+        "projectPath": "/mnt/stuff/RiderProjects/MediatorLite/src/MediatorLite.SourceGeneration/MediatorLite.SourceGeneration.csproj",
+        "packagesPath": "/home/anmol/.nuget/packages/",
+        "outputPath": "/mnt/stuff/RiderProjects/MediatorLite/src/MediatorLite.SourceGeneration/obj/",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "/home/anmol/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "netstandard2.0"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "netstandard2.0": {
+            "targetAlias": "netstandard2.0",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "allWarningsAsErrors": true,
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.100"
+      },
+      "frameworks": {
+        "netstandard2.0": {
+          "targetAlias": "netstandard2.0",
+          "dependencies": {
+            "Microsoft.CodeAnalysis.Analyzers": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[3.3.4, )"
+            },
+            "Microsoft.CodeAnalysis.CSharp": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[4.8.0, )"
+            },
+            "NETStandard.Library": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[2.0.3, )",
+              "autoReferenced": true
+            }
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "runtimeIdentifierGraphPath": "/home/anmol/.dotnet/sdk/10.0.100/RuntimeIdentifierGraph.json"
+        }
+      }
+    }
+  }
+}
