@@ -8,17 +8,30 @@ This guide helps you migrate from MediatR to MediatorLite.
 |---------|--------------|-------|
 | `IRequest<TResponse>` | `IRequest<TResponse>` | Same |
 | `IRequest` | `IRequest` | Same |
-| `IRequestHandler<TRequest, TResponse>` | `IRequestHandler<TRequest, TResponse>` | Same signature |
+| `IRequestHandler<TRequest, TResponse>` | `IRequestHandler<TRequest, TResponse>` | Handler returns `ValueTask<T>` for performance |
 | `INotification` | `INotification` | Same |
-| `INotificationHandler<T>` | `INotificationHandler<T>` | Same |
-| `IPipelineBehavior<TRequest, TResponse>` | `IPipelineBehavior<TRequest, TResponse>` | Return type changes |
+| `INotificationHandler<T>` | `INotificationHandler<T>` | Handler returns `ValueTask` |
+| `IPipelineBehavior<TRequest, TResponse>` | `IPipelineBehavior<TRequest, TResponse>` | Behavior returns `ValueTask<T>` |
 | `Unit` | `Unit` | Same concept |
+| `IMediator.Send<T>()` returns `Task<T>` | `IMediator.SendAsync<T>()` returns `Task<T>` | **Same return type for consumer ergonomics** |
+| `IMediator.Publish()` returns `Task` | `IMediator.PublishAsync()` returns `Task` | **Same return type for consumer ergonomics** |
 
 ## Key Differences
 
-### 1. Return Type: Task → ValueTask
+### 1. Public API: Task-based for Consumer Ergonomics
 
-MediatorLite uses `ValueTask<T>` for better performance.
+MediatorLite's `IMediator` interface returns `Task<T>` and `Task` for maximum consumer ergonomics, enabling natural parallel execution patterns:
+
+```csharp
+// MediatorLite supports natural parallel execution
+var task1 = _mediator.SendAsync(new GetUserQuery(1));
+var task2 = _mediator.SendAsync(new GetOrderQuery(1));
+await Task.WhenAll(task1, task2);  // Works naturally!
+```
+
+### 2. Handler Internals: ValueTask for Performance
+
+Internally, handlers use `ValueTask<T>` for better performance on synchronous completion paths:
 
 **MediatR:**
 ```csharp
@@ -26,7 +39,7 @@ public class MyHandler : IRequestHandler<MyQuery, Result>
 {
     public Task<Result> Handle(MyQuery request, CancellationToken ct)
     {
-        return Task.FromResult(new Result());
+        return Task.FromResult(new Result());  // Allocates Task
     }
 }
 ```
@@ -37,12 +50,12 @@ public class MyHandler : IRequestHandler<MyQuery, Result>
 {
     public ValueTask<Result> HandleAsync(MyQuery request, CancellationToken ct = default)
     {
-        return ValueTask.FromResult(new Result());
+        return ValueTask.FromResult(new Result());  // Zero allocation for sync completion
     }
 }
 ```
 
-### 2. Method Name: Handle → HandleAsync
+### 3. Method Name: Handle → HandleAsync
 
 | MediatR | MediatorLite |
 |---------|--------------|
@@ -50,7 +63,7 @@ public class MyHandler : IRequestHandler<MyQuery, Result>
 | `Send()` | `SendAsync()` |
 | `Publish()` | `PublishAsync()` |
 
-### 3. Registration
+### 4. Registration
 
 **MediatR:**
 ```csharp
@@ -70,7 +83,7 @@ services.AddMediatorLite(options =>
 });
 ```
 
-### 4. Pipeline Behaviors
+### 5. Pipeline Behaviors
 
 **MediatR:**
 ```csharp
@@ -126,10 +139,11 @@ using MediatorLite;
 
 ### Step 3: Update Handlers
 
-Use find-and-replace:
-- `Task<` → `ValueTask<`
-- `Handle(` → `HandleAsync(`
-- `: IRequestHandler<` stays the same
+For handlers, update the return type and method name:
+- `Task<T> Handle(` → `ValueTask<T> HandleAsync(`
+- `Task Handle(` → `ValueTask HandleAsync(`
+- `Task.FromResult(x)` → `ValueTask.FromResult(x)`
+- `Task.CompletedTask` → `ValueTask.CompletedTask`
 - Add `= default` to CancellationToken parameters
 
 ### Step 4: Update Mediator Calls
@@ -152,6 +166,19 @@ services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(...));
 
 // After
 services.AddMediatorLite(options => options.RegisterHandlersFromAssembly(...));
+```
+
+## Source Generator (Zero-Reflection Registration)
+
+MediatorLite includes a source generator for compile-time handler discovery:
+
+```csharp
+// Instead of runtime reflection scanning
+services.AddMediatorLite();
+
+// Use source-generated registrations
+services.AddMediatorLite();
+services.AddGeneratedHandlers();  // Zero reflection at startup!
 ```
 
 ## Regex for Bulk Migration

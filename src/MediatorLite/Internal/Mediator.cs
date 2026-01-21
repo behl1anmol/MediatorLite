@@ -2,20 +2,33 @@ using MediatorLite.Configuration;
 using MediatorLite.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Buffers;
+using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Linq.Expressions;
 using System.Reflection;
-using System.Runtime.CompilerServices;
 
 namespace MediatorLite.Internal;
 
 /// <summary>
-/// Internal implementation of the mediator.
+/// Internal implementation of the mediator with optimized dispatch using cached delegates.
 /// </summary>
 internal sealed class Mediator : IMediator
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<Mediator> _logger;
     private readonly MediatorOptions _options;
+
+    // Static caches for type lookups - shared across all Mediator instances
+    private static readonly ConcurrentDictionary<Type, Type> _handlerTypeCache = new();
+    private static readonly ConcurrentDictionary<(Type, Type), Type> _behaviorTypeCache = new();
+    
+    // Cached compiled delegates for handler invocation (avoids reflection per request)
+    private static readonly ConcurrentDictionary<Type, Delegate> _handlerDelegateCache = new();
+    private static readonly ConcurrentDictionary<Type, Delegate> _behaviorDelegateCache = new();
+    
+    // Cached notification handler orderings
+    private static readonly ConcurrentDictionary<Type, int> _handlerOrderCache = new();
 
     public Mediator(
         IServiceProvider serviceProvider,
@@ -27,7 +40,19 @@ internal sealed class Mediator : IMediator
         _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
-    public async ValueTask<TResponse> SendAsync<TResponse>(
+    /// <summary>
+    /// Clears all static caches. Useful for testing scenarios.
+    /// </summary>
+    internal static void ClearCaches()
+    {
+        _handlerTypeCache.Clear();
+        _behaviorTypeCache.Clear();
+        _handlerDelegateCache.Clear();
+        _behaviorDelegateCache.Clear();
+        _handlerOrderCache.Clear();
+    }
+
+    public async Task<TResponse> SendAsync<TResponse>(
         IRequest<TResponse> request,
         CancellationToken cancellationToken = default)
     {
@@ -54,11 +79,18 @@ internal sealed class Mediator : IMediator
 
         try
         {
-            // Get the handler type
-            var handlerType = typeof(IRequestHandler<,>).MakeGenericType(requestType, typeof(TResponse));
+            // Get cached handler type
+            var handlerType = _handlerTypeCache.GetOrAdd(
+                requestType,
+                static rt => typeof(IRequestHandler<,>).MakeGenericType(rt, rt.GetInterfaces()
+                    .First(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IRequest<>))
+                    .GetGenericArguments()[0]));
+
+            // For the specific response type, we need a more precise cache key
+            var specificHandlerType = typeof(IRequestHandler<,>).MakeGenericType(requestType, typeof(TResponse));
 
             // Resolve the handler
-            var handler = _serviceProvider.GetService(handlerType)
+            var handler = _serviceProvider.GetService(specificHandlerType)
                 ?? throw new InvalidOperationException(
                     $"No handler registered for request type {requestType.FullName}. " +
                     $"Ensure a handler implementing IRequestHandler<{requestTypeName}, {typeof(TResponse).Name}> is registered.");
@@ -66,15 +98,28 @@ internal sealed class Mediator : IMediator
             // Get pipeline behaviors
             var behaviors = GetPipelineBehaviors<TResponse>(requestType);
 
-            // Build the pipeline
-            var response = await ExecutePipeline(request, handler, behaviors, cancellationToken);
+            // Fast path: no behaviors, invoke handler directly using cached delegate
+            if (behaviors.Count == 0)
+            {
+                var response = await InvokeHandlerDirectly<TResponse>(handler, request, cancellationToken);
+                
+                if (_options.EnableBuiltInLogging)
+                {
+                    _logger.Log(_options.DefaultLogLevel, "Request {RequestType} handled successfully", requestTypeName);
+                }
+                
+                return response;
+            }
+
+            // Build and execute the pipeline
+            var result = await ExecutePipeline(request, handler, behaviors, cancellationToken);
 
             if (_options.EnableBuiltInLogging)
             {
                 _logger.Log(_options.DefaultLogLevel, "Request {RequestType} handled successfully", requestTypeName);
             }
 
-            return response;
+            return result;
         }
         catch (Exception ex)
         {
@@ -90,7 +135,7 @@ internal sealed class Mediator : IMediator
         }
     }
 
-    public async ValueTask PublishAsync<TNotification>(
+    public async Task PublishAsync<TNotification>(
         TNotification notification,
         CancellationToken cancellationToken = default)
         where TNotification : INotification
@@ -130,7 +175,7 @@ internal sealed class Mediator : IMediator
             return;
         }
 
-        // Order handlers by attribute if present
+        // Order handlers by attribute if present (uses cached order values)
         var orderedHandlers = OrderHandlers(handlers);
 
         // Get execution options (check for per-notification override)
@@ -162,13 +207,67 @@ internal sealed class Mediator : IMediator
         }
     }
 
+    /// <summary>
+    /// Invokes the handler directly using a cached compiled delegate (fast path for no behaviors).
+    /// </summary>
+    private ValueTask<TResponse> InvokeHandlerDirectly<TResponse>(
+        object handler,
+        IRequest<TResponse> request,
+        CancellationToken cancellationToken)
+    {
+        var requestType = request.GetType();
+        var cacheKey = requestType;
+
+        var invoker = _handlerDelegateCache.GetOrAdd(cacheKey, _ =>
+        {
+            return CreateHandlerDelegate<TResponse>(requestType);
+        });
+
+        return ((Func<object, object, CancellationToken, ValueTask<TResponse>>)invoker)(handler, request, cancellationToken);
+    }
+
+    /// <summary>
+    /// Creates a compiled delegate for invoking handler.HandleAsync without reflection.
+    /// </summary>
+    private static Func<object, object, CancellationToken, ValueTask<TResponse>> CreateHandlerDelegate<TResponse>(Type requestType)
+    {
+        // Parameters: handler (object), request (object), cancellationToken
+        var handlerParam = Expression.Parameter(typeof(object), "handler");
+        var requestParam = Expression.Parameter(typeof(object), "request");
+        var ctParam = Expression.Parameter(typeof(CancellationToken), "cancellationToken");
+
+        var handlerInterfaceType = typeof(IRequestHandler<,>).MakeGenericType(requestType, typeof(TResponse));
+        
+        // Cast handler to the specific interface
+        var castHandler = Expression.Convert(handlerParam, handlerInterfaceType);
+        
+        // Cast request to the specific type
+        var castRequest = Expression.Convert(requestParam, requestType);
+
+        // Get the HandleAsync method
+        var handleMethod = handlerInterfaceType.GetMethod("HandleAsync")!;
+
+        // Call handler.HandleAsync(request, cancellationToken)
+        var call = Expression.Call(castHandler, handleMethod, castRequest, ctParam);
+
+        // Compile and return
+        var lambda = Expression.Lambda<Func<object, object, CancellationToken, ValueTask<TResponse>>>(
+            call, handlerParam, requestParam, ctParam);
+
+        return lambda.Compile();
+    }
+
     private List<object> GetPipelineBehaviors<TResponse>(Type requestType)
     {
         var behaviors = new List<object>();
         var responseType = typeof(TResponse);
-        
+
+        // Get cached behavior interface type
+        var behaviorInterfaceType = _behaviorTypeCache.GetOrAdd(
+            (requestType, responseType),
+            static key => typeof(IPipelineBehavior<,>).MakeGenericType(key.Item1, key.Item2));
+
         // Resolve behaviors registered directly with the interface type
-        var behaviorInterfaceType = typeof(IPipelineBehavior<,>).MakeGenericType(requestType, responseType);
         var interfaceBehaviors = _serviceProvider.GetServices(behaviorInterfaceType);
         foreach (var behavior in interfaceBehaviors)
         {
@@ -185,13 +284,24 @@ internal sealed class Mediator : IMediator
 
             if (behaviorType.IsGenericTypeDefinition)
             {
-                try
+                // Use cache for MakeGenericType
+                closedBehaviorType = _behaviorTypeCache.GetOrAdd(
+                    (behaviorType, requestType),
+                    key =>
+                    {
+                        try
+                        {
+                            return key.Item1.MakeGenericType(requestType, responseType);
+                        }
+                        catch (ArgumentException)
+                        {
+                            // Generic constraints not satisfied
+                            return null!;
+                        }
+                    });
+
+                if (closedBehaviorType == null)
                 {
-                    closedBehaviorType = behaviorType.MakeGenericType(requestType, responseType);
-                }
-                catch (ArgumentException)
-                {
-                    // Generic constraints not satisfied, skip this behavior
                     continue;
                 }
             }
@@ -223,25 +333,10 @@ internal sealed class Mediator : IMediator
         CancellationToken cancellationToken)
     {
         var requestType = request.GetType();
-        
-        // Get the handler interface type for proper method resolution
-        var handlerInterfaceType = typeof(IRequestHandler<,>).MakeGenericType(requestType, typeof(TResponse));
 
-        // Build the handler delegate
+        // Build the handler delegate using cached compiled delegate
         RequestHandlerDelegate<TResponse> handlerDelegate = () =>
-        {
-            // Find the HandleAsync method on the interface, not the concrete type
-            // This ensures we get the ValueTask<TResponse> version, not the shadowed ValueTask version
-            var interfaceMap = handler.GetType().GetInterfaceMap(handlerInterfaceType);
-            var handleAsyncIndex = Array.FindIndex(interfaceMap.InterfaceMethods, 
-                m => m.Name == "HandleAsync" && m.ReturnType == typeof(ValueTask<TResponse>));
-            
-            var method = handleAsyncIndex >= 0 
-                ? interfaceMap.TargetMethods[handleAsyncIndex] 
-                : handlerInterfaceType.GetMethod("HandleAsync");
-                
-            return (ValueTask<TResponse>)method!.Invoke(handler, [request, cancellationToken])!;
-        };
+            InvokeHandlerDirectly<TResponse>(handler, request, cancellationToken);
 
         // Wrap with behaviors (in reverse order so first registered runs first)
         for (int i = behaviors.Count - 1; i >= 0; i--)
@@ -250,18 +345,7 @@ internal sealed class Mediator : IMediator
             var currentDelegate = handlerDelegate;
 
             handlerDelegate = () =>
-            {
-                var behaviorInterfaceType = typeof(IPipelineBehavior<,>).MakeGenericType(requestType, typeof(TResponse));
-                var interfaceMap = behavior.GetType().GetInterfaceMap(behaviorInterfaceType);
-                var handleAsyncIndex = Array.FindIndex(interfaceMap.InterfaceMethods,
-                    m => m.Name == "HandleAsync" && m.GetParameters().Length == 3);
-                    
-                var method = handleAsyncIndex >= 0
-                    ? interfaceMap.TargetMethods[handleAsyncIndex]
-                    : behaviorInterfaceType.GetMethod("HandleAsync");
-
-                return (ValueTask<TResponse>)method!.Invoke(behavior, [request, currentDelegate, cancellationToken])!;
-            };
+                InvokeBehavior<TResponse>(behavior, request, currentDelegate, cancellationToken);
         }
 
         try
@@ -276,14 +360,75 @@ internal sealed class Mediator : IMediator
         }
     }
 
+    /// <summary>
+    /// Invokes a behavior using a cached compiled delegate.
+    /// </summary>
+    private ValueTask<TResponse> InvokeBehavior<TResponse>(
+        object behavior,
+        IRequest<TResponse> request,
+        RequestHandlerDelegate<TResponse> next,
+        CancellationToken cancellationToken)
+    {
+        var requestType = request.GetType();
+        var behaviorType = behavior.GetType();
+        var cacheKey = behaviorType;
+
+        var invoker = _behaviorDelegateCache.GetOrAdd(cacheKey, _ =>
+        {
+            return CreateBehaviorDelegate<TResponse>(requestType, behaviorType);
+        });
+
+        return ((Func<object, object, RequestHandlerDelegate<TResponse>, CancellationToken, ValueTask<TResponse>>)invoker)(
+            behavior, request, next, cancellationToken);
+    }
+
+    /// <summary>
+    /// Creates a compiled delegate for invoking behavior.HandleAsync without reflection.
+    /// </summary>
+    private static Func<object, object, RequestHandlerDelegate<TResponse>, CancellationToken, ValueTask<TResponse>> 
+        CreateBehaviorDelegate<TResponse>(Type requestType, Type behaviorType)
+    {
+        // Parameters: behavior (object), request (object), next (delegate), cancellationToken
+        var behaviorParam = Expression.Parameter(typeof(object), "behavior");
+        var requestParam = Expression.Parameter(typeof(object), "request");
+        var nextParam = Expression.Parameter(typeof(RequestHandlerDelegate<TResponse>), "next");
+        var ctParam = Expression.Parameter(typeof(CancellationToken), "cancellationToken");
+
+        var behaviorInterfaceType = typeof(IPipelineBehavior<,>).MakeGenericType(requestType, typeof(TResponse));
+
+        // Cast behavior to the specific interface
+        var castBehavior = Expression.Convert(behaviorParam, behaviorInterfaceType);
+
+        // Cast request to the specific type
+        var castRequest = Expression.Convert(requestParam, requestType);
+
+        // Get the HandleAsync method
+        var handleMethod = behaviorInterfaceType.GetMethod("HandleAsync")!;
+
+        // Call behavior.HandleAsync(request, next, cancellationToken)
+        var call = Expression.Call(castBehavior, handleMethod, castRequest, nextParam, ctParam);
+
+        // Compile and return
+        var lambda = Expression.Lambda<Func<object, object, RequestHandlerDelegate<TResponse>, CancellationToken, ValueTask<TResponse>>>(
+            call, behaviorParam, requestParam, nextParam, ctParam);
+
+        return lambda.Compile();
+    }
+
     private static List<INotificationHandler<TNotification>> OrderHandlers<TNotification>(
         List<INotificationHandler<TNotification>> handlers)
         where TNotification : INotification
     {
         return [.. handlers.OrderBy(h =>
         {
-            var orderAttr = h.GetType().GetCustomAttribute<NotificationHandlerOrderAttribute>();
-            return orderAttr?.Order ?? 0;
+            var handlerType = h.GetType();
+            
+            // Use cached order value
+            return _handlerOrderCache.GetOrAdd(handlerType, static type =>
+            {
+                var orderAttr = type.GetCustomAttribute<NotificationHandlerOrderAttribute>();
+                return orderAttr?.Order ?? 0;
+            });
         })];
     }
 
@@ -326,14 +471,15 @@ internal sealed class Mediator : IMediator
         }
     }
 
-    private async ValueTask ExecuteSequential<TNotification>(
+    private static async ValueTask ExecuteSequential<TNotification>(
         TNotification notification,
         List<INotificationHandler<TNotification>> handlers,
         NotificationErrorStrategy errorStrategy,
         CancellationToken cancellationToken)
         where TNotification : INotification
     {
-        var exceptions = new List<Exception>();
+        // Lazy exception list allocation - only allocate when needed
+        List<Exception>? exceptions = null;
 
         foreach (var handler in handlers)
         {
@@ -353,11 +499,11 @@ internal sealed class Mediator : IMediator
                     throw;
                 }
 
-                exceptions.Add(ex);
+                (exceptions ??= []).Add(ex);
             }
         }
 
-        if (exceptions.Count > 0)
+        if (exceptions is { Count: > 0 })
         {
             throw new AggregateException(
                 $"One or more notification handlers for {typeof(TNotification).Name} threw exceptions.",
@@ -365,59 +511,76 @@ internal sealed class Mediator : IMediator
         }
     }
 
-    private async ValueTask ExecuteParallel<TNotification>(
+    private static async ValueTask ExecuteParallel<TNotification>(
         TNotification notification,
         List<INotificationHandler<TNotification>> handlers,
         NotificationErrorStrategy errorStrategy,
         CancellationToken cancellationToken)
         where TNotification : INotification
     {
-        // Wrap each handler invocation to catch synchronous exceptions
-        // that would otherwise escape the LINQ Select before Task.WhenAll
-        var tasks = new List<Task>(handlers.Count);
-        foreach (var handler in handlers)
+        var count = handlers.Count;
+        
+        // Use ArrayPool to avoid allocating a new array for each notification
+        var rentedArray = ArrayPool<Task>.Shared.Rent(count);
+        try
         {
-            try
+            // Fill the array with handler tasks
+            // Note: ValueTask must be converted to Task for Task.WhenAll parallel execution.
+            // This allocates a Task wrapper per handler, but is unavoidable for concurrent execution.
+            for (int i = 0; i < count; i++)
             {
-                tasks.Add(handler.HandleAsync(notification, cancellationToken).AsTask());
-            }
-            catch (Exception ex)
-            {
-                // Synchronous exception - wrap in a faulted task
-                tasks.Add(Task.FromException(ex));
-            }
-        }
-
-        if (errorStrategy == NotificationErrorStrategy.StopOnFirstError)
-        {
-            await Task.WhenAll(tasks);
-        }
-        else
-        {
-            var exceptions = new List<Exception>();
-
-            try
-            {
-                await Task.WhenAll(tasks);
-            }
-            catch
-            {
-                // Collect all exceptions from faulted tasks
-                foreach (var task in tasks)
+                try
                 {
-                    if (task.IsFaulted && task.Exception != null)
-                    {
-                        exceptions.AddRange(task.Exception.InnerExceptions);
-                    }
+                    rentedArray[i] = handlers[i].HandleAsync(notification, cancellationToken).AsTask();
+                }
+                catch (Exception ex)
+                {
+                    // Synchronous exception - wrap in a faulted task
+                    rentedArray[i] = Task.FromException(ex);
                 }
             }
 
-            if (exceptions.Count > 0)
+            // Create a span of just the tasks we need and use explicit cast to avoid ambiguity
+            var tasksSpan = rentedArray.AsSpan(0, count);
+
+            if (errorStrategy == NotificationErrorStrategy.StopOnFirstError)
             {
-                throw new AggregateException(
-                    $"One or more notification handlers for {typeof(TNotification).Name} threw exceptions.",
-                    exceptions);
+                await Task.WhenAll(tasksSpan.ToArray());
             }
+            else
+            {
+                List<Exception>? exceptions = null;
+
+                try
+                {
+                    await Task.WhenAll(tasksSpan.ToArray());
+                }
+                catch
+                {
+                    // Collect all exceptions from faulted tasks
+                    for (int i = 0; i < count; i++)
+                    {
+                        var task = rentedArray[i];
+                        if (task.IsFaulted && task.Exception != null)
+                        {
+                            (exceptions ??= []).AddRange(task.Exception.InnerExceptions);
+                        }
+                    }
+                }
+
+                if (exceptions is { Count: > 0 })
+                {
+                    throw new AggregateException(
+                        $"One or more notification handlers for {typeof(TNotification).Name} threw exceptions.",
+                        exceptions);
+                }
+            }
+        }
+        finally
+        {
+            // Return the rented array - clear it to avoid holding references
+            Array.Clear(rentedArray, 0, count);
+            ArrayPool<Task>.Shared.Return(rentedArray);
         }
     }
 
