@@ -5,7 +5,7 @@ using System.ComponentModel.DataAnnotations;
 using Xunit;
 using MediatorValidationResult = MediatorLite.Validation.ValidationResult;
 
-namespace MediatorLite.Tests;
+namespace MediatorLite.Tests.Reflection;
 
 public class ValidationTests
 {

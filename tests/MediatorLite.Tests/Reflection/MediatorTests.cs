@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
-namespace MediatorLite.Tests;
+namespace MediatorLite.Tests.Reflection;
 
 public class MediatorTests
 {

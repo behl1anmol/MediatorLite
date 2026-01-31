@@ -3,7 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Xunit;
 
-namespace MediatorLite.Tests;
+namespace MediatorLite.Tests.Reflection;
 
 public class PipelineBehaviorTests
 {
