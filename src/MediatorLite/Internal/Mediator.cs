@@ -308,9 +308,19 @@ internal sealed class Mediator : IMediator
         var requestType = request.GetType();
         var behaviorInterfaceType = typeof(IPipelineBehavior<,>).MakeGenericType(requestType, typeof(TResponse));
 
-        // Build the innermost handler delegate
+        // Build the innermost handler delegate - prefer source-gen, fallback to reflection
         RequestHandlerDelegate<TResponse> handlerDelegate = () =>
-            InvokeHandlerAsync<TResponse>(handler, handlerInterfaceType, request, cancellationToken);
+        {
+            // Try source-generated dispatch first for zero-reflection invocation
+            var sourceGenResult = _sourceGeneratedMediator?.TryInvokeHandlerAsync<TResponse>(_serviceProvider, request, cancellationToken);
+            if (sourceGenResult.HasValue)
+            {
+                return sourceGenResult.Value;
+            }
+
+            // Fallback to reflection-based invocation
+            return InvokeHandlerAsync<TResponse>(handler, handlerInterfaceType, request, cancellationToken);
+        };
 
         // Wrap with behaviors (in reverse order so first registered runs first)
         for (int i = behaviors.Count - 1; i >= 0; i--)

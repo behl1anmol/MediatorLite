@@ -386,6 +386,39 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("        }");
         sb.AppendLine();
 
+        // Generate TryInvokeHandlerAsync method (same logic as TrySendAsync, for use in behavior pipelines)
+        sb.AppendLine("        /// <inheritdoc />");
+        sb.AppendLine("        public ValueTask<TResponse>? TryInvokeHandlerAsync<TResponse>(");
+        sb.AppendLine("            IServiceProvider serviceProvider,");
+        sb.AppendLine("            global::MediatorLite.IRequest<TResponse> request,");
+        sb.AppendLine("            CancellationToken cancellationToken)");
+        sb.AppendLine("        {");
+
+        if (requestHandlers.Count > 0)
+        {
+            sb.AppendLine("            return request switch");
+            sb.AppendLine("            {");
+
+            foreach (var (handler, iface) in requestHandlers)
+            {
+                var requestType = iface.RequestType;
+                var responseType = iface.ResponseType!;
+
+                sb.AppendLine($"                {requestType} r => DispatchAs<TResponse, {responseType}>(");
+                sb.AppendLine($"                    serviceProvider.GetRequiredService<{iface.InterfaceType}>().HandleAsync(r, cancellationToken)),");
+            }
+
+            sb.AppendLine("                _ => null,");
+            sb.AppendLine("            };");
+        }
+        else
+        {
+            sb.AppendLine("            return null;");
+        }
+
+        sb.AppendLine("        }");
+        sb.AppendLine();
+
         // Generate TryGetHandlerOrder method
         sb.AppendLine("        /// <inheritdoc />");
         sb.AppendLine("        public int? TryGetHandlerOrder(Type handlerType)");

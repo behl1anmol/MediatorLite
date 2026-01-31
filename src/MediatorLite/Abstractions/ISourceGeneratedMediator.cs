@@ -28,6 +28,27 @@ public interface ISourceGeneratedMediator
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// Attempts to invoke a request handler directly using compile-time generated code.
+    /// This is used when behaviors are present - source-gen handles the innermost handler call.
+    /// </summary>
+    /// <typeparam name="TResponse">The response type.</typeparam>
+    /// <param name="serviceProvider">The service provider for resolving handlers.</param>
+    /// <param name="request">The request to handle.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>
+    /// A <see cref="ValueTask{TResponse}"/> if the request type was discovered at compile-time;
+    /// otherwise, null indicating the caller should fall back to reflection-based invocation.
+    /// </returns>
+    /// <remarks>
+    /// Unlike <see cref="TrySendAsync{TResponse}"/>, this method is specifically designed for use
+    /// within behavior pipelines where the handler invocation needs to be the innermost delegate.
+    /// </remarks>
+    ValueTask<TResponse>? TryInvokeHandlerAsync<TResponse>(
+        IServiceProvider serviceProvider,
+        IRequest<TResponse> request,
+        CancellationToken cancellationToken);
+
+    /// <summary>
     /// Gets the execution order for a notification handler type.
     /// </summary>
     /// <param name="handlerType">The handler type to get the order for.</param>
