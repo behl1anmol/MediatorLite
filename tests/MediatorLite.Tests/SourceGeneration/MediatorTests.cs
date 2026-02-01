@@ -2,6 +2,7 @@ using FluentAssertions;
 using MediatorLite.Generated;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
+using Unit = MediatorLite.Unit;
 
 namespace MediatorLite.Tests.SourceGeneration;
 

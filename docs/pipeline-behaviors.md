@@ -2,7 +2,21 @@
 
 Pipeline behaviors allow you to add cross-cutting concerns to your request handling pipeline.
 
-## Creating a Behavior
+## Open vs Closed Behaviors
+
+**Open behavior** = an open generic type definition (e.g., `LoggingBehavior<,>`) that can be applied to any request/response pair. It is resolved by DI for each concrete request at runtime.
+
+**Closed behavior** = a concrete type (non-generic or fully closed generic) that targets a specific request/response pair.
+
+Example request/response:
+
+```csharp
+public sealed record CreateOrder(string ProductId) : IRequest<OrderResult>;
+
+public sealed record OrderResult(Guid OrderId);
+```
+
+### Open behavior example
 
 ```csharp
 public class LoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
@@ -32,6 +46,34 @@ public class LoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, 
         return response;
     }
 }
+
+// Applies to all requests (any TRequest/TResponse)
+options.AddOpenBehavior(typeof(LoggingBehavior<,>));
+
+// Must also be registered in DI
+services.AddTransient(typeof(LoggingBehavior<,>));
+```
+
+### Closed behavior example
+
+```csharp
+public sealed class CreateOrderLoggingBehavior
+    : IPipelineBehavior<CreateOrder, OrderResult>
+{
+    public async ValueTask<OrderResult> HandleAsync(
+        CreateOrder request,
+        RequestHandlerDelegate<OrderResult> next,
+        CancellationToken cancellationToken = default)
+    {
+        return await next();
+    }
+}
+
+// Applies only to CreateOrder -> OrderResult
+options.AddBehavior<CreateOrderLoggingBehavior>();
+
+// Register the concrete type in DI
+services.AddTransient<CreateOrderLoggingBehavior>();
 ```
 
 ## Registering Behaviors
@@ -174,4 +216,3 @@ public class CachingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, 
         return response;
     }
 }
-```

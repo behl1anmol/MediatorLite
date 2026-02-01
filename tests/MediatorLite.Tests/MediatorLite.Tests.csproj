@@ -25,9 +25,11 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\MediatorLite\MediatorLite.csproj" />
     <!-- Source generator for SourceGeneration tests -->
-    <ProjectReference Include="..\..\src\MediatorLite.SourceGeneration\MediatorLite.SourceGeneration.csproj" 
-                      OutputItemType="Analyzer" 
-                      ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\MediatorLite.SourceGeneration\MediatorLite.SourceGeneration.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Unit\" />
   </ItemGroup>
 
 </Project>

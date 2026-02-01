@@ -1,9 +1,9 @@
 using MediatorLite;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using MediatorLite.Generated;
 using MediatorLite.Sample.SourceGen.Behaviors;
 using MediatorLite.Sample.SourceGen.Requests;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MediatorLite Source Generator Sample
@@ -34,7 +34,7 @@ services.AddLogging(builder =>
 });
 
 // Add MediatorLite core services
-services.AddMediatorLite(options =>
+services.AddMediatorLiteCore(options =>
 {
     options.EnableBuiltInLogging = true;
     options.EnableTracing = true;
