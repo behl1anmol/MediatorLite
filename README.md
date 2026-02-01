@@ -68,6 +68,28 @@ public class MyService(IMediator mediator)
 - [Notifications](docs/notifications.md)
 - [Migration from MediatR](docs/migration-from-mediatr.md)
 
+## 📢 Notification Execution Strategies
+
+MediatorLite provides flexible notification execution with three strategies:
+
+| Strategy | Description | Error Handling |
+|----------|-------------|----------------|
+| **Sequential** | Handlers run one-by-one in order | Error strategy applies |
+| **Parallel** | All handlers run concurrently | Always aggregates exceptions* |
+| **StopOnFirst** | Stops after first successful handler | Error strategy applies |
+
+> *Parallel mode always aggregates exceptions because concurrent tasks cannot be cancelled mid-execution.
+
+```csharp
+services.AddMediatorLite(options =>
+{
+    options.NotificationExecutionStrategy = NotificationExecutionStrategy.Parallel;
+    options.NotificationErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate;
+});
+```
+
+See [Notifications documentation](docs/notifications.md) for detailed strategy behavior and error handling patterns.
+
 ## 🎯 Why MediatorLite?
 
 | Feature | MediatorLite | MediatR |

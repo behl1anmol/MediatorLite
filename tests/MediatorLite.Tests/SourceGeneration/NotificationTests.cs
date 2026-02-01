@@ -267,4 +267,126 @@ public class NotificationTests
 
         UserCreatedEventHandler1.CallCount.Should().Be(1);
     }
+
+    [Fact]
+    public async Task PublishAsync_StopOnFirst_WithContinueAndAggregate_FallsBackToNextHandler()
+    {
+        // Arrange - StopOnFirstFallbackEvent is configured with StopOnFirst + ContinueAndAggregate
+        // Handler1 fails, Handler2 succeeds, Handler3 should not run
+        StopOnFirstFallbackEventHandler1.Reset();
+        StopOnFirstFallbackEventHandler2.Reset();
+        StopOnFirstFallbackEventHandler3.Reset();
+
+        var services = new ServiceCollection();
+        services.AddGeneratedHandlers();
+        services.AddMediatorLiteCore();
+        services.AddLogging();
+
+        var provider = services.BuildServiceProvider();
+        var mediator = provider.GetRequiredService<IMediator>();
+
+        // Act - Should not throw because Handler2 succeeds
+        await mediator.PublishAsync(new StopOnFirstFallbackEvent("test"));
+
+        // Assert
+        StopOnFirstFallbackEventHandler1.WasCalled.Should().BeTrue("Handler1 should be tried first");
+        StopOnFirstFallbackEventHandler2.WasCalled.Should().BeTrue("Handler2 should be tried after Handler1 fails");
+        StopOnFirstFallbackEventHandler3.WasCalled.Should().BeFalse("Handler3 should not run after Handler2 succeeds");
+    }
+
+    [Fact]
+    public async Task PublishAsync_StopOnFirst_WithStopOnFirstError_ThrowsImmediately()
+    {
+        // Arrange - StopOnFirstEvent is configured with StopOnFirst + StopOnFirstError (default)
+        StopOnFirstEventHandler1.Reset();
+        StopOnFirstEventHandler2.Reset();
+
+        var services = new ServiceCollection();
+        services.AddTransient<INotificationHandler<StopOnFirstWithErrorEvent>, StopOnFirstWithErrorEventFailingHandler>();
+        services.AddTransient<INotificationHandler<StopOnFirstWithErrorEvent>, StopOnFirstWithErrorEventSuccessHandler>();
+        services.AddMediatorLite(options =>
+        {
+            options.NotificationExecutionStrategy = NotificationExecutionStrategy.StopOnFirst;
+            options.NotificationErrorStrategy = NotificationErrorStrategy.StopOnFirstError;
+        });
+        services.AddLogging();
+
+        var provider = services.BuildServiceProvider();
+        var mediator = provider.GetRequiredService<IMediator>();
+
+        // Act & Assert - Should throw immediately because StopOnFirstError
+        Func<Task> act = async () => await mediator.PublishAsync(new StopOnFirstWithErrorEvent("test"));
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("StopOnFirst handler failed");
+
+        // Success handler should NOT have been called
+        StopOnFirstWithErrorEventSuccessHandler.WasCalled.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task PublishAsync_StopOnFirst_AllHandlersFail_ThrowsAggregateException()
+    {
+        // Arrange - Create notification where all handlers fail with ContinueAndAggregate
+        var services = new ServiceCollection();
+        services.AddTransient<INotificationHandler<AllFailStopOnFirstEvent>, AllFailStopOnFirstEventHandler1>();
+        services.AddTransient<INotificationHandler<AllFailStopOnFirstEvent>, AllFailStopOnFirstEventHandler2>();
+        services.AddMediatorLite(options =>
+        {
+            options.NotificationExecutionStrategy = NotificationExecutionStrategy.StopOnFirst;
+            options.NotificationErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate;
+        });
+        services.AddLogging();
+
+        var provider = services.BuildServiceProvider();
+        var mediator = provider.GetRequiredService<IMediator>();
+
+        // Act & Assert - Should throw AggregateException with all failures
+        Func<Task> act = async () => await mediator.PublishAsync(new AllFailStopOnFirstEvent("test"));
+        var exception = await act.Should().ThrowAsync<AggregateException>();
+        exception.Which.InnerExceptions.Should().HaveCount(2);
+    }
 }
+
+#region Additional Test Types for StopOnFirst Error Handling
+
+public record StopOnFirstWithErrorEvent(string Message) : INotification;
+
+public class StopOnFirstWithErrorEventFailingHandler : INotificationHandler<StopOnFirstWithErrorEvent>
+{
+    public ValueTask HandleAsync(StopOnFirstWithErrorEvent notification, CancellationToken cancellationToken = default)
+    {
+        throw new InvalidOperationException("StopOnFirst handler failed");
+    }
+}
+
+public class StopOnFirstWithErrorEventSuccessHandler : INotificationHandler<StopOnFirstWithErrorEvent>
+{
+    public static bool WasCalled { get; private set; }
+    public static void Reset() => WasCalled = false;
+
+    public ValueTask HandleAsync(StopOnFirstWithErrorEvent notification, CancellationToken cancellationToken = default)
+    {
+        WasCalled = true;
+        return ValueTask.CompletedTask;
+    }
+}
+
+public record AllFailStopOnFirstEvent(string Message) : INotification;
+
+public class AllFailStopOnFirstEventHandler1 : INotificationHandler<AllFailStopOnFirstEvent>
+{
+    public ValueTask HandleAsync(AllFailStopOnFirstEvent notification, CancellationToken cancellationToken = default)
+    {
+        throw new InvalidOperationException("Handler1 failed");
+    }
+}
+
+public class AllFailStopOnFirstEventHandler2 : INotificationHandler<AllFailStopOnFirstEvent>
+{
+    public ValueTask HandleAsync(AllFailStopOnFirstEvent notification, CancellationToken cancellationToken = default)
+    {
+        throw new InvalidOperationException("Handler2 failed");
+    }
+}
+
+#endregion

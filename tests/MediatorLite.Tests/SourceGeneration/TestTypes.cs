@@ -33,6 +33,16 @@ public record ParallelEvent(string Message) : INotification;
     OverrideGlobal = true)]
 public record StopOnFirstEvent(string Message) : INotification;
 
+/// <summary>
+/// Notification configured for StopOnFirst execution with ContinueAndAggregate error strategy.
+/// This enables the "fallback pattern" where if one handler fails, the next is tried.
+/// </summary>
+[NotificationOptions(
+    ExecutionStrategy = NotificationExecutionStrategy.StopOnFirst,
+    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate,
+    OverrideGlobal = true)]
+public record StopOnFirstFallbackEvent(string Message) : INotification;
+
 #endregion
 
 #region Request Handlers
@@ -182,6 +192,55 @@ public class StopOnFirstEventHandler2 : INotificationHandler<StopOnFirstEvent>
     public static void Reset() => WasCalled = false;
 
     public ValueTask HandleAsync(StopOnFirstEvent notification, CancellationToken cancellationToken = default)
+    {
+        WasCalled = true;
+        return ValueTask.CompletedTask;
+    }
+}
+
+/// <summary>
+/// First handler for fallback event - always fails to test fallback behavior.
+/// </summary>
+public class StopOnFirstFallbackEventHandler1 : INotificationHandler<StopOnFirstFallbackEvent>
+{
+    public static bool WasCalled { get; private set; }
+    public static Exception? ThrownException { get; private set; }
+    public static void Reset() { WasCalled = false; ThrownException = null; }
+
+    public ValueTask HandleAsync(StopOnFirstFallbackEvent notification, CancellationToken cancellationToken = default)
+    {
+        WasCalled = true;
+        ThrownException = new InvalidOperationException("Primary handler failed");
+        throw ThrownException;
+    }
+}
+
+/// <summary>
+/// Second handler (fallback) for fallback event - succeeds if reached.
+/// </summary>
+[NotificationHandlerOrder(1)]
+public class StopOnFirstFallbackEventHandler2 : INotificationHandler<StopOnFirstFallbackEvent>
+{
+    public static bool WasCalled { get; private set; }
+    public static void Reset() => WasCalled = false;
+
+    public ValueTask HandleAsync(StopOnFirstFallbackEvent notification, CancellationToken cancellationToken = default)
+    {
+        WasCalled = true;
+        return ValueTask.CompletedTask;
+    }
+}
+
+/// <summary>
+/// Third handler - should never be reached (fallback stops after Handler2 succeeds).
+/// </summary>
+[NotificationHandlerOrder(2)]
+public class StopOnFirstFallbackEventHandler3 : INotificationHandler<StopOnFirstFallbackEvent>
+{
+    public static bool WasCalled { get; private set; }
+    public static void Reset() => WasCalled = false;
+
+    public ValueTask HandleAsync(StopOnFirstFallbackEvent notification, CancellationToken cancellationToken = default)
     {
         WasCalled = true;
         return ValueTask.CompletedTask;

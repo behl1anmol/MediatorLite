@@ -400,11 +400,13 @@ internal sealed class Mediator : IMediator
                 break;
 
             case NotificationExecutionStrategy.Parallel:
-                await ExecuteParallel(notification, handlers, errorStrategy, cancellationToken);
+                // Parallel mode always aggregates exceptions - StopOnFirstError is not meaningful
+                // because all handlers run concurrently and cannot be stopped mid-execution
+                await ExecuteParallel(notification, handlers, cancellationToken);
                 break;
 
             case NotificationExecutionStrategy.StopOnFirst:
-                await ExecuteStopOnFirst(notification, handlers, cancellationToken);
+                await ExecuteStopOnFirst(notification, handlers, errorStrategy, cancellationToken);
                 break;
 
             default:
@@ -412,6 +414,16 @@ internal sealed class Mediator : IMediator
         }
     }
 
+    /// <summary>
+    /// Executes notification handlers sequentially in order.
+    /// </summary>
+    /// <remarks>
+    /// Error strategy behavior:
+    /// <list type="bullet">
+    /// <item><description><see cref="NotificationErrorStrategy.StopOnFirstError"/>: Stops execution and throws immediately when a handler fails.</description></item>
+    /// <item><description><see cref="NotificationErrorStrategy.ContinueAndAggregate"/>: Continues executing all handlers, collecting exceptions to throw as <see cref="AggregateException"/>.</description></item>
+    /// </list>
+    /// </remarks>
     private static async ValueTask ExecuteSequential<TNotification>(
         TNotification notification,
         List<INotificationHandler<TNotification>> handlers,
@@ -451,10 +463,23 @@ internal sealed class Mediator : IMediator
         }
     }
 
+    /// <summary>
+    /// Executes all notification handlers concurrently using Task.WhenAll.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This method always aggregates exceptions because all handlers start executing immediately
+    /// and cannot be stopped mid-execution. The <see cref="NotificationErrorStrategy"/> setting
+    /// is intentionally ignored for parallel execution.
+    /// </para>
+    /// <para>
+    /// If any handlers fail, all exceptions are collected and thrown as an <see cref="AggregateException"/>
+    /// after all handlers have completed.
+    /// </para>
+    /// </remarks>
     private static async ValueTask ExecuteParallel<TNotification>(
         TNotification notification,
         List<INotificationHandler<TNotification>> handlers,
-        NotificationErrorStrategy errorStrategy,
         CancellationToken cancellationToken)
         where TNotification : INotification
     {
@@ -476,37 +501,29 @@ internal sealed class Mediator : IMediator
             }
 
             var tasksSpan = rentedArray.AsSpan(0, count);
+            List<Exception>? exceptions = null;
 
-            if (errorStrategy == NotificationErrorStrategy.StopOnFirstError)
+            try
             {
                 await Task.WhenAll(tasksSpan.ToArray());
             }
-            else
+            catch
             {
-                List<Exception>? exceptions = null;
-
-                try
+                for (int i = 0; i < count; i++)
                 {
-                    await Task.WhenAll(tasksSpan.ToArray());
-                }
-                catch
-                {
-                    for (int i = 0; i < count; i++)
+                    var task = rentedArray[i];
+                    if (task.IsFaulted && task.Exception != null)
                     {
-                        var task = rentedArray[i];
-                        if (task.IsFaulted && task.Exception != null)
-                        {
-                            (exceptions ??= []).AddRange(task.Exception.InnerExceptions);
-                        }
+                        (exceptions ??= []).AddRange(task.Exception.InnerExceptions);
                     }
                 }
+            }
 
-                if (exceptions is { Count: > 0 })
-                {
-                    throw new AggregateException(
-                        $"One or more notification handlers for {typeof(TNotification).Name} threw exceptions.",
-                        exceptions);
-                }
+            if (exceptions is { Count: > 0 })
+            {
+                throw new AggregateException(
+                    $"One or more notification handlers for {typeof(TNotification).Name} threw exceptions.",
+                    exceptions);
             }
         }
         finally
@@ -516,17 +533,55 @@ internal sealed class Mediator : IMediator
         }
     }
 
+    /// <summary>
+    /// Executes notification handlers until one completes successfully ("first handler wins").
+    /// </summary>
+    /// <remarks>
+    /// Error strategy behavior:
+    /// <list type="bullet">
+    /// <item><description><see cref="NotificationErrorStrategy.StopOnFirstError"/>: Stops and throws immediately if a handler fails.</description></item>
+    /// <item><description><see cref="NotificationErrorStrategy.ContinueAndAggregate"/>: If a handler fails, tries the next handler. Stops on first success. If all handlers fail, throws <see cref="AggregateException"/> with all collected exceptions.</description></item>
+    /// </list>
+    /// </remarks>
     private static async ValueTask ExecuteStopOnFirst<TNotification>(
         TNotification notification,
         List<INotificationHandler<TNotification>> handlers,
+        NotificationErrorStrategy errorStrategy,
         CancellationToken cancellationToken)
         where TNotification : INotification
     {
+        List<Exception>? exceptions = null;
+
         foreach (var handler in handlers)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            await handler.HandleAsync(notification, cancellationToken);
-            return;
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await handler.HandleAsync(notification, cancellationToken);
+                return; // Success - stop here
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                if (errorStrategy == NotificationErrorStrategy.StopOnFirstError)
+                {
+                    throw;
+                }
+
+                // ContinueAndAggregate: collect exception and try next handler
+                (exceptions ??= []).Add(ex);
+            }
+        }
+
+        // If we get here with ContinueAndAggregate, all handlers failed
+        if (exceptions is { Count: > 0 })
+        {
+            throw new AggregateException(
+                $"All notification handlers for {typeof(TNotification).Name} threw exceptions.",
+                exceptions);
         }
     }
 }

@@ -100,7 +100,7 @@ public class SendWelcomeEmailHandler : INotificationHandler<UserCreatedNotificat
 
 public class CreateAuditLogHandler : INotificationHandler<UserCreatedNotification>
 {
-    public async ValueTask HandleAsync(UserCreatedNotification notification, CancellationToken ct)
+    public async ValueTask HandleAsync(UserCreatedNotification notification, CancellationToken ct = default)
     {
         await _auditService.LogAsync($"User {notification.UserId} created");
     }
@@ -109,6 +109,33 @@ public class CreateAuditLogHandler : INotificationHandler<UserCreatedNotificatio
 // Publish notification
 await _mediator.PublishAsync(new UserCreatedNotification(user.Id, user.Email));
 ```
+
+## 6. Notification Execution Strategies
+
+Control how notification handlers execute:
+
+```csharp
+services.AddMediatorLite(options =>
+{
+    // Choose execution strategy
+    options.NotificationExecutionStrategy = NotificationExecutionStrategy.Sequential; // Default
+    // options.NotificationExecutionStrategy = NotificationExecutionStrategy.Parallel;
+    // options.NotificationExecutionStrategy = NotificationExecutionStrategy.StopOnFirst;
+
+    // Choose error strategy
+    options.NotificationErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate;
+});
+```
+
+| Strategy | Behavior | Error Strategy |
+|----------|----------|----------------|
+| `Sequential` | Execute handlers one-by-one in order | ✅ Applies |
+| `Parallel` | Execute all handlers concurrently | ⚠️ Always aggregates* |
+| `StopOnFirst` | Stop after first successful handler | ✅ Applies |
+
+> *Parallel mode always aggregates exceptions because concurrent tasks cannot be stopped mid-execution.
+
+See [Notifications](notifications.md) for detailed strategy documentation and error handling patterns.
 
 ## Next Steps
 

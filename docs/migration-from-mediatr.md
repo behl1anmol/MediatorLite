@@ -200,6 +200,64 @@ public $1ValueTask<$2> HandleAsync($3 request, CancellationToken $4 = default)
 Find: `\.Send\(` → Replace: `.SendAsync(`
 Find: `\.Publish\(` → Replace: `.PublishAsync(`
 
+## Notification Execution Strategies
+
+MediatorLite provides enhanced control over notification execution that differs from MediatR's default behavior.
+
+### Strategy Options
+
+| Strategy | MediatR | MediatorLite |
+|----------|---------|--------------|
+| Sequential execution | Default (no option) | `NotificationExecutionStrategy.Sequential` |
+| Parallel execution | Not built-in | `NotificationExecutionStrategy.Parallel` |
+| Stop on first success | Not available | `NotificationExecutionStrategy.StopOnFirst` |
+
+### Error Handling Strategies
+
+| Error Strategy | Behavior |
+|----------------|----------|
+| `StopOnFirstError` | Stop execution and throw immediately (MediatR's behavior) |
+| `ContinueAndAggregate` | Execute all handlers, aggregate exceptions |
+
+### Strategy-Specific Behavior
+
+MediatorLite applies error strategies based on the execution mode:
+
+| Execution Strategy | Error Strategy Effect |
+|--------------------|----------------------|
+| **Sequential** | ✅ Both strategies work as expected |
+| **Parallel** | ⚠️ Error strategy ignored - always aggregates* |
+| **StopOnFirst** | ✅ Both strategies work as expected |
+
+> *Parallel mode always aggregates exceptions because concurrent tasks cannot be cancelled mid-execution. This is by design.
+
+### Configuration Example
+
+```csharp
+services.AddMediatorLite(options =>
+{
+    // MediatR-like behavior (sequential, stop on first error)
+    options.NotificationExecutionStrategy = NotificationExecutionStrategy.Sequential;
+    options.NotificationErrorStrategy = NotificationErrorStrategy.StopOnFirstError;
+
+    // Or: More resilient production setup
+    options.NotificationExecutionStrategy = NotificationExecutionStrategy.Parallel;
+    options.NotificationErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate;
+});
+```
+
+### Per-Notification Override
+
+```csharp
+[NotificationOptions(
+    ExecutionStrategy = NotificationExecutionStrategy.StopOnFirst,
+    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate,
+    OverrideGlobal = true)]
+public record FallbackNotification(string Message) : INotification;
+```
+
+See [Notifications documentation](notifications.md) for detailed strategy behavior.
+
 ## Features Not Available in MediatorLite v1.0
 
 | MediatR Feature | MediatorLite Status |
