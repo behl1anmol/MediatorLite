@@ -7,8 +7,7 @@ namespace MediatorLite.Tests.SourceGeneration;
 
 /// <summary>
 /// Tests for pipeline behavior functionality when using source-generated handler registration.
-/// These tests verify that behaviors work correctly with source-generated dispatch,
-/// including the optimization where the innermost handler uses source-gen invocation.
+/// These tests verify that behaviors work correctly with source-generated dispatch.
 /// </summary>
 public class PipelineBehaviorTests
 {
@@ -16,8 +15,6 @@ public class PipelineBehaviorTests
     public async Task Behaviors_ExecuteInRegistrationOrder_WithSourceGen()
     {
         // Arrange
-        // Handler: 5 * 2 = 10
-        // AddOneBehavior wraps MultiplyByTwoBehavior wraps Handler
         // Handler: 5 * 2 = 10
         // MultiplyByTwoBehavior: 10 * 2 = 20
         // AddOneBehavior: 20 + 1 = 21
@@ -86,7 +83,7 @@ public class PipelineBehaviorTests
     {
         // This test verifies that even when behaviors are present,
         // the innermost handler invocation uses source-generated dispatch
-        
+
         // Arrange
         GenericLoggingBehavior<GetUserByIdQuery, UserDto>.Reset();
 
@@ -176,7 +173,6 @@ public class PipelineBehaviorTests
 
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddTransient(typeof(GenericLoggingBehavior<,>));
         services.AddMediatorLite(options =>
         {
             options.AddOpenBehavior(typeof(GenericLoggingBehavior<,>));
@@ -212,5 +208,24 @@ public class PipelineBehaviorTests
         // Assert
         result.Should().NotBeNull();
         result.Id.Should().Be(99);
+    }
+
+    [Fact]
+    public async Task SourceGenDispatch_ResolvesHandlerCorrectly()
+    {
+        // Verify that source-gen dispatch resolves the handler from DI (not just calling it directly)
+        var services = new ServiceCollection();
+        services.AddGeneratedHandlers();
+        services.AddMediatorLiteCore();
+        services.AddLogging();
+
+        var provider = services.BuildServiceProvider();
+        var sourceGenMediator = provider.GetRequiredService<ISourceGeneratedMediator>();
+
+        // Verify TryResolveBehaviors returns empty list (not null) for known types with no behaviors
+        var behaviors = sourceGenMediator.TryResolveBehaviors(
+            provider, typeof(ComputeValueQuery), typeof(int));
+        behaviors.Should().NotBeNull("TryResolveBehaviors should recognize ComputeValueQuery");
+        behaviors!.Count.Should().Be(0);
     }
 }

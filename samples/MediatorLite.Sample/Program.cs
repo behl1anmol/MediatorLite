@@ -1,5 +1,6 @@
 using MediatorLite;
 using MediatorLite.Sample.Requests;
+using MediatorLite.Sample.Handlers;
 using MediatorLite.Sample.Notifications;
 using MediatorLite.Sample.Behaviors;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,17 +16,24 @@ services.AddLogging(builder =>
     builder.SetMinimumLevel(LogLevel.Debug);
 });
 
-// Add MediatorLite with handlers from this assembly
+// Register handlers manually
+services.AddTransient<IRequestHandler<GetUserQuery, User>, GetUserQueryHandler>();
+services.AddTransient<IRequestHandler<DeleteUserCommand, Unit>, DeleteUserCommandHandler>();
+services.AddTransient<IRequestHandler<CreateOrderCommand, int>, CreateOrderCommandHandler>();
+
+// Register notification handlers
+services.AddTransient<INotificationHandler<UserCreatedNotification>, SendWelcomeEmailHandler>();
+services.AddTransient<INotificationHandler<UserCreatedNotification>, CreateAuditLogHandler>();
+
+// Register open generic behaviors
+services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
+
+// Add MediatorLite
 services.AddMediatorLite(options =>
 {
-    options.RegisterHandlersFromAssemblyContaining<Program>();
-    options.AddOpenBehavior(typeof(LoggingBehavior<,>));
     options.EnableBuiltInLogging = true;
     options.EnableTracing = true;
 });
-
-// Register open generic behaviors
-services.AddTransient(typeof(LoggingBehavior<,>));
 
 // Build provider
 var provider = services.BuildServiceProvider();

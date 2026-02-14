@@ -39,10 +39,6 @@ public interface ISourceGeneratedMediator
     /// A <see cref="ValueTask{TResponse}"/> if the request type was discovered at compile-time;
     /// otherwise, null indicating the caller should fall back to reflection-based invocation.
     /// </returns>
-    /// <remarks>
-    /// Unlike <see cref="TrySendAsync{TResponse}"/>, this method is specifically designed for use
-    /// within behavior pipelines where the handler invocation needs to be the innermost delegate.
-    /// </remarks>
     ValueTask<TResponse>? TryInvokeHandlerAsync<TResponse>(
         IServiceProvider serviceProvider,
         IRequest<TResponse> request,
@@ -67,4 +63,73 @@ public interface ISourceGeneratedMediator
     /// and has options configured; otherwise, null indicating the caller should use default options.
     /// </returns>
     (NotificationExecutionStrategy ExecutionStrategy, NotificationErrorStrategy ErrorStrategy)? TryGetNotificationOptions(Type notificationType);
+
+    /// <summary>
+    /// Attempts to get cached notification handlers for the given notification type.
+    /// </summary>
+    /// <typeparam name="TNotification">The notification type.</typeparam>
+    /// <param name="serviceProvider">The service provider for resolving handlers.</param>
+    /// <returns>
+    /// A read-only list of handlers if discovered at compile-time; otherwise, null indicating
+    /// the caller should fall back to GetServices() enumeration.
+    /// </returns>
+    IReadOnlyList<INotificationHandler<TNotification>>? TryGetCachedHandlers<TNotification>(
+        IServiceProvider serviceProvider)
+        where TNotification : INotification;
+
+    /// <summary>
+    /// Resolves pipeline behaviors for a request type using compile-time generated typed resolution.
+    /// Eliminates the need for MakeGenericType at runtime.
+    /// </summary>
+    /// <param name="serviceProvider">The service provider for resolving behaviors.</param>
+    /// <param name="requestType">The concrete request type.</param>
+    /// <param name="responseType">The response type.</param>
+    /// <returns>
+    /// A list of behavior instances if the request type was discovered at compile-time;
+    /// otherwise, null indicating the caller should fall back to runtime resolution.
+    /// </returns>
+    List<object>? TryResolveBehaviors(
+        IServiceProvider serviceProvider,
+        Type requestType,
+        Type responseType);
+
+    /// <summary>
+    /// Invokes a request handler using generated typed code (zero reflection).
+    /// </summary>
+    /// <typeparam name="TResponse">The response type.</typeparam>
+    /// <param name="requestType">The concrete request type.</param>
+    /// <param name="handler">The handler instance (will be cast to correct interface).</param>
+    /// <param name="request">The request instance (will be cast to correct type).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The handler response.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown if the request type was not discovered at compile-time.
+    /// </exception>
+    ValueTask<TResponse> InvokeHandler<TResponse>(
+        Type requestType,
+        object handler,
+        object request,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Invokes a pipeline behavior using generated typed code (zero reflection).
+    /// </summary>
+    /// <typeparam name="TResponse">The response type.</typeparam>
+    /// <param name="requestType">The concrete request type.</param>
+    /// <param name="behaviorType">The concrete behavior type.</param>
+    /// <param name="behavior">The behavior instance (will be cast to correct interface).</param>
+    /// <param name="request">The request instance (will be cast to correct type).</param>
+    /// <param name="next">The next delegate in the pipeline.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The behavior response.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown if the request type or behavior type was not discovered at compile-time.
+    /// </exception>
+    ValueTask<TResponse> InvokeBehavior<TResponse>(
+        Type requestType,
+        Type behaviorType,
+        object behavior,
+        object request,
+        RequestHandlerDelegate<TResponse> next,
+        CancellationToken cancellationToken);
 }

@@ -1,6 +1,7 @@
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Running;
 using MediatorLite;
+using MediatorLite.Generated;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -180,8 +181,9 @@ public class MediatorBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        // Setup MediatorLite
+        // Setup MediatorLite with source-gen dispatch (no behaviors for simple request)
         var mediatorLiteServices = new ServiceCollection();
+        mediatorLiteServices.AddSingleton<MediatorLite.ISourceGeneratedMediator, SourceGeneratedMediator>();
         mediatorLiteServices.AddTransient<MediatorLite.IRequestHandler<MediatorLiteQuery, MediatorLiteResult>, MediatorLiteHandler>();
         mediatorLiteServices.AddMediatorLite(options =>
         {
@@ -236,15 +238,15 @@ public class PipelineBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        // Setup MediatorLite with behaviors
+        // Setup MediatorLite with source-gen dispatch + single behavior
         var mediatorLiteServices = new ServiceCollection();
+        mediatorLiteServices.AddSingleton<MediatorLite.ISourceGeneratedMediator, SourceGeneratedMediator>();
         mediatorLiteServices.AddTransient<MediatorLite.IRequestHandler<MediatorBenchmarks.MediatorLiteQuery, MediatorBenchmarks.MediatorLiteResult>, MediatorBenchmarks.MediatorLiteHandler>();
-        mediatorLiteServices.AddTransient(typeof(MediatorBenchmarks.MediatorLiteLoggingBehavior<,>));
+        mediatorLiteServices.AddTransient(typeof(MediatorLite.IPipelineBehavior<,>), typeof(MediatorBenchmarks.MediatorLiteLoggingBehavior<,>));
         mediatorLiteServices.AddMediatorLite(options =>
         {
             options.EnableBuiltInLogging = false;
             options.EnableTracing = false;
-            options.AddOpenBehavior(typeof(MediatorBenchmarks.MediatorLiteLoggingBehavior<,>));
         });
         mediatorLiteServices.AddSingleton<ILoggerFactory, NullLoggerFactory>();
         mediatorLiteServices.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
@@ -295,19 +297,17 @@ public class MultipleBehaviorsBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        // Setup MediatorLite with 3 behaviors (logging, validation, metrics)
+        // Setup MediatorLite with source-gen dispatch + 3 behaviors
         var mediatorLiteServices = new ServiceCollection();
+        mediatorLiteServices.AddSingleton<MediatorLite.ISourceGeneratedMediator, SourceGeneratedMediator>();
         mediatorLiteServices.AddTransient<MediatorLite.IRequestHandler<MediatorBenchmarks.MediatorLiteQuery, MediatorBenchmarks.MediatorLiteResult>, MediatorBenchmarks.MediatorLiteHandler>();
-        mediatorLiteServices.AddTransient(typeof(MediatorBenchmarks.MediatorLiteLoggingBehavior<,>));
-        mediatorLiteServices.AddTransient(typeof(MediatorBenchmarks.MediatorLiteValidationBehavior<,>));
-        mediatorLiteServices.AddTransient(typeof(MediatorBenchmarks.MediatorLiteMetricsBehavior<,>));
+        mediatorLiteServices.AddTransient(typeof(MediatorLite.IPipelineBehavior<,>), typeof(MediatorBenchmarks.MediatorLiteLoggingBehavior<,>));
+        mediatorLiteServices.AddTransient(typeof(MediatorLite.IPipelineBehavior<,>), typeof(MediatorBenchmarks.MediatorLiteValidationBehavior<,>));
+        mediatorLiteServices.AddTransient(typeof(MediatorLite.IPipelineBehavior<,>), typeof(MediatorBenchmarks.MediatorLiteMetricsBehavior<,>));
         mediatorLiteServices.AddMediatorLite(options =>
         {
             options.EnableBuiltInLogging = false;
             options.EnableTracing = false;
-            options.AddOpenBehavior(typeof(MediatorBenchmarks.MediatorLiteLoggingBehavior<,>));
-            options.AddOpenBehavior(typeof(MediatorBenchmarks.MediatorLiteValidationBehavior<,>));
-            options.AddOpenBehavior(typeof(MediatorBenchmarks.MediatorLiteMetricsBehavior<,>));
         });
         mediatorLiteServices.AddSingleton<ILoggerFactory, NullLoggerFactory>();
         mediatorLiteServices.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
@@ -362,8 +362,9 @@ public class NotificationBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        // Setup MediatorLite with sequential notifications
+        // Setup MediatorLite with source-gen dispatch + sequential notifications
         var mediatorLiteSequentialServices = new ServiceCollection();
+        mediatorLiteSequentialServices.AddSingleton<MediatorLite.ISourceGeneratedMediator, SourceGeneratedMediator>();
         mediatorLiteSequentialServices.AddTransient<MediatorLite.INotificationHandler<MediatorBenchmarks.MediatorLiteNotification>, MediatorBenchmarks.MediatorLiteNotificationHandler1>();
         mediatorLiteSequentialServices.AddTransient<MediatorLite.INotificationHandler<MediatorBenchmarks.MediatorLiteNotification>, MediatorBenchmarks.MediatorLiteNotificationHandler2>();
         mediatorLiteSequentialServices.AddTransient<MediatorLite.INotificationHandler<MediatorBenchmarks.MediatorLiteNotification>, MediatorBenchmarks.MediatorLiteNotificationHandler3>();
@@ -378,8 +379,9 @@ public class NotificationBenchmarks
         _mediatorLiteSequentialProvider = mediatorLiteSequentialServices.BuildServiceProvider();
         _mediatorLiteSequential = _mediatorLiteSequentialProvider.GetRequiredService<MediatorLite.IMediator>();
 
-        // Setup MediatorLite with parallel notifications
+        // Setup MediatorLite with source-gen dispatch + parallel notifications
         var mediatorLiteParallelServices = new ServiceCollection();
+        mediatorLiteParallelServices.AddSingleton<MediatorLite.ISourceGeneratedMediator, SourceGeneratedMediator>();
         mediatorLiteParallelServices.AddTransient<MediatorLite.INotificationHandler<MediatorBenchmarks.MediatorLiteNotification>, MediatorBenchmarks.MediatorLiteNotificationHandler1>();
         mediatorLiteParallelServices.AddTransient<MediatorLite.INotificationHandler<MediatorBenchmarks.MediatorLiteNotification>, MediatorBenchmarks.MediatorLiteNotificationHandler2>();
         mediatorLiteParallelServices.AddTransient<MediatorLite.INotificationHandler<MediatorBenchmarks.MediatorLiteNotification>, MediatorBenchmarks.MediatorLiteNotificationHandler3>();

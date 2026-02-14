@@ -251,6 +251,7 @@ public class StopOnFirstFallbackEventHandler3 : INotificationHandler<StopOnFirst
 
 #region Pipeline Behaviors
 
+[MediatorGeneration(Skip = true)]
 public class AddOneBehavior : IPipelineBehavior<ComputeValueQuery, int>
 {
     public async ValueTask<int> HandleAsync(
@@ -263,6 +264,7 @@ public class AddOneBehavior : IPipelineBehavior<ComputeValueQuery, int>
     }
 }
 
+[MediatorGeneration(Skip = true)]
 public class MultiplyByTwoBehavior : IPipelineBehavior<ComputeValueQuery, int>
 {
     public async ValueTask<int> HandleAsync(
@@ -275,6 +277,7 @@ public class MultiplyByTwoBehavior : IPipelineBehavior<ComputeValueQuery, int>
     }
 }
 
+[MediatorGeneration(Skip = true)]
 public class GenericLoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
     where TRequest : IRequest<TResponse>
 {
@@ -293,6 +296,7 @@ public class GenericLoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRe
     }
 }
 
+[MediatorGeneration(Skip = true)]
 public class ShortCircuitBehavior : IPipelineBehavior<ComputeValueQuery, int>
 {
     public ValueTask<int> HandleAsync(

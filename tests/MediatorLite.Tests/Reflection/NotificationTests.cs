@@ -16,6 +16,7 @@ public class NotificationTests
         ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate)]
     public record ParallelNotification(string Message) : INotification;
 
+    [MediatorGeneration(Skip = true)]
     public class FirstHandler : INotificationHandler<UserCreatedNotification>
     {
         public static List<int> CallOrder { get; } = [];
@@ -35,6 +36,7 @@ public class NotificationTests
         }
     }
 
+    [MediatorGeneration(Skip = true)]
     [NotificationHandlerOrder(2)]
     public class SecondHandler : INotificationHandler<UserCreatedNotification>
     {
@@ -50,6 +52,7 @@ public class NotificationTests
         public static void Reset() => CallCount = 0;
     }
 
+    [MediatorGeneration(Skip = true)]
     [NotificationHandlerOrder(1)]
     public class OrderedFirstHandler : INotificationHandler<UserCreatedNotification>
     {
@@ -65,6 +68,7 @@ public class NotificationTests
         public static void Reset() => CallCount = 0;
     }
 
+    [MediatorGeneration(Skip = true)]
     public class FailingHandler : INotificationHandler<ParallelNotification>
     {
         public ValueTask HandleAsync(ParallelNotification notification, CancellationToken cancellationToken = default)
@@ -73,6 +77,7 @@ public class NotificationTests
         }
     }
 
+    [MediatorGeneration(Skip = true)]
     public class SuccessHandler : INotificationHandler<ParallelNotification>
     {
         public static bool WasCalled { get; private set; }
@@ -97,10 +102,10 @@ public class NotificationTests
         OrderedFirstHandler.Reset();
 
         var services = new ServiceCollection();
-        services.AddMediatorLite(options =>
-        {
-            options.RegisterHandlersFromAssemblyContaining<NotificationTests>();
-        });
+        services.AddTransient<INotificationHandler<UserCreatedNotification>, FirstHandler>();
+        services.AddTransient<INotificationHandler<UserCreatedNotification>, SecondHandler>();
+        services.AddTransient<INotificationHandler<UserCreatedNotification>, OrderedFirstHandler>();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -124,9 +129,11 @@ public class NotificationTests
         OrderedFirstHandler.Reset();
 
         var services = new ServiceCollection();
+        services.AddTransient<INotificationHandler<UserCreatedNotification>, FirstHandler>();
+        services.AddTransient<INotificationHandler<UserCreatedNotification>, SecondHandler>();
+        services.AddTransient<INotificationHandler<UserCreatedNotification>, OrderedFirstHandler>();
         services.AddMediatorLite(options =>
         {
-            options.RegisterHandlersFromAssemblyContaining<NotificationTests>();
             options.NotificationExecutionStrategy = NotificationExecutionStrategy.Sequential;
         });
         services.AddLogging();
@@ -137,9 +144,7 @@ public class NotificationTests
         // Act
         await mediator.PublishAsync(new UserCreatedNotification(1, "test@test.com"));
 
-        // Assert - Order should be: OrderedFirstHandler (1), FirstHandler (default 0), SecondHandler (2)
-        // Note: FirstHandler has no attribute so order=0, OrderedFirstHandler has order=1, SecondHandler has order=2
-        // So actual order: FirstHandler(0), OrderedFirstHandler(1), SecondHandler(2)
+        // Assert - Order should be: FirstHandler(0), OrderedFirstHandler(1), SecondHandler(2)
         FirstHandler.CallOrder.Should().ContainInOrder(1, 0, 2);
     }
 
@@ -221,6 +226,7 @@ public class NotificationTests
 
     public record StopOnFirstNotification(string Message) : INotification;
 
+    [MediatorGeneration(Skip = true)]
     public class StopOnFirstHandler1 : INotificationHandler<StopOnFirstNotification>
     {
         public static bool WasCalled { get; private set; }
@@ -233,6 +239,7 @@ public class NotificationTests
         }
     }
 
+    [MediatorGeneration(Skip = true)]
     [NotificationHandlerOrder(1)]
     public class StopOnFirstHandler2 : INotificationHandler<StopOnFirstNotification>
     {
@@ -248,6 +255,7 @@ public class NotificationTests
 
     public record FallbackNotification(string Message) : INotification;
 
+    [MediatorGeneration(Skip = true)]
     public class FallbackHandler1_Fails : INotificationHandler<FallbackNotification>
     {
         public static bool WasCalled { get; private set; }
@@ -260,6 +268,7 @@ public class NotificationTests
         }
     }
 
+    [MediatorGeneration(Skip = true)]
     [NotificationHandlerOrder(1)]
     public class FallbackHandler2_Succeeds : INotificationHandler<FallbackNotification>
     {
@@ -273,6 +282,7 @@ public class NotificationTests
         }
     }
 
+    [MediatorGeneration(Skip = true)]
     [NotificationHandlerOrder(2)]
     public class FallbackHandler3_NotReached : INotificationHandler<FallbackNotification>
     {
@@ -379,7 +389,7 @@ public class NotificationTests
         // Arrange - All handlers fail
         var services = new ServiceCollection();
         services.AddTransient<INotificationHandler<FallbackNotification>, FallbackHandler1_Fails>();
-        services.AddTransient<INotificationHandler<FallbackNotification>>(_ => 
+        services.AddTransient<INotificationHandler<FallbackNotification>>(_ =>
             new ThrowingFallbackHandler("Handler2 also failed"));
         services.AddMediatorLite(options =>
         {
@@ -397,6 +407,7 @@ public class NotificationTests
         exception.Which.InnerExceptions.Should().HaveCount(2);
     }
 
+    [MediatorGeneration(Skip = true)]
     public class ThrowingFallbackHandler(string message) : INotificationHandler<FallbackNotification>
     {
         public ValueTask HandleAsync(FallbackNotification notification, CancellationToken cancellationToken = default)
