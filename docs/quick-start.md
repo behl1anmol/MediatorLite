@@ -36,16 +36,59 @@ public class GetUserQueryHandler : IRequestHandler<GetUserQuery, User>
 
 ## 2. Register Services
 
+### Source-Generated Registration (Recommended)
+
+The source generator discovers all handlers at compile time. No runtime reflection needed:
+
 ```csharp
-// In Program.cs or Startup.cs
-services.AddMediatorLite(options =>
+using MediatorLite.Generated;
+
+services
+    .AddGeneratedHandlers()   // Registers all handlers, notifications, behaviors
+    .AddMediatorLite(options =>
+    {
+        options.AddOpenBehavior(typeof(LoggingBehavior<,>));
+    });
+```
+
+`AddGeneratedHandlers()` registers:
+- All `IRequestHandler<,>` implementations
+- All `INotificationHandler<>` implementations
+- All `IPipelineBehavior<,>` implementations
+- The `ISourceGeneratedMediator` for zero-reflection dispatch
+
+For granular control, use the individual registration methods:
+
+```csharp
+services
+    .AddGeneratedRequestHandlers()        // Only request handlers
+    .AddGeneratedNotificationHandlers()   // Only notification handlers
+    .AddGeneratedBehaviors()              // Only pipeline behaviors
+    .AddMediatorLite();
+```
+
+### Manual DI Registration
+
+You can also register handlers directly with the DI container:
+
+```csharp
+services.AddTransient<IRequestHandler<GetUserQuery, User>, GetUserQueryHandler>();
+services.AddTransient<INotificationHandler<UserCreatedNotification>, SendWelcomeEmailHandler>();
+services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
+services.AddMediatorLite();
+```
+
+### Excluding Types from Source Generation
+
+Use `[MediatorGeneration(Skip = true)]` to prevent a handler from being discovered by the source generator:
+
+```csharp
+[MediatorGeneration(Skip = true)]
+public class TestOnlyHandler : IRequestHandler<TestQuery, string>
 {
-    // Auto-register all handlers from assembly
-    options.RegisterHandlersFromAssembly(typeof(Program).Assembly);
-    
-    // Optional: Add pipeline behaviors
-    options.AddOpenBehavior(typeof(LoggingBehavior<,>));
-});
+    // This handler will NOT be registered by AddGeneratedHandlers()
+    // Register it manually if needed
+}
 ```
 
 ## 3. Send Requests
@@ -129,13 +172,25 @@ services.AddMediatorLite(options =>
 
 | Strategy | Behavior | Error Strategy |
 |----------|----------|----------------|
-| `Sequential` | Execute handlers one-by-one in order | ✅ Applies |
-| `Parallel` | Execute all handlers concurrently | ⚠️ Always aggregates* |
-| `StopOnFirst` | Stop after first successful handler | ✅ Applies |
+| `Sequential` | Execute handlers one-by-one in order | Applies |
+| `Parallel` | Execute all handlers concurrently | Always aggregates* |
+| `StopOnFirst` | Stop after first successful handler | Applies |
 
 > *Parallel mode always aggregates exceptions because concurrent tasks cannot be stopped mid-execution.
 
 See [Notifications](notifications.md) for detailed strategy documentation and error handling patterns.
+
+## 7. Source Generator Diagnostics
+
+The source generator exposes handler counts for diagnostics:
+
+```csharp
+using MediatorLite.Generated;
+
+Console.WriteLine($"Request handlers: {MediatorLiteRegistration.RequestHandlerCount}");
+Console.WriteLine($"Notification handlers: {MediatorLiteRegistration.NotificationHandlerCount}");
+Console.WriteLine($"Behaviors: {MediatorLiteRegistration.BehaviorCount}");
+```
 
 ## Next Steps
 

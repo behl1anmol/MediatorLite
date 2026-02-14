@@ -35,23 +35,17 @@ public class LoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, 
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Handling {RequestType}", typeof(TRequest).Name);
-        
+
         var stopwatch = Stopwatch.StartNew();
         var response = await next(); // Call the next behavior or handler
         stopwatch.Stop();
-        
-        _logger.LogInformation("Handled {RequestType} in {ElapsedMs}ms", 
+
+        _logger.LogInformation("Handled {RequestType} in {ElapsedMs}ms",
             typeof(TRequest).Name, stopwatch.ElapsedMilliseconds);
-        
+
         return response;
     }
 }
-
-// Applies to all requests (any TRequest/TResponse)
-options.AddOpenBehavior(typeof(LoggingBehavior<,>));
-
-// Must also be registered in DI
-services.AddTransient(typeof(LoggingBehavior<,>));
 ```
 
 ### Closed behavior example
@@ -68,38 +62,66 @@ public sealed class CreateOrderLoggingBehavior
         return await next();
     }
 }
-
-// Applies only to CreateOrder -> OrderResult
-options.AddBehavior<CreateOrderLoggingBehavior>();
-
-// Register the concrete type in DI
-services.AddTransient<CreateOrderLoggingBehavior>();
 ```
 
 ## Registering Behaviors
 
-### Open Generic Registration
+### Source-Generated Registration
+
+If your behaviors are in the same project as the source generator, `AddGeneratedHandlers()` will discover and register them automatically:
+
+```csharp
+using MediatorLite.Generated;
+
+services
+    .AddGeneratedHandlers()   // Discovers and registers behaviors automatically
+    .AddMediatorLite();
+```
+
+To register only behaviors from the source generator:
+
+```csharp
+services
+    .AddGeneratedBehaviors()  // Only pipeline behaviors
+    .AddMediatorLite();
+```
+
+### Manual Registration via MediatorOptions
+
+Register open generic behaviors through `MediatorOptions`:
 
 ```csharp
 services.AddMediatorLite(options =>
 {
-    options.RegisterHandlersFromAssemblyContaining<Program>();
-    
-    // Register open generic behaviors (applied to all requests)
     options.AddOpenBehavior(typeof(LoggingBehavior<,>));
     options.AddOpenBehavior(typeof(ValidationBehavior<,>));
 });
-
-// Also register with DI container
-services.AddTransient(typeof(LoggingBehavior<,>));
-services.AddTransient(typeof(ValidationBehavior<,>));
 ```
 
-### Closed Type Registration
+This registers them as `IPipelineBehavior<,>` in DI automatically.
+
+### Manual Registration via DI
+
+You can also register behaviors directly with the DI container:
 
 ```csharp
-// For specific request types only
+// Open generic - applies to all requests
+services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
+
+// Closed type - applies to specific request only
+services.AddTransient<IPipelineBehavior<CreateOrder, OrderResult>, CreateOrderLoggingBehavior>();
+```
+
+### Closed Type Registration via Options
+
+```csharp
 options.AddBehavior<AuthorizationBehavior>();
+```
+
+### Convenience Extension Method
+
+```csharp
+services.AddMediatorBehavior<LoggingBehavior<,>>();
 ```
 
 ## Execution Order
@@ -107,7 +129,7 @@ options.AddBehavior<AuthorizationBehavior>();
 Behaviors execute in registration order (first registered = first executed):
 
 ```
-Request → LoggingBehavior → ValidationBehavior → Handler → ValidationBehavior → LoggingBehavior → Response
+Request -> LoggingBehavior -> ValidationBehavior -> Handler -> ValidationBehavior -> LoggingBehavior -> Response
 ```
 
 ### Using BehaviorOrderAttribute
@@ -148,7 +170,7 @@ public class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TReques
                 throw new ValidationException(result.Errors);
             }
         }
-        
+
         return await next();
     }
 }
@@ -173,7 +195,7 @@ public class TransactionBehavior<TRequest, TResponse> : IPipelineBehavior<TReque
         CancellationToken cancellationToken = default)
     {
         await using var transaction = await _dbContext.BeginTransactionAsync(cancellationToken);
-        
+
         try
         {
             var response = await next();
@@ -205,12 +227,12 @@ public class CachingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, 
         CancellationToken cancellationToken = default)
     {
         var cacheKey = GenerateCacheKey(request);
-        
+
         if (_cache.TryGet<TResponse>(cacheKey, out var cached))
         {
             return cached!; // Don't call next(), return cached value
         }
-        
+
         var response = await next();
         _cache.Set(cacheKey, response);
         return response;

@@ -3,8 +3,8 @@
 - **Architecture**
   - Core dispatcher lives in [src/MediatorLite/Internal/Mediator.cs](src/MediatorLite/Internal/Mediator.cs); it routes `IRequest<T>` to a single `IRequestHandler` and publishes `INotification` to all `INotificationHandler` implementations.
   - Two registration paths:
-    - Runtime scan via [ServiceCollectionExtensions](src/MediatorLite/Configuration/ServiceCollectionExtensions.cs): call `AddMediatorLite` and `options.RegisterHandlersFromAssembly*` to scan assemblies.
-    - Compile-time discovery via [HandlerDiscoveryGenerator](src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs): call generated `AddGeneratedHandlers()` then `AddMediatorLiteCore` (or `AddMediatorLite` if you still want runtime options) to avoid reflection at startup.
+    - Source-generated (recommended): call `AddGeneratedHandlers()` (from [HandlerDiscoveryGenerator](src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs)) then `AddMediatorLite()` for zero-reflection dispatch. Granular methods available: `AddGeneratedRequestHandlers()`, `AddGeneratedNotificationHandlers()`, `AddGeneratedBehaviors()`.
+    - Manual DI: register handlers directly (e.g., `services.AddTransient<IRequestHandler<...>, Handler>()`) then call `AddMediatorLite()`. The mediator falls back to reflection-based dispatch with `ConcurrentDictionary` caching when `ISourceGeneratedMediator` is not registered.
   - Pipeline behaviors (`IPipelineBehavior<TRequest,TResponse>`) wrap handlers; they are resolved in DI registration order plus any types added through `MediatorOptions.BehaviorTypes`.
   - Notifications support execution strategies (sequential/parallel/stop-on-first) and error strategies (stop-first vs continue+aggregate) configured globally or per-notification.
 
@@ -35,10 +35,10 @@
 
 - **Developer workflows**
   - Build/test: `dotnet test MediatorLite.sln` (runs xUnit + FluentAssertions tests under [tests/](tests)).
-  - Samples: runtime DI sample in [samples/MediatorLite.Sample/Program.cs](samples/MediatorLite.Sample/Program.cs); source-gen sample in [samples/MediatorLite.Sample.SourceGen/Program.cs](samples/MediatorLite.Sample.SourceGen/Program.cs) showing `AddGeneratedHandlers` + performance logging behavior.
-  - Source generator output class: `MediatorLite.Generated.MediatorLiteRegistration` exposes `AddGeneratedHandlers`, `RequestHandlerCount`, and `NotificationHandlerCount` for diagnostics.
+  - Samples: manual DI registration sample in [samples/MediatorLite.Sample/Program.cs](samples/MediatorLite.Sample/Program.cs); source-gen sample in [samples/MediatorLite.Sample.SourceGen/Program.cs](samples/MediatorLite.Sample.SourceGen/Program.cs) showing `AddGeneratedHandlers` + performance logging behavior.
+  - Source generator output class: `MediatorLite.Generated.MediatorLiteRegistration` exposes `AddGeneratedHandlers`, `AddGeneratedRequestHandlers`, `AddGeneratedNotificationHandlers`, `AddGeneratedBehaviors`, `RequestHandlerCount`, `NotificationHandlerCount`, and `BehaviorCount` for diagnostics.
 
 - **Common pitfalls**
-  - Forgetting to register handler assemblies or to call `AddGeneratedHandlers` results in `InvalidOperationException` when sending requests.
-  - Behaviors must be registered both in options and DI; otherwise mediator will try to resolve them and find none.
+  - Forgetting to call `AddGeneratedHandlers()` or register handlers manually results in `InvalidOperationException` when sending requests.
+  - Open generic behaviors registered via `MediatorOptions.AddOpenBehavior` are automatically added to DI by `AddMediatorLite()`. When using manual DI registration, register them directly (e.g., `services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>))`).
   - When using parallel notification execution with `ContinueAndAggregate`, expect `AggregateException` wrapping handler failures.

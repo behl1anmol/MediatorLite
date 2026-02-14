@@ -55,7 +55,7 @@ public class MyHandler : IRequestHandler<MyQuery, Result>
 }
 ```
 
-### 3. Method Name: Handle → HandleAsync
+### 3. Method Name: Handle -> HandleAsync
 
 | MediatR | MediatorLite |
 |---------|--------------|
@@ -65,7 +65,7 @@ public class MyHandler : IRequestHandler<MyQuery, Result>
 
 ### 4. Registration
 
-**MediatR:**
+**MediatR** uses runtime assembly scanning:
 ```csharp
 services.AddMediatR(cfg =>
 {
@@ -74,13 +74,23 @@ services.AddMediatR(cfg =>
 });
 ```
 
-**MediatorLite:**
+**MediatorLite** uses compile-time source generation:
 ```csharp
-services.AddMediatorLite(options =>
-{
-    options.RegisterHandlersFromAssemblyContaining<Program>();
-    options.AddOpenBehavior(typeof(LoggingBehavior<,>));
-});
+using MediatorLite.Generated;
+
+services
+    .AddGeneratedHandlers()   // Source-generated: zero reflection at startup
+    .AddMediatorLite(options =>
+    {
+        options.AddOpenBehavior(typeof(LoggingBehavior<,>));
+    });
+```
+
+Or register handlers manually with standard DI:
+```csharp
+services.AddTransient<IRequestHandler<MyQuery, Result>, MyQueryHandler>();
+services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
+services.AddMediatorLite();
 ```
 
 ### 5. Pipeline Behaviors
@@ -140,10 +150,10 @@ using MediatorLite;
 ### Step 3: Update Handlers
 
 For handlers, update the return type and method name:
-- `Task<T> Handle(` → `ValueTask<T> HandleAsync(`
-- `Task Handle(` → `ValueTask HandleAsync(`
-- `Task.FromResult(x)` → `ValueTask.FromResult(x)`
-- `Task.CompletedTask` → `ValueTask.CompletedTask`
+- `Task<T> Handle(` -> `ValueTask<T> HandleAsync(`
+- `Task Handle(` -> `ValueTask HandleAsync(`
+- `Task.FromResult(x)` -> `ValueTask.FromResult(x)`
+- `Task.CompletedTask` -> `ValueTask.CompletedTask`
 - Add `= default` to CancellationToken parameters
 
 ### Step 4: Update Mediator Calls
@@ -160,25 +170,79 @@ await _mediator.PublishAsync(notification);
 
 ### Step 5: Update Registration
 
+Replace MediatR's runtime assembly scanning with source-generated registration:
+
 ```csharp
-// Before
+// Before (MediatR)
 services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(...));
 
-// After
-services.AddMediatorLite(options => options.RegisterHandlersFromAssembly(...));
+// After (MediatorLite - source generation)
+using MediatorLite.Generated;
+
+services
+    .AddGeneratedHandlers()   // Compile-time handler discovery
+    .AddMediatorLite();
+
+// Or: manual DI registration
+services.AddTransient<IRequestHandler<MyQuery, MyResult>, MyQueryHandler>();
+services.AddMediatorLite();
 ```
 
-## Source Generator (Zero-Reflection Registration)
+## Source Generation
 
-MediatorLite includes a source generator for compile-time handler discovery:
+MediatorLite includes a Roslyn source generator (`MediatorLite.SourceGeneration`) that discovers handlers, notification handlers, and pipeline behaviors at compile time.
+
+### How It Works
+
+The source generator scans your project for types implementing:
+- `IRequestHandler<TRequest, TResponse>`
+- `INotificationHandler<TNotification>`
+- `IPipelineBehavior<TRequest, TResponse>`
+
+It generates a `MediatorLiteRegistration` class with extension methods to register all discovered types with the DI container.
+
+### Registration Methods
 
 ```csharp
-// Instead of runtime reflection scanning
-services.AddMediatorLite();
+using MediatorLite.Generated;
 
-// Use source-generated registrations
-services.AddMediatorLite();
-services.AddGeneratedHandlers();  // Zero reflection at startup!
+// Register everything at once
+services.AddGeneratedHandlers();
+
+// Or register specific categories
+services.AddGeneratedRequestHandlers();        // Only request handlers
+services.AddGeneratedNotificationHandlers();   // Only notification handlers
+services.AddGeneratedBehaviors();              // Only pipeline behaviors
+```
+
+### Zero-Reflection Dispatch
+
+`AddGeneratedHandlers()` also registers a `SourceGeneratedMediator` that implements `ISourceGeneratedMediator`. This enables the mediator to dispatch requests to handlers using direct typed method calls instead of reflection-based `MethodInfo.Invoke()`.
+
+The source-generated mediator provides:
+- **Typed request dispatch** - Direct handler invocation without `MakeGenericType`/`MethodInfo.Invoke`
+- **Typed behavior resolution** - Resolve `IPipelineBehavior<TRequest, TResponse>` without reflection
+- **Handler ordering** - Compile-time lookup of `[NotificationHandlerOrder]` attributes
+- **Notification options** - Compile-time lookup of `[NotificationOptions]` attributes
+
+### Excluding Types
+
+Use `[MediatorGeneration(Skip = true)]` to exclude a type from source generation:
+
+```csharp
+[MediatorGeneration(Skip = true)]
+public class TestHandler : IRequestHandler<TestQuery, string>
+{
+    // Not registered by AddGeneratedHandlers()
+}
+```
+
+### Diagnostics
+
+```csharp
+Console.WriteLine($"Request handlers: {MediatorLiteRegistration.RequestHandlerCount}");
+Console.WriteLine($"Notification handlers: {MediatorLiteRegistration.NotificationHandlerCount}");
+Console.WriteLine($"Behaviors: {MediatorLiteRegistration.BehaviorCount}");
 ```
 
 ## Regex for Bulk Migration
@@ -197,8 +261,8 @@ public $1ValueTask<$2> HandleAsync($3 request, CancellationToken $4 = default)
 
 ### Mediator Calls
 
-Find: `\.Send\(` → Replace: `.SendAsync(`
-Find: `\.Publish\(` → Replace: `.PublishAsync(`
+Find: `\.Send\(` -> Replace: `.SendAsync(`
+Find: `\.Publish\(` -> Replace: `.PublishAsync(`
 
 ## Notification Execution Strategies
 
@@ -225,9 +289,9 @@ MediatorLite applies error strategies based on the execution mode:
 
 | Execution Strategy | Error Strategy Effect |
 |--------------------|----------------------|
-| **Sequential** | ✅ Both strategies work as expected |
-| **Parallel** | ⚠️ Error strategy ignored - always aggregates* |
-| **StopOnFirst** | ✅ Both strategies work as expected |
+| **Sequential** | Both strategies work as expected |
+| **Parallel** | Error strategy ignored - always aggregates* |
+| **StopOnFirst** | Both strategies work as expected |
 
 > *Parallel mode always aggregates exceptions because concurrent tasks cannot be cancelled mid-execution. This is by design.
 
