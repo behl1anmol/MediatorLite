@@ -14,6 +14,11 @@ on:
       - 'tests/MediatorLite.Benchmarks/**'
   workflow_dispatch:  # Allow manual trigger
 
+# Required permissions for commenting on PRs and pushing benchmark data
+permissions:
+  contents: write
+  pull-requests: write
+
 env:
   DOTNET_VERSION: '10.0.x'
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
