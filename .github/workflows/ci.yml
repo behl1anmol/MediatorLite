@@ -74,8 +74,8 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore
 
+    - name: Build and run analyzers
+      run: dotnet build --configuration Release --no-restore /p:EnforceCodeStyleInBuild=true /p:TreatWarningsAsErrors=true
+
     - name: Check code formatting
       run: dotnet format --verify-no-changes --verbosity diagnostic
-
-    - name: Run analyzers
-      run: dotnet build --configuration Release --no-restore /p:EnforceCodeStyleInBuild=true /p:TreatWarningsAsErrors=true
