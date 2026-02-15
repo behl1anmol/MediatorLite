@@ -10,9 +10,9 @@
     <AnalysisLevel>latest</AnalysisLevel>
     
     <!-- Package metadata -->
-    <Authors>MediatorLite Contributors</Authors>
-    <Company>MediatorLite</Company>
-    <Copyright>Copyright © 2026 MediatorLite Contributors</Copyright>
+    <Authors>Anmol Behl</Authors>
+    <Company>AB Dev Studio</Company>
+    <Copyright>Copyright © $([System.DateTime]::Now.Year) Anmol Behl</Copyright>
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
