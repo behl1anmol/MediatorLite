@@ -67,7 +67,7 @@ jobs:
         if [ -d "$results_dir" ]; then
           cd "$results_dir"
           # Combine all JSON files into one array using jq
-          jq -s 'add' *-report-full.json > combined-benchmarks.json
+          jq -s 'add' *-report-github.md > combined-benchmarks.json
           echo "Combined benchmark files created"
           ls -la combined-benchmarks.json
         else
