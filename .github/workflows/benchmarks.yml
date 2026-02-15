@@ -1,0 +1,90 @@
+name: Benchmarks
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'tests/MediatorLite.Benchmarks/**'
+      - '.github/workflows/benchmarks.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'tests/MediatorLite.Benchmarks/**'
+  workflow_dispatch:  # Allow manual trigger
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  benchmark:
+    name: Run Benchmarks
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Build (Release)
+      run: dotnet build --configuration Release --no-restore
+
+    - name: Run Benchmarks
+      run: dotnet run --project tests/MediatorLite.Benchmarks/MediatorLite.Benchmarks.csproj --configuration Release --no-build -- --filter='*' --exporters json --memory
+
+    - name: Upload benchmark results
+      uses: actions/upload-artifact@v6
+      with:
+        name: benchmark-results
+        path: |
+          tests/MediatorLite.Benchmarks/BenchmarkDotNet.Artifacts/results/*.json
+          tests/MediatorLite.Benchmarks/BenchmarkDotNet.Artifacts/results/*.md
+
+    - name: Store benchmark result
+      if: github.event_name != 'pull_request'
+      uses: benchmark-action/github-action-benchmark@v1
+      with:
+        tool: 'benchmarkdotnet'
+        output-file-path: tests/MediatorLite.Benchmarks/BenchmarkDotNet.Artifacts/results/combined-benchmarks.json
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        auto-push: true
+        alert-threshold: '150%'
+        comment-on-alert: true
+        fail-on-alert: false
+        alert-comment-cc-users: '@behl1anmol'
+
+    - name: Comment PR with benchmark results
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v8
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const fs = require('fs');
+          const path = './tests/MediatorLite.Benchmarks/BenchmarkDotNet.Artifacts/results';
+
+          // Find the markdown results file
+          const files = fs.readdirSync(path);
+          const mdFile = files.find(f => f.endsWith('.md'));
+
+          if (mdFile) {
+            const results = fs.readFileSync(`${path}/${mdFile}`, 'utf8');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Benchmark Results\n\n${results}`
+            });
+          }
