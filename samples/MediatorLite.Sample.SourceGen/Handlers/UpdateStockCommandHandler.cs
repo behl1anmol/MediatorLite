@@ -18,7 +18,7 @@ public sealed class UpdateStockCommandHandler : IRequestHandler<UpdateStockComma
 
     public ValueTask HandleAsync(UpdateStockCommand request, CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Updating stock for ProductId: {ProductId}, Change: {QuantityChange}", 
+        _logger.LogInformation("Updating stock for ProductId: {ProductId}, Change: {QuantityChange}",
             request.ProductId, request.QuantityChange);
 
         // Simulate stock update (in real app, would update database)

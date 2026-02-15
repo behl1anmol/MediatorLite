@@ -17,7 +17,7 @@ public sealed class SearchProductsQueryHandler : IRequestHandler<SearchProductsQ
 
     public ValueTask<IReadOnlyList<Product>> HandleAsync(SearchProductsQuery request, CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Searching products with term: '{SearchTerm}', max results: {MaxResults}", 
+        _logger.LogInformation("Searching products with term: '{SearchTerm}', max results: {MaxResults}",
             request.SearchTerm, request.MaxResults);
 
         // Simulate search results

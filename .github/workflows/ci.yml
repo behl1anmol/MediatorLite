@@ -74,8 +74,11 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore
 
+    - name: Check code formatting (whitespace)
+      run: dotnet format whitespace --verify-no-changes --verbosity diagnostic --no-restore
+
+    - name: Check code formatting (style)
+      run: dotnet format style --verify-no-changes --verbosity diagnostic --no-restore
+
     - name: Build and run analyzers
       run: dotnet build --configuration Release --no-restore /p:EnforceCodeStyleInBuild=true /p:TreatWarningsAsErrors=true
-
-    - name: Check code formatting
-      run: dotnet format --verify-no-changes --verbosity diagnostic

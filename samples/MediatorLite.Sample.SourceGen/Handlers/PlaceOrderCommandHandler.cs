@@ -19,7 +19,7 @@ public sealed class PlaceOrderCommandHandler : IRequestHandler<PlaceOrderCommand
 
     public async ValueTask<OrderResult> HandleAsync(PlaceOrderCommand request, CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Processing order for ProductId: {ProductId}, Quantity: {Quantity}", 
+        _logger.LogInformation("Processing order for ProductId: {ProductId}, Quantity: {Quantity}",
             request.ProductId, request.Quantity);
 
         // Get product to calculate price
@@ -34,7 +34,7 @@ public sealed class PlaceOrderCommandHandler : IRequestHandler<PlaceOrderCommand
 
         // Publish order placed notification
         await _mediator.PublishAsync(
-            new Notifications.OrderPlacedNotification(orderId, request.ProductId, request.Quantity, request.CustomerEmail, totalAmount), 
+            new Notifications.OrderPlacedNotification(orderId, request.ProductId, request.Quantity, request.CustomerEmail, totalAmount),
             cancellationToken);
 
         _logger.LogInformation("Order {OrderId} placed successfully. Total: {TotalAmount:C}", orderId, totalAmount);
