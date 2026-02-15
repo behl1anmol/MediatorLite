@@ -66,7 +66,9 @@ public sealed class CreateOrderLoggingBehavior
 
 ## Registering Behaviors
 
-### Source-Generated Registration
+### Source-Generated Registration (Recommended)
+
+**When using source-generated registration, behaviors are automatically discovered and registered. Do NOT use `MediatorOptions.AddOpenBehavior()` - it's not needed.**
 
 If your behaviors are in the same project as the source generator, `AddGeneratedHandlers()` will discover and register them automatically:
 
@@ -74,8 +76,8 @@ If your behaviors are in the same project as the source generator, `AddGenerated
 using MediatorLite.Generated;
 
 services
-    .AddGeneratedHandlers()   // Discovers and registers behaviors automatically
-    .AddMediatorLite();
+    .AddGeneratedHandlers()   // Discovers and registers ALL behaviors automatically
+    .AddMediatorLite();       // No need to call options.AddOpenBehavior()
 ```
 
 To register only behaviors from the source generator:
@@ -86,9 +88,15 @@ services
     .AddMediatorLite();
 ```
 
-### Manual Registration via MediatorOptions
+**Important:** The source generator discovers both open generic behaviors (e.g., `LoggingBehavior<,>`) and closed behaviors (e.g., `CreateOrderValidationBehavior`). They are registered directly in DI and will be resolved automatically by the mediator.
 
-Register open generic behaviors through `MediatorOptions`:
+### Manual Registration (Without Source Generation)
+
+When NOT using source-generated registration, you have two options:
+
+#### Option 1: Via MediatorOptions (Recommended for manual registration)
+
+Register open generic behaviors through `MediatorOptions`. This automatically adds them to DI:
 
 ```csharp
 services.AddMediatorLite(options =>
@@ -98,9 +106,16 @@ services.AddMediatorLite(options =>
 });
 ```
 
-This registers them as `IPipelineBehavior<,>` in DI automatically.
+Register closed behaviors:
 
-### Manual Registration via DI
+```csharp
+services.AddMediatorLite(options =>
+{
+    options.AddBehavior<CreateOrderAuthorizationBehavior>();
+});
+```
+
+#### Option 2: Direct DI Registration
 
 You can also register behaviors directly with the DI container:
 
@@ -110,19 +125,19 @@ services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
 
 // Closed type - applies to specific request only
 services.AddTransient<IPipelineBehavior<CreateOrder, OrderResult>, CreateOrderLoggingBehavior>();
+
+services.AddMediatorLite();
 ```
 
-### Closed Type Registration via Options
+### Summary: Source-Gen vs Manual Registration
 
-```csharp
-options.AddBehavior<AuthorizationBehavior>();
-```
+| Method | When to Use | Behavior Registration |
+|--------|-------------|----------------------|
+| **Source-Generated** | Recommended for all projects | `AddGeneratedHandlers()` - behaviors auto-discovered, **DO NOT** use `options.AddOpenBehavior()` |
+| **Manual via Options** | When NOT using source-gen | `options.AddOpenBehavior()` or `options.AddBehavior<T>()` |
+| **Manual via DI** | When NOT using source-gen | `services.AddTransient(typeof(IPipelineBehavior<,>), typeof(Behavior<,>))` |
 
-### Convenience Extension Method
-
-```csharp
-services.AddMediatorBehavior<LoggingBehavior<,>>();
-```
+**Key Rule:** If you call `AddGeneratedHandlers()` or `AddGeneratedBehaviors()`, the source generator handles all behavior registration. Do not mix source-gen with `MediatorOptions.AddOpenBehavior()` for the same behavior - it will be registered twice.
 
 ## Execution Order
 

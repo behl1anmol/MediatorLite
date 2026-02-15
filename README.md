@@ -138,6 +138,7 @@ await mediator.PublishAsync(new UserCreatedNotification(user.Id, user.Email));
 
 - [Quick Start Guide](docs/quick-start.md)
 - [Pipeline Behaviors](docs/pipeline-behaviors.md)
+- [Validation](docs/validation.md)
 - [Notifications](docs/notifications.md)
 - [Migration from MediatR](docs/migration-from-mediatr.md)
 
