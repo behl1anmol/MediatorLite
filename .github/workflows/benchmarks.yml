@@ -106,20 +106,33 @@ jobs:
           try {
             // Find ALL markdown results files
             const files = fs.readdirSync(path);
-            const mdFiles = files.filter(f => f.endsWith('-report.md'));
+            console.log('Files found:', files);
+
+            // BenchmarkDotNet creates files like "*-report-github.md" for GitHub-formatted output
+            let mdFiles = files.filter(f => f.endsWith('-report-github.md'));
+
+            // Fallback to any .md files if github-formatted not found
+            if (mdFiles.length === 0) {
+              mdFiles = files.filter(f => f.endsWith('.md'));
+            }
 
             if (mdFiles.length === 0) {
               console.log('No benchmark markdown files found');
               return;
             }
 
+            console.log('Markdown files to process:', mdFiles);
+
             // Combine all benchmark results
             let combinedResults = '## Benchmark Results\n\n';
 
             for (const mdFile of mdFiles) {
               const content = fs.readFileSync(`${path}/${mdFile}`, 'utf8');
-              // Extract benchmark class name from filename (e.g., "MediatorBenchmarks-report.md" -> "MediatorBenchmarks")
-              const benchmarkName = mdFile.replace('-report.md', '');
+              // Extract benchmark class name from filename
+              let benchmarkName = mdFile
+                .replace('-report-github.md', '')
+                .replace('-report.md', '')
+                .replace('.md', '');
               combinedResults += `### ${benchmarkName}\n\n${content}\n\n---\n\n`;
             }
 

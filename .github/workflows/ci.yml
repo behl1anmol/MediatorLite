@@ -34,7 +34,7 @@ jobs:
       run: dotnet build --configuration Release --no-restore
 
     - name: Run tests
-      run: dotnet test --configuration Release --no-build --verbosity normal --logger trx --collect:"XPlat Code Coverage"
+      run: dotnet test --configuration Release --no-build --verbosity normal --logger trx --logger "junit;LogFilePath=TestResults/junit-results.xml" --collect:"XPlat Code Coverage"
 
     - name: Upload test results
       uses: actions/upload-artifact@v6
@@ -63,6 +63,7 @@ jobs:
       uses: codecov/codecov-action@v5
       with:
         report_type: test_results
+        files: '**/TestResults/junit-results.xml'
         fail_ci_if_error: false
         token: ${{ secrets.CODECOV_TOKEN }}
 
