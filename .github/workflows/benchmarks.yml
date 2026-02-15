@@ -42,15 +42,33 @@ jobs:
       run: dotnet build --configuration Release --no-restore
 
     - name: Run Benchmarks
-      run: dotnet run --project tests/MediatorLite.Benchmarks/MediatorLite.Benchmarks.csproj --configuration Release --no-build -- --filter='*' --exporters json --memory
+      run: |
+        cd tests/MediatorLite.Benchmarks
+        dotnet run --configuration Release --no-build -- --filter='*' --exporters json markdown --memory
 
     - name: Upload benchmark results
       uses: actions/upload-artifact@v6
+      if: always()
       with:
         name: benchmark-results
         path: |
           tests/MediatorLite.Benchmarks/BenchmarkDotNet.Artifacts/results/*.json
           tests/MediatorLite.Benchmarks/BenchmarkDotNet.Artifacts/results/*.md
+
+    - name: Combine benchmark results
+      if: github.event_name != 'pull_request'
+      run: |
+        results_dir="tests/MediatorLite.Benchmarks/BenchmarkDotNet.Artifacts/results"
+        if [ -d "$results_dir" ]; then
+          cd "$results_dir"
+          # Combine all JSON files into one array using jq
+          jq -s 'add' *-report-full.json > combined-benchmarks.json
+          echo "Combined benchmark files created"
+          ls -la combined-benchmarks.json
+        else
+          echo "Benchmark results directory not found"
+          exit 1
+        fi
 
     - name: Store benchmark result
       if: github.event_name != 'pull_request'
