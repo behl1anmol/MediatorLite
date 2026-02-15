@@ -33,23 +33,40 @@ public record CreateUserCommand : IRequest<int>
 }
 ```
 
-### 2. Register ValidationBehavior and Validators
+### 2. Register Services
 
-#### With Source Generation
+#### With Source Generation (Recommended)
+
+The source generator automatically handles validation setup:
+
+- **Discovers** all `IValidator<T>` implementations at compile time
+- **Auto-registers** `DataAnnotationsValidator<T>` for request types with DataAnnotation attributes
+- **Registers** `ValidationBehavior<,>` first in the pipeline (before other behaviors) to ensure validation short-circuits early
 
 ```csharp
 using MediatorLite.Generated;
-using MediatorLite.Validation;
 
 services
-    .AddGeneratedHandlers()   // Registers handlers
+    .AddGeneratedHandlers()   // Registers handlers, validators, behaviors, and source-gen mediator
     .AddMediatorLite();
 
-// Register the validation behavior as an open generic
-services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
+// That's it! No manual validator or behavior registration needed.
+// The source generator:
+//   1. Detects [Required], [Range], etc. on CreateUserCommand properties
+//   2. Registers DataAnnotationsValidator<CreateUserCommand> automatically
+//   3. Registers ValidationBehavior<CreateUserCommand, int> first in the pipeline
+//   4. Discovers any custom IValidator<CreateUserCommand> implementations
+```
 
-// Register DataAnnotations validator for your request
-services.AddTransient<IValidator<CreateUserCommand>, DataAnnotationsValidator<CreateUserCommand>>();
+For granular control, use the individual methods:
+
+```csharp
+services
+    .AddGeneratedRequestHandlers()
+    .AddGeneratedNotificationHandlers()
+    .AddGeneratedValidators()       // Registers discovered validators + DataAnnotationsValidator
+    .AddGeneratedBehaviors()        // Registers ValidationBehavior first, then other behaviors
+    .AddMediatorLite();
 ```
 
 #### Without Source Generation
@@ -92,7 +109,7 @@ catch (ValidationException ex)
 
 ## Custom Validators
 
-Create custom validators by implementing `IValidator<TRequest>`:
+Create custom validators by implementing `IValidator<TRequest>`. The source generator automatically discovers and registers these at compile time:
 
 ```csharp
 public class CreateUserCommandValidator : IValidator<CreateUserCommand>
@@ -134,10 +151,22 @@ public class CreateUserCommandValidator : IValidator<CreateUserCommand>
 }
 ```
 
-Register the custom validator:
+Register the custom validator (only needed without source generation):
 
 ```csharp
+// With source generation: automatically discovered and registered by AddGeneratedHandlers()
+// Without source generation: register manually
 services.AddTransient<IValidator<CreateUserCommand>, CreateUserCommandValidator>();
+```
+
+Use `[MediatorGeneration(Skip = true)]` to exclude a validator from source generation:
+
+```csharp
+[MediatorGeneration(Skip = true)]
+public class TestOnlyValidator : IValidator<CreateUserCommand>
+{
+    // This validator will NOT be registered by AddGeneratedHandlers()
+}
 ```
 
 ## Multiple Validators
@@ -201,7 +230,21 @@ The built-in `DataAnnotationsValidator<T>` supports all standard `System.Compone
 
 ## Validation Behavior Execution Order
 
-`ValidationBehavior` runs as part of the pipeline. Register it first to validate before other behaviors:
+`ValidationBehavior` runs as part of the pipeline. It must execute **first** to short-circuit the pipeline before expensive operations.
+
+### With Source Generation (Automatic)
+
+The source generator guarantees `ValidationBehavior` is registered first in the DI container, before any other pipeline behaviors. This ensures validation always executes first:
+
+```
+Request → ValidationBehavior → LoggingBehavior → OtherBehavior → Handler
+```
+
+If validation fails, the pipeline short-circuits and subsequent behaviors/handlers are not executed.
+
+### Without Source Generation (Manual)
+
+Register `ValidationBehavior` before other behaviors to ensure it runs first:
 
 ```csharp
 // ValidationBehavior runs first (validates before logging)
@@ -209,12 +252,15 @@ services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>
 services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
 ```
 
-Execution order:
-```
-Request → ValidationBehavior → LoggingBehavior → Handler
-```
+## Source Generator Diagnostics
 
-If validation fails, the pipeline short-circuits and subsequent behaviors/handlers are not executed.
+The source generator exposes validator counts for diagnostics:
+
+```csharp
+using MediatorLite.Generated;
+
+Console.WriteLine($"Validators discovered: {MediatorLiteRegistration.ValidatorCount}");
+```
 
 ## Advanced Patterns
 
@@ -287,7 +333,17 @@ services.AddTransient(typeof(IValidator<>), typeof(FluentValidationAdapter<>));
 
 ### Per-Request Validator Registration
 
-For specific requests that need validation:
+With source generation, validation is automatically scoped to request types that have validators or DataAnnotation attributes. Request types without either are not validated:
+
+```csharp
+// CreateUserCommand has [Required], [EmailAddress], etc.
+// Source generator auto-registers DataAnnotationsValidator<CreateUserCommand>
+
+// UpdateUserCommand has no annotations and no custom validator
+// No validation is registered - ValidationBehavior is not added for this type
+```
+
+Without source generation, register validators per-request manually:
 
 ```csharp
 // Only CreateUserCommand has validation
@@ -323,13 +379,14 @@ public async Task Validator_ShouldFailForInvalidEmail()
 
 ## Best Practices
 
-1. **Use DataAnnotations for simple validation** - Required, ranges, string lengths, formats
-2. **Use custom validators for business logic** - Async database checks, complex rules
-3. **Register ValidationBehavior first** - Fail fast before expensive operations
-4. **Create specific error messages** - Help users understand what went wrong
-5. **Include AttemptedValue in errors** - Useful for logging and debugging
-6. **Handle ValidationException at API boundary** - Convert to HTTP 400 responses
-7. **Register validators per-request** - Don't validate requests that don't need it
+1. **Use `AddGeneratedHandlers()`** - Automatic validator discovery, DataAnnotation detection, and execution order
+2. **Use DataAnnotations for simple validation** - Required, ranges, string lengths, formats
+3. **Use custom validators for business logic** - Async database checks, complex rules
+4. **Validation runs first automatically** - Source generator ensures `ValidationBehavior` is registered before other behaviors
+5. **Create specific error messages** - Help users understand what went wrong
+6. **Include AttemptedValue in errors** - Useful for logging and debugging
+7. **Handle ValidationException at API boundary** - Convert to HTTP 400 responses
+8. **Use `[MediatorGeneration(Skip = true)]`** - To exclude test-only validators from source generation
 
 ## See Also
 

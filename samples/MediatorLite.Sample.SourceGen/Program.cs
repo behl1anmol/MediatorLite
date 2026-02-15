@@ -1,7 +1,6 @@
 using MediatorLite;
 using MediatorLite.Generated;
 using MediatorLite.Sample.SourceGen.Requests;
-using MediatorLite.Sample.SourceGen.Validators;
 using MediatorLite.Validation;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -25,6 +24,10 @@ Console.WriteLine($"   Notification Handlers discovered: {MediatorLiteRegistrati
 Console.WriteLine($"   Pipeline Behaviors discovered: {MediatorLiteRegistration.BehaviorCount}");
 Console.WriteLine($"      - PerformanceLoggingBehavior<,> (open generic - applies to all requests)");
 Console.WriteLine($"      - PlaceOrderAuthorizationBehavior (closed - applies only to PlaceOrderCommand)");
+Console.WriteLine($"      - ValidationBehavior<,> (auto-registered for validated request types)");
+Console.WriteLine($"   Validators discovered: {MediatorLiteRegistration.ValidatorCount}");
+Console.WriteLine($"      - DataAnnotationsValidator<CreateProductCommand> (auto-detected from attributes)");
+Console.WriteLine($"      - CreateProductCommandValidator (custom business logic validator)");
 Console.WriteLine();
 
 // Configure services
@@ -37,22 +40,16 @@ services.AddLogging(builder =>
     builder.AddConsole(options => options.LogToStandardErrorThreshold = LogLevel.Trace);
 });
 
-// 🎯 Register source-generated handlers, behaviors, and notifications
+// 🎯 Register source-generated handlers, behaviors, validators, and notifications
 // The source generator discovers:
 //   - All IRequestHandler implementations
 //   - All INotificationHandler implementations
 //   - All IPipelineBehavior implementations (open generic AND closed)
-// NO NEED to call options.AddOpenBehavior() or manually register behaviors!
+//   - All IValidator<T> implementations (custom validators)
+//   - DataAnnotationsValidator<T> for request types with DataAnnotation attributes
+//   - ValidationBehavior<,> registered FIRST to ensure validation short-circuits before other behaviors
+// NO NEED to call options.AddOpenBehavior() or manually register behaviors/validators!
 services.AddGeneratedHandlers();
-
-// 📋 Register ValidationBehavior for request validation
-// This is an open generic behavior that validates ALL requests
-services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
-
-// 🔍 Register validators for CreateProductCommand
-// Both DataAnnotations and custom business logic validators
-services.AddTransient<IValidator<CreateProductCommand>, DataAnnotationsValidator<CreateProductCommand>>();
-services.AddTransient<IValidator<CreateProductCommand>, CreateProductCommandValidator>();
 
 // Add MediatorLite core services
 services.AddMediatorLite(options =>

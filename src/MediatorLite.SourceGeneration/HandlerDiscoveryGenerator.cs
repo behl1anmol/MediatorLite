@@ -41,17 +41,25 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 transform: static (context, ct) => GetBehaviorInfo(context, ct))
             .Where(static info => info is not null);
 
+        // Find all validator declarations
+        var validatorDeclarations = context.SyntaxProvider
+            .CreateSyntaxProvider(
+                predicate: static (node, _) => IsValidatorCandidate(node),
+                transform: static (context, ct) => GetValidatorInfo(context, ct))
+            .Where(static info => info is not null);
+
         // Combine with compilation
         var compilationAndData = context.CompilationProvider
             .Combine(handlerDeclarations.Collect())
             .Combine(notificationDeclarations.Collect())
-            .Combine(behaviorDeclarations.Collect());
+            .Combine(behaviorDeclarations.Collect())
+            .Combine(validatorDeclarations.Collect());
 
         // Generate the output
         context.RegisterSourceOutput(compilationAndData, static (spc, source) =>
         {
-            var (((compilation, handlers), notifications), behaviors) = source;
-            Execute(spc, compilation, handlers!, notifications!, behaviors!);
+            var ((((compilation, handlers), notifications), behaviors), validators) = source;
+            Execute(spc, compilation, handlers!, notifications!, behaviors!, validators!);
         });
     }
 
@@ -172,6 +180,95 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             IsOpenGeneric: isOpenGeneric);
     }
 
+    private static bool IsValidatorCandidate(SyntaxNode node)
+    {
+        return node is ClassDeclarationSyntax classDecl
+               && classDecl.BaseList is not null
+               && !classDecl.Modifiers.Any(SyntaxKind.AbstractKeyword);
+    }
+
+    private static ValidatorInfo? GetValidatorInfo(GeneratorSyntaxContext context, CancellationToken ct)
+    {
+        var classDecl = (ClassDeclarationSyntax)context.Node;
+        var semanticModel = context.SemanticModel;
+        var classSymbol = semanticModel.GetDeclaredSymbol(classDecl, ct) as INamedTypeSymbol;
+
+        if (classSymbol is null || classSymbol.IsAbstract)
+            return null;
+
+        // Skip open generic validators (e.g., DataAnnotationsValidator<T> from the library)
+        if (classSymbol.IsGenericType)
+            return null;
+
+        var hasSkipAttribute = classSymbol.GetAttributes()
+            .Any(a => a.AttributeClass?.Name == "MediatorGenerationAttribute"
+                      && a.NamedArguments.Any(arg => arg.Key == "Skip" && arg.Value.Value is true));
+
+        if (hasSkipAttribute)
+            return null;
+
+        foreach (var iface in classSymbol.AllInterfaces)
+        {
+            if (!iface.IsGenericType)
+                continue;
+
+            var originalDef = iface.OriginalDefinition.ToDisplayString();
+
+            if (originalDef == "MediatorLite.Validation.IValidator<TRequest>")
+            {
+                var typeArgs = iface.TypeArguments;
+                if (typeArgs.Length == 1)
+                {
+                    // Only discover validators for concrete (non-generic) request types
+                    if (typeArgs[0].TypeKind == TypeKind.TypeParameter)
+                        continue;
+
+                    return new ValidatorInfo(
+                        ClassName: classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                        Namespace: classSymbol.ContainingNamespace?.ToDisplayString() ?? "",
+                        InterfaceType: iface.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                        RequestType: typeArgs[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Checks whether a type has any properties decorated with DataAnnotation validation attributes.
+    /// </summary>
+    private static bool HasDataAnnotationAttributes(ITypeSymbol typeSymbol)
+    {
+        foreach (var member in typeSymbol.GetMembers())
+        {
+            if (member is IPropertySymbol property)
+            {
+                foreach (var attr in property.GetAttributes())
+                {
+                    if (IsValidationAttribute(attr.AttributeClass))
+                        return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Checks whether an attribute type inherits from System.ComponentModel.DataAnnotations.ValidationAttribute.
+    /// </summary>
+    private static bool IsValidationAttribute(INamedTypeSymbol? attributeType)
+    {
+        var current = attributeType;
+        while (current != null)
+        {
+            if (current.ToDisplayString() == "System.ComponentModel.DataAnnotations.ValidationAttribute")
+                return true;
+            current = current.BaseType;
+        }
+        return false;
+    }
+
     private static HandlerInfo? GetHandlerInfo(GeneratorSyntaxContext context, CancellationToken ct)
     {
         var classDecl = (ClassDeclarationSyntax)context.Node;
@@ -211,10 +308,13 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 var typeArgs = iface.TypeArguments;
                 if (typeArgs.Length == 2)
                 {
+                    bool hasDataAnnotations = HasDataAnnotationAttributes(typeArgs[0]);
+
                     requestHandlerInterfaces.Add(new HandlerInterfaceInfo(
                         InterfaceType: iface.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                         RequestType: typeArgs[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                        ResponseType: typeArgs[1].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)));
+                        ResponseType: typeArgs[1].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                        HasDataAnnotations: hasDataAnnotations));
                 }
             }
             else if (originalDef == "MediatorLite.INotificationHandler<TNotification>")
@@ -245,11 +345,13 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         Compilation compilation,
         ImmutableArray<HandlerInfo?> handlers,
         ImmutableArray<NotificationTypeInfo?> notifications,
-        ImmutableArray<BehaviorInfo?> behaviors)
+        ImmutableArray<BehaviorInfo?> behaviors,
+        ImmutableArray<ValidatorInfo?> validators)
     {
         var validHandlers = handlers.Where(h => h is not null).Cast<HandlerInfo>().ToList();
         var validNotifications = notifications.Where(n => n is not null).Cast<NotificationTypeInfo>().ToList();
         var validBehaviors = behaviors.Where(b => b is not null).Cast<BehaviorInfo>().ToList();
+        var validValidators = validators.Where(v => v is not null).Cast<ValidatorInfo>().ToList();
 
         if (validHandlers.Count == 0)
         {
@@ -259,8 +361,47 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
 
         var expandedBehaviors = ExpandBehaviors(validBehaviors, validHandlers);
 
-        GenerateRegistrationCode(context, validHandlers, expandedBehaviors);
+        // Determine which request types need validation
+        var requestTypesWithValidation = DetermineValidationTargets(validHandlers, validValidators);
+
+        // Add ValidationBehavior entries for InvokeBehavior dispatch
+        foreach (var (requestType, responseType) in requestTypesWithValidation)
+        {
+            expandedBehaviors.Add(new ExpandedBehaviorInfo(
+                BehaviorTypeName: $"global::MediatorLite.Validation.ValidationBehavior<{requestType}, {responseType}>",
+                RequestType: requestType,
+                ResponseType: responseType,
+                InterfaceType: $"global::MediatorLite.IPipelineBehavior<{requestType}, {responseType}>"));
+        }
+
+        GenerateRegistrationCode(context, validHandlers, expandedBehaviors, validValidators, requestTypesWithValidation);
         GenerateSourceGeneratedMediator(context, validHandlers, validNotifications, validBehaviors, expandedBehaviors);
+    }
+
+    /// <summary>
+    /// Determines which request types need validation based on discovered validators and DataAnnotation attributes.
+    /// </summary>
+    private static List<(string RequestType, string ResponseType)> DetermineValidationTargets(
+        List<HandlerInfo> handlers,
+        List<ValidatorInfo> validators)
+    {
+        var result = new List<(string RequestType, string ResponseType)>();
+        var requestTypesWithValidators = new HashSet<string>(validators.Select(v => v.RequestType));
+
+        var requestResponsePairs = handlers
+            .SelectMany(h => h.RequestHandlers.Select(r => (r.RequestType, ResponseType: r.ResponseType!, r.HasDataAnnotations)))
+            .Distinct()
+            .ToList();
+
+        foreach (var (requestType, responseType, hasDataAnnotations) in requestResponsePairs)
+        {
+            if (hasDataAnnotations || requestTypesWithValidators.Contains(requestType))
+            {
+                result.Add((requestType, responseType));
+            }
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -358,6 +499,15 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                              }
 
                              /// <summary>
+                             /// Adds only source-generated validators to the service collection.
+                             /// </summary>
+                             public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection AddGeneratedValidators(
+                                 this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)
+                             {
+                                 return services;
+                             }
+
+                             /// <summary>
                              /// Adds only source-generated pipeline behaviors to the service collection.
                              /// </summary>
                              public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection AddGeneratedBehaviors(
@@ -369,6 +519,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                              public static int RequestHandlerCount => 0;
                              public static int NotificationHandlerCount => 0;
                              public static int BehaviorCount => 0;
+                             public static int ValidatorCount => 0;
                          }
                      }
                      """;
@@ -379,7 +530,9 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
     private static void GenerateRegistrationCode(
         SourceProductionContext context,
         List<HandlerInfo> handlers,
-        List<ExpandedBehaviorInfo> expandedBehaviors)
+        List<ExpandedBehaviorInfo> expandedBehaviors,
+        List<ValidatorInfo> validators,
+        List<(string RequestType, string ResponseType)> requestTypesWithValidation)
     {
         var requestHandlers = handlers.SelectMany(h =>
             h.RequestHandlers.Select(r => (Handler: h, Interface: r))).ToList();
@@ -415,6 +568,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("        {");
         sb.AppendLine("            AddGeneratedRequestHandlers(services);");
         sb.AppendLine("            AddGeneratedNotificationHandlers(services);");
+        sb.AppendLine("            AddGeneratedValidators(services);");
         sb.AppendLine("            AddGeneratedBehaviors(services);");
         sb.AppendLine();
         sb.AppendLine("            // Register the source-generated mediator for zero-reflection dispatch");
@@ -466,20 +620,78 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("        }");
         sb.AppendLine();
 
+        // --- Validator registration ---
+        sb.AppendLine("        /// <summary>");
+        sb.AppendLine("        /// Adds only source-generated validators to the service collection.");
+        sb.AppendLine("        /// Registers custom validators and DataAnnotationsValidator for annotated request types.");
+        sb.AppendLine("        /// </summary>");
+        sb.AppendLine(
+            "        public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection AddGeneratedValidators(");
+        sb.AppendLine("            this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
+        sb.AppendLine("        {");
+
+        // Register discovered custom validators
+        if (validators.Count > 0)
+        {
+            foreach (var validator in validators)
+            {
+                sb.AppendLine($"            services.AddTransient<{validator.InterfaceType}, {validator.ClassName}>();");
+            }
+        }
+
+        // Register DataAnnotationsValidator for request types with DataAnnotation attributes
+        var requestTypesWithDataAnnotations = requestHandlers
+            .Where(rh => rh.Interface.HasDataAnnotations)
+            .Select(rh => rh.Interface.RequestType)
+            .Distinct()
+            .ToList();
+
+        if (requestTypesWithDataAnnotations.Count > 0)
+        {
+            foreach (var requestType in requestTypesWithDataAnnotations)
+            {
+                sb.AppendLine($"            services.AddTransient<global::MediatorLite.Validation.IValidator<{requestType}>, global::MediatorLite.Validation.DataAnnotationsValidator<{requestType}>>();");
+            }
+        }
+
+        sb.AppendLine("            return services;");
+        sb.AppendLine("        }");
+        sb.AppendLine();
+
         // --- Behavior registration ---
         sb.AppendLine("        /// <summary>");
         sb.AppendLine("        /// Adds only source-generated pipeline behaviors to the service collection.");
+        sb.AppendLine("        /// ValidationBehavior is registered first to ensure validation runs before other behaviors.");
         sb.AppendLine("        /// </summary>");
         sb.AppendLine(
             "        public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection AddGeneratedBehaviors(");
         sb.AppendLine("            this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
         sb.AppendLine("        {");
 
+        // Register ValidationBehavior FIRST for request types with validators
+        if (requestTypesWithValidation.Count > 0)
+        {
+            sb.AppendLine("            // Validation behaviors (registered first to ensure validation runs before other behaviors)");
+            foreach (var (requestType, responseType) in requestTypesWithValidation)
+            {
+                sb.AppendLine($"            services.AddTransient<global::MediatorLite.IPipelineBehavior<{requestType}, {responseType}>, global::MediatorLite.Validation.ValidationBehavior<{requestType}, {responseType}>>();");
+            }
+            sb.AppendLine();
+        }
+
+        // Then register other (non-validation) behaviors
         if (expandedBehaviors.Count > 0)
         {
-            foreach (var behavior in expandedBehaviors)
+            var nonValidationBehaviors = expandedBehaviors
+                .Where(b => !b.BehaviorTypeName.StartsWith("global::MediatorLite.Validation.ValidationBehavior<"))
+                .ToList();
+
+            if (nonValidationBehaviors.Count > 0)
             {
-                sb.AppendLine($"            services.AddTransient<{behavior.InterfaceType}, {behavior.BehaviorTypeName}>();");
+                foreach (var behavior in nonValidationBehaviors)
+                {
+                    sb.AppendLine($"            services.AddTransient<{behavior.InterfaceType}, {behavior.BehaviorTypeName}>();");
+                }
             }
         }
 
@@ -488,14 +700,21 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine();
 
         // --- Diagnostic counts ---
+        var totalValidatorCount = validators.Count + requestTypesWithDataAnnotations.Count;
+        var nonValidationBehaviorCount = expandedBehaviors
+            .Count(b => !b.BehaviorTypeName.StartsWith("global::MediatorLite.Validation.ValidationBehavior<"));
+
         sb.AppendLine($"        /// <summary>Number of request handlers discovered at compile time.</summary>");
         sb.AppendLine($"        public static int RequestHandlerCount => {requestHandlers.Count};");
         sb.AppendLine();
         sb.AppendLine($"        /// <summary>Number of notification handlers discovered at compile time.</summary>");
         sb.AppendLine($"        public static int NotificationHandlerCount => {notificationHandlers.Count};");
         sb.AppendLine();
-        sb.AppendLine($"        /// <summary>Number of pipeline behaviors registered at compile time.</summary>");
-        sb.AppendLine($"        public static int BehaviorCount => {expandedBehaviors.Count};");
+        sb.AppendLine($"        /// <summary>Number of pipeline behaviors registered at compile time (including validation behaviors).</summary>");
+        sb.AppendLine($"        public static int BehaviorCount => {nonValidationBehaviorCount + requestTypesWithValidation.Count};");
+        sb.AppendLine();
+        sb.AppendLine($"        /// <summary>Number of validators registered at compile time.</summary>");
+        sb.AppendLine($"        public static int ValidatorCount => {totalValidatorCount};");
 
         sb.AppendLine("    }");
         sb.AppendLine("}");
@@ -898,7 +1117,8 @@ internal sealed record HandlerInfo(
 internal sealed record HandlerInterfaceInfo(
     string InterfaceType,
     string RequestType,
-    string? ResponseType);
+    string? ResponseType,
+    bool HasDataAnnotations = false);
 
 internal sealed record NotificationHandlerInterfaceInfo(
     string InterfaceType,
@@ -927,3 +1147,9 @@ internal sealed record ExpandedBehaviorInfo(
     string RequestType,
     string ResponseType,
     string InterfaceType);
+
+internal sealed record ValidatorInfo(
+    string ClassName,
+    string Namespace,
+    string InterfaceType,
+    string RequestType);

@@ -1,5 +1,9 @@
 namespace MediatorLite.Tests.SourceGeneration;
 
+using System.ComponentModel.DataAnnotations;
+using MediatorLite.Validation;
+using MediatorValidationResult = MediatorLite.Validation.ValidationResult;
+
 #region Request/Response Types
 
 public record GetUserByIdQuery(int Id) : IRequest<UserDto>;
@@ -305,6 +309,84 @@ public class ShortCircuitBehavior : IPipelineBehavior<ComputeValueQuery, int>
         CancellationToken cancellationToken = default)
     {
         return ValueTask.FromResult(999);
+    }
+}
+
+#endregion
+
+#region Validation Types
+
+/// <summary>
+/// Request with DataAnnotation attributes for testing source-generated validation.
+/// Source generator should auto-register DataAnnotationsValidator for this type.
+/// </summary>
+public sealed record ValidatedCommand : IRequest<string>
+{
+    [Required(ErrorMessage = "Name is required")]
+    [StringLength(50, MinimumLength = 2, ErrorMessage = "Name must be between 2 and 50 characters")]
+    public required string Name { get; init; }
+
+    [Range(1, 100, ErrorMessage = "Value must be between 1 and 100")]
+    public int Value { get; init; }
+}
+
+/// <summary>
+/// Handler for ValidatedCommand - tracks whether it was executed.
+/// </summary>
+public class ValidatedCommandHandler : IRequestHandler<ValidatedCommand, string>
+{
+    public static bool WasExecuted { get; set; }
+    public static void Reset() => WasExecuted = false;
+
+    public ValueTask<string> HandleAsync(ValidatedCommand request, CancellationToken cancellationToken = default)
+    {
+        WasExecuted = true;
+        return ValueTask.FromResult($"Processed: {request.Name}");
+    }
+}
+
+/// <summary>
+/// Custom validator for ValidatedCommand - discovered by source generator.
+/// </summary>
+public class ValidatedCommandCustomValidator : IValidator<ValidatedCommand>
+{
+    public static bool WasExecuted { get; set; }
+    public static void Reset() => WasExecuted = false;
+
+    public ValueTask<MediatorValidationResult> ValidateAsync(ValidatedCommand request, CancellationToken cancellationToken = default)
+    {
+        WasExecuted = true;
+
+        if (request.Name.Contains("blocked"))
+        {
+            return ValueTask.FromResult(MediatorValidationResult.Failure(
+                new ValidationError("Name", "Name cannot contain 'blocked'")));
+        }
+
+        return ValueTask.FromResult(MediatorValidationResult.Success);
+    }
+}
+
+/// <summary>
+/// Behavior for tracking execution order in tests.
+/// Marked as Skip so it's not auto-registered - each test controls its own registration.
+/// </summary>
+[MediatorGeneration(Skip = true)]
+public class ExecutionOrderTrackingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
+    where TRequest : IRequest<TResponse>
+{
+    public static List<string> ExecutionLog { get; } = [];
+    public static void Reset() => ExecutionLog.Clear();
+
+    public async ValueTask<TResponse> HandleAsync(
+        TRequest request,
+        RequestHandlerDelegate<TResponse> next,
+        CancellationToken cancellationToken = default)
+    {
+        ExecutionLog.Add($"TrackingBehavior:Before:{typeof(TRequest).Name}");
+        var result = await next();
+        ExecutionLog.Add($"TrackingBehavior:After:{typeof(TRequest).Name}");
+        return result;
     }
 }
 
