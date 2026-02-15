@@ -5,15 +5,16 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
-    
     <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
     <IsRoslynComponent>true</IsRoslynComponent>
-    
     <PackageId>MediatorLite.SourceGeneration</PackageId>
     <Description>Source generators for MediatorLite - compile-time handler discovery with zero runtime reflection.</Description>
     <PackageTags>mediator;source-generator;roslyn;analyzers</PackageTags>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
+
+    <!-- Disable README for source generator package -->
+    <PackageReadmeFile></PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
