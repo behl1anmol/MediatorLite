@@ -128,24 +128,6 @@ public class ServiceCollectionExtensionsTests
         Assert.NotNull(mediator);
     }
 
-    [Fact]
-    public void AddMediatorLiteCore_IsAliasForAddMediatorLite()
-    {
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddMediatorLiteCore(options =>
-        {
-            options.NotificationExecutionStrategy = NotificationExecutionStrategy.Parallel;
-        });
-
-        var provider = services.BuildServiceProvider();
-        var mediator = provider.GetRequiredService<IMediator>();
-        Assert.NotNull(mediator);
-
-        var options = provider.GetRequiredService<MediatorOptions>();
-        Assert.Equal(NotificationExecutionStrategy.Parallel, options.NotificationExecutionStrategy);
-    }
-
     // Test types
     public class TestRequest : IRequest<TestResponse> { }
     public class TestResponse { }

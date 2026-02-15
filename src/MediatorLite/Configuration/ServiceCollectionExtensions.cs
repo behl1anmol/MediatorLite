@@ -73,27 +73,6 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Adds MediatorLite runtime services using source-generated handler registrations.
-    /// Alias for <see cref="AddMediatorLite"/> - call this after AddGeneratedHandlers().
-    /// </summary>
-    /// <param name="services">The <see cref="IServiceCollection"/> to add services to.</param>
-    /// <param name="configure">An optional action to configure <see cref="MediatorOptions"/>.</param>
-    /// <returns>The <see cref="IServiceCollection"/> for chaining.</returns>
-    /// <example>
-    /// <code>
-    /// services
-    ///     .AddGeneratedHandlers()  // Source-generated
-    ///     .AddMediatorLiteCore();
-    /// </code>
-    /// </example>
-    public static IServiceCollection AddMediatorLiteCore(
-        this IServiceCollection services,
-        Action<MediatorOptions>? configure = null)
-    {
-        return AddMediatorLite(services, configure);
-    }
-
-    /// <summary>
     /// Adds a pipeline behavior to the service collection.
     /// </summary>
     /// <typeparam name="TBehavior">The behavior type.</typeparam>

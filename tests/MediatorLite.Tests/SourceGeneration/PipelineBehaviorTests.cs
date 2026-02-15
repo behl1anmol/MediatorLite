@@ -22,7 +22,7 @@ public class PipelineBehaviorTests
         services.AddGeneratedHandlers();
         services.AddTransient<IPipelineBehavior<ComputeValueQuery, int>, AddOneBehavior>();
         services.AddTransient<IPipelineBehavior<ComputeValueQuery, int>, MultiplyByTwoBehavior>();
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -44,7 +44,7 @@ public class PipelineBehaviorTests
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
         services.AddTransient(typeof(IPipelineBehavior<,>), typeof(GenericLoggingBehavior<,>));
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -65,7 +65,7 @@ public class PipelineBehaviorTests
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
         services.AddTransient<IPipelineBehavior<ComputeValueQuery, int>, ShortCircuitBehavior>();
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -90,7 +90,7 @@ public class PipelineBehaviorTests
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
         services.AddTransient(typeof(IPipelineBehavior<,>), typeof(GenericLoggingBehavior<,>));
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -123,7 +123,7 @@ public class PipelineBehaviorTests
         services.AddGeneratedHandlers();
         services.AddTransient(typeof(IPipelineBehavior<,>), typeof(GenericLoggingBehavior<,>));
         services.AddTransient<IPipelineBehavior<ComputeValueQuery, int>, AddOneBehavior>();
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -150,7 +150,7 @@ public class PipelineBehaviorTests
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
         services.AddTransient(typeof(IPipelineBehavior<,>), typeof(GenericLoggingBehavior<,>));
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -196,7 +196,7 @@ public class PipelineBehaviorTests
         // Arrange - No behaviors registered
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -216,7 +216,7 @@ public class PipelineBehaviorTests
         // Verify that source-gen dispatch resolves the handler from DI (not just calling it directly)
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();

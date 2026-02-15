@@ -2,7 +2,6 @@ using FluentAssertions;
 using MediatorLite.Generated;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
-using Unit = MediatorLite.Unit;
 
 namespace MediatorLite.Tests.SourceGeneration;
 
@@ -35,7 +34,7 @@ public class MediatorTests
         // Arrange
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -54,7 +53,7 @@ public class MediatorTests
         // Arrange
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -77,7 +76,7 @@ public class MediatorTests
 
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -98,7 +97,7 @@ public class MediatorTests
         // Arrange
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -116,7 +115,7 @@ public class MediatorTests
         // Arrange
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -136,7 +135,7 @@ public class MediatorTests
         // Arrange
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -153,7 +152,7 @@ public class MediatorTests
         // Arrange - Use source-gen registration
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -183,7 +182,7 @@ public class MediatorTests
 
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();

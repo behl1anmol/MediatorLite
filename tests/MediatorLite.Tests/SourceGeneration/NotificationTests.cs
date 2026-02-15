@@ -22,7 +22,7 @@ public class NotificationTests
 
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -67,11 +67,11 @@ public class NotificationTests
     public async Task PublishAsync_UsesSourceGenHandlerOrder()
     {
         // This test verifies that source-generated TryGetHandlerOrder is used
-        
+
         // Arrange
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -91,7 +91,7 @@ public class NotificationTests
     {
         // Arrange - Create a notification type that has no handlers registered
         var services = new ServiceCollection();
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -110,7 +110,7 @@ public class NotificationTests
 
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -131,7 +131,7 @@ public class NotificationTests
         // Arrange
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -155,7 +155,7 @@ public class NotificationTests
 
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -179,7 +179,7 @@ public class NotificationTests
 
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -279,7 +279,7 @@ public class NotificationTests
 
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddMediatorLiteCore();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();

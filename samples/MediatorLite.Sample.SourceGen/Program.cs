@@ -34,7 +34,7 @@ services.AddLogging(builder =>
 });
 
 // Add MediatorLite core services
-services.AddMediatorLiteCore(options =>
+services.AddMediatorLite(options =>
 {
     options.EnableBuiltInLogging = true;
     options.EnableTracing = true;
