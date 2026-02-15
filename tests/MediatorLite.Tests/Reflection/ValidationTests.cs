@@ -5,7 +5,7 @@ using System.ComponentModel.DataAnnotations;
 using Xunit;
 using MediatorValidationResult = MediatorLite.Validation.ValidationResult;
 
-namespace MediatorLite.Tests;
+namespace MediatorLite.Tests.Reflection;
 
 public class ValidationTests
 {
@@ -20,6 +20,7 @@ public class ValidationTests
         [property: EmailAddress]
         string Email) : IRequest<int>;
 
+    [MediatorGeneration(Skip = true)]
     public class CreateUserCommandHandler : IRequestHandler<CreateUserCommand, int>
     {
         public ValueTask<int> HandleAsync(CreateUserCommand request, CancellationToken cancellationToken = default)
@@ -28,6 +29,7 @@ public class ValidationTests
         }
     }
 
+    [MediatorGeneration(Skip = true)]
     public class CustomValidator : IValidator<CreateUserCommand>
     {
         public ValueTask<MediatorValidationResult> ValidateAsync(CreateUserCommand request, CancellationToken cancellationToken = default)
@@ -52,10 +54,7 @@ public class ValidationTests
         services.AddTransient<IRequestHandler<CreateUserCommand, int>, CreateUserCommandHandler>();
         services.AddTransient<IValidator<CreateUserCommand>, DataAnnotationsValidator<CreateUserCommand>>();
         services.AddTransient<IPipelineBehavior<CreateUserCommand, int>, ValidationBehavior<CreateUserCommand, int>>();
-        services.AddMediatorLite(options =>
-        {
-            options.AddBehavior<ValidationBehavior<CreateUserCommand, int>>();
-        });
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -76,10 +75,7 @@ public class ValidationTests
         services.AddTransient<IRequestHandler<CreateUserCommand, int>, CreateUserCommandHandler>();
         services.AddTransient<IValidator<CreateUserCommand>, DataAnnotationsValidator<CreateUserCommand>>();
         services.AddTransient<IPipelineBehavior<CreateUserCommand, int>, ValidationBehavior<CreateUserCommand, int>>();
-        services.AddMediatorLite(options =>
-        {
-            options.AddBehavior<ValidationBehavior<CreateUserCommand, int>>();
-        });
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -98,10 +94,7 @@ public class ValidationTests
         services.AddTransient<IRequestHandler<CreateUserCommand, int>, CreateUserCommandHandler>();
         services.AddTransient<IValidator<CreateUserCommand>, CustomValidator>();
         services.AddTransient<IPipelineBehavior<CreateUserCommand, int>, ValidationBehavior<CreateUserCommand, int>>();
-        services.AddMediatorLite(options =>
-        {
-            options.AddBehavior<ValidationBehavior<CreateUserCommand, int>>();
-        });
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();

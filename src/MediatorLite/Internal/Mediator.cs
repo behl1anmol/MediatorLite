@@ -2,20 +2,30 @@ using MediatorLite.Configuration;
 using MediatorLite.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Buffers;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Reflection;
-using System.Runtime.CompilerServices;
 
 namespace MediatorLite.Internal;
 
 /// <summary>
-/// Internal implementation of the mediator.
+/// Internal implementation of the mediator with source-generated dispatch.
+/// Uses source-generated dispatch for compile-time discovered types (zero reflection).
+/// Falls back to minimal reflection only for dynamically registered types not known at compile time.
 /// </summary>
 internal sealed class Mediator : IMediator
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<Mediator> _logger;
     private readonly MediatorOptions _options;
+    private readonly ISourceGeneratedMediator? _sourceGeneratedMediator;
+
+    // Reflection fallback caches (used only when source-gen is not available)
+    private static readonly ConcurrentDictionary<(Type, Type), Type> _handlerTypeCache = new();
+    private static readonly ConcurrentDictionary<(Type, Type), Type> _behaviorTypeCache = new();
+    private static readonly ConcurrentDictionary<Type, int> _handlerOrderCache = new();
+    private static readonly ConcurrentDictionary<Type, (NotificationExecutionStrategy, NotificationErrorStrategy)?> _notificationOptionsCache = new();
 
     public Mediator(
         IServiceProvider serviceProvider,
@@ -25,9 +35,11 @@ internal sealed class Mediator : IMediator
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options ?? throw new ArgumentNullException(nameof(options));
+
+        _sourceGeneratedMediator = serviceProvider.GetService<ISourceGeneratedMediator>();
     }
 
-    public async ValueTask<TResponse> SendAsync<TResponse>(
+    public async Task<TResponse> SendAsync<TResponse>(
         IRequest<TResponse> request,
         CancellationToken cancellationToken = default)
     {
@@ -36,7 +48,6 @@ internal sealed class Mediator : IMediator
         var requestType = request.GetType();
         var requestTypeName = requestType.Name;
 
-        // Start OpenTelemetry activity if tracing is enabled
         using var activity = _options.EnableTracing
             ? MediatorActivitySource.Source.StartActivity(
                 $"{MediatorActivitySource.ActivityNames.SendRequest} {requestTypeName}",
@@ -46,7 +57,6 @@ internal sealed class Mediator : IMediator
         activity?.SetTag(MediatorActivitySource.Tags.RequestType, requestType.FullName);
         activity?.SetTag(MediatorActivitySource.Tags.ResponseType, typeof(TResponse).FullName);
 
-        // Log if enabled
         if (_options.EnableBuiltInLogging)
         {
             _logger.Log(_options.DefaultLogLevel, "Sending request {RequestType}", requestTypeName);
@@ -54,27 +64,66 @@ internal sealed class Mediator : IMediator
 
         try
         {
-            // Get the handler type
-            var handlerType = typeof(IRequestHandler<,>).MakeGenericType(requestType, typeof(TResponse));
+            // Resolve behaviors via source-gen (no MakeGenericType needed)
+            var behaviors = _sourceGeneratedMediator?.TryResolveBehaviors(
+                _serviceProvider, requestType, typeof(TResponse));
 
-            // Resolve the handler
-            var handler = _serviceProvider.GetService(handlerType)
-                ?? throw new InvalidOperationException(
+            // Fallback: resolve behaviors from DI when source gen is not available
+            behaviors ??= ResolveBehaviorsFromDI(requestType, typeof(TResponse));
+
+            // Fast path: no behaviors - use direct dispatch
+            if (behaviors.Count == 0)
+            {
+                // Try source-gen dispatch first
+                var sourceGenResult = _sourceGeneratedMediator?.TrySendAsync<TResponse>(
+                    _serviceProvider, request, cancellationToken);
+
+                if (sourceGenResult.HasValue)
+                {
+                    var response = await sourceGenResult.Value;
+
+                    if (_options.EnableBuiltInLogging)
+                    {
+                        _logger.Log(_options.DefaultLogLevel,
+                            "Request {RequestType} handled successfully (source-generated)",
+                            requestTypeName);
+                    }
+
+                    return response;
+                }
+
+                // DI fallback: resolve handler using reflection
+                var fallbackResponse = InvokeHandlerFromDI<TResponse>(requestType, request, cancellationToken);
+                if (fallbackResponse != null)
+                {
+                    var response = await fallbackResponse.Value;
+
+                    if (_options.EnableBuiltInLogging)
+                    {
+                        _logger.Log(_options.DefaultLogLevel,
+                            "Request {RequestType} handled successfully (DI fallback)",
+                            requestTypeName);
+                    }
+
+                    return response;
+                }
+
+                throw new InvalidOperationException(
                     $"No handler registered for request type {requestType.FullName}. " +
-                    $"Ensure a handler implementing IRequestHandler<{requestTypeName}, {typeof(TResponse).Name}> is registered.");
+                    $"Ensure a handler implementing IRequestHandler<{requestTypeName}, {typeof(TResponse).Name}> " +
+                    "is registered via DI or AddGeneratedHandlers() is called.");
+            }
 
-            // Get pipeline behaviors
-            var behaviors = GetPipelineBehaviors<TResponse>(requestType);
-
-            // Build the pipeline
-            var response = await ExecutePipeline(request, handler, behaviors, cancellationToken);
+            // Build and execute the pipeline with behaviors using source-gen dispatch
+            var result = await ExecutePipeline(request, behaviors, cancellationToken);
 
             if (_options.EnableBuiltInLogging)
             {
-                _logger.Log(_options.DefaultLogLevel, "Request {RequestType} handled successfully", requestTypeName);
+                _logger.Log(_options.DefaultLogLevel, "Request {RequestType} handled successfully",
+                    requestTypeName);
             }
 
-            return response;
+            return result;
         }
         catch (Exception ex)
         {
@@ -90,7 +139,7 @@ internal sealed class Mediator : IMediator
         }
     }
 
-    public async ValueTask PublishAsync<TNotification>(
+    public async Task PublishAsync<TNotification>(
         TNotification notification,
         CancellationToken cancellationToken = default)
         where TNotification : INotification
@@ -100,7 +149,6 @@ internal sealed class Mediator : IMediator
         var notificationType = typeof(TNotification);
         var notificationTypeName = notificationType.Name;
 
-        // Start OpenTelemetry activity if tracing is enabled
         using var activity = _options.EnableTracing
             ? MediatorActivitySource.Source.StartActivity(
                 $"{MediatorActivitySource.ActivityNames.PublishNotification} {notificationTypeName}",
@@ -111,13 +159,12 @@ internal sealed class Mediator : IMediator
 
         if (_options.EnableBuiltInLogging)
         {
-            _logger.Log(_options.DefaultLogLevel, "Publishing notification {NotificationType}", notificationTypeName);
+            _logger.Log(_options.DefaultLogLevel, "Publishing notification {NotificationType}",
+                notificationTypeName);
         }
 
-        // Get handlers
-        var handlers = _serviceProvider
-            .GetServices<INotificationHandler<TNotification>>()
-            .ToList();
+        // Get handlers from DI - no MakeGenericType needed since TNotification is compile-time resolved
+        var handlers = _serviceProvider.GetServices<INotificationHandler<TNotification>>().ToList();
 
         activity?.SetTag(MediatorActivitySource.Tags.HandlerCount, handlers.Count);
 
@@ -125,26 +172,29 @@ internal sealed class Mediator : IMediator
         {
             if (_options.EnableBuiltInLogging)
             {
-                _logger.Log(_options.DefaultLogLevel, "No handlers registered for notification {NotificationType}", notificationTypeName);
+                _logger.Log(_options.DefaultLogLevel,
+                    "No handlers registered for notification {NotificationType}", notificationTypeName);
             }
             return;
         }
 
-        // Order handlers by attribute if present
+        // Order handlers
         var orderedHandlers = OrderHandlers(handlers);
 
-        // Get execution options (check for per-notification override)
+        // Get execution options
         var (executionStrategy, errorStrategy) = GetNotificationOptions(notificationType);
 
         activity?.SetTag(MediatorActivitySource.Tags.ExecutionStrategy, executionStrategy.ToString());
 
         try
         {
-            await ExecuteNotificationHandlers(notification, orderedHandlers, executionStrategy, errorStrategy, cancellationToken);
+            await ExecuteNotificationHandlers(notification, orderedHandlers, executionStrategy,
+                errorStrategy, cancellationToken);
 
             if (_options.EnableBuiltInLogging)
             {
-                _logger.Log(_options.DefaultLogLevel, "Notification {NotificationType} published to {HandlerCount} handlers",
+                _logger.Log(_options.DefaultLogLevel,
+                    "Notification {NotificationType} published to {HandlerCount} handlers",
                     notificationTypeName, handlers.Count);
             }
         }
@@ -155,92 +205,45 @@ internal sealed class Mediator : IMediator
 
             if (_options.EnableBuiltInLogging)
             {
-                _logger.LogError(ex, "Error publishing notification {NotificationType}", notificationTypeName);
+                _logger.LogError(ex, "Error publishing notification {NotificationType}",
+                    notificationTypeName);
             }
 
             throw;
         }
     }
 
-    private List<object> GetPipelineBehaviors<TResponse>(Type requestType)
-    {
-        var behaviors = new List<object>();
-        var responseType = typeof(TResponse);
-        
-        // Resolve behaviors registered directly with the interface type
-        var behaviorInterfaceType = typeof(IPipelineBehavior<,>).MakeGenericType(requestType, responseType);
-        var interfaceBehaviors = _serviceProvider.GetServices(behaviorInterfaceType);
-        foreach (var behavior in interfaceBehaviors)
-        {
-            if (behavior != null)
-            {
-                behaviors.Add(behavior);
-            }
-        }
-
-        // Also resolve behaviors registered via options
-        foreach (var behaviorType in _options.BehaviorTypes)
-        {
-            Type closedBehaviorType;
-
-            if (behaviorType.IsGenericTypeDefinition)
-            {
-                try
-                {
-                    closedBehaviorType = behaviorType.MakeGenericType(requestType, responseType);
-                }
-                catch (ArgumentException)
-                {
-                    // Generic constraints not satisfied, skip this behavior
-                    continue;
-                }
-            }
-            else
-            {
-                closedBehaviorType = behaviorType;
-            }
-
-            // Check if this behavior type was already resolved via interface
-            if (behaviors.Any(b => b.GetType() == closedBehaviorType))
-            {
-                continue;
-            }
-
-            var behavior = _serviceProvider.GetService(closedBehaviorType);
-            if (behavior != null)
-            {
-                behaviors.Add(behavior);
-            }
-        }
-
-        return behaviors;
-    }
-
+    /// <summary>
+    /// Executes the pipeline with behaviors using source-generated typed dispatch.
+    /// </summary>
     private async ValueTask<TResponse> ExecutePipeline<TResponse>(
         IRequest<TResponse> request,
-        object handler,
         List<object> behaviors,
         CancellationToken cancellationToken)
     {
         var requestType = request.GetType();
-        
-        // Get the handler interface type for proper method resolution
-        var handlerInterfaceType = typeof(IRequestHandler<,>).MakeGenericType(requestType, typeof(TResponse));
 
-        // Build the handler delegate
+        // Build the innermost handler delegate
         RequestHandlerDelegate<TResponse> handlerDelegate = () =>
         {
-            // Find the HandleAsync method on the interface, not the concrete type
-            // This ensures we get the ValueTask<TResponse> version, not the shadowed ValueTask version
-            var interfaceMap = handler.GetType().GetInterfaceMap(handlerInterfaceType);
-            var handleAsyncIndex = Array.FindIndex(interfaceMap.InterfaceMethods, 
-                m => m.Name == "HandleAsync" && m.ReturnType == typeof(ValueTask<TResponse>));
-            
-            var method = handleAsyncIndex >= 0 
-                ? interfaceMap.TargetMethods[handleAsyncIndex] 
-                : handlerInterfaceType.GetMethod("HandleAsync");
-                
-            return (ValueTask<TResponse>)method!.Invoke(handler, [request, cancellationToken])!;
+            // Try source-gen dispatch first
+            var sourceGenResult = _sourceGeneratedMediator?.TryInvokeHandlerAsync<TResponse>(
+                _serviceProvider, request, cancellationToken);
+
+            if (sourceGenResult.HasValue)
+            {
+                return sourceGenResult.Value;
+            }
+
+            // DI fallback: resolve handler using reflection
+            var fallbackResult = InvokeHandlerFromDI<TResponse>(requestType, request, cancellationToken);
+            if (fallbackResult != null)
+            {
+                return fallbackResult.Value;
+            }
+
+            throw new InvalidOperationException(
+                $"No handler registered for request type {requestType.FullName}.");
         };
 
         // Wrap with behaviors (in reverse order so first registered runs first)
@@ -250,53 +253,178 @@ internal sealed class Mediator : IMediator
             var currentDelegate = handlerDelegate;
 
             handlerDelegate = () =>
-            {
-                var behaviorInterfaceType = typeof(IPipelineBehavior<,>).MakeGenericType(requestType, typeof(TResponse));
-                var interfaceMap = behavior.GetType().GetInterfaceMap(behaviorInterfaceType);
-                var handleAsyncIndex = Array.FindIndex(interfaceMap.InterfaceMethods,
-                    m => m.Name == "HandleAsync" && m.GetParameters().Length == 3);
-                    
-                var method = handleAsyncIndex >= 0
-                    ? interfaceMap.TargetMethods[handleAsyncIndex]
-                    : behaviorInterfaceType.GetMethod("HandleAsync");
-
-                return (ValueTask<TResponse>)method!.Invoke(behavior, [request, currentDelegate, cancellationToken])!;
-            };
+                InvokeBehaviorAsync<TResponse>(behavior, requestType, request, currentDelegate,
+                    cancellationToken);
         }
 
+        return await handlerDelegate();
+    }
+
+    /// <summary>
+    /// Invokes a behavior using source-generated typed dispatch (zero reflection).
+    /// Falls back to reflection-based invocation for dynamically registered behaviors.
+    /// </summary>
+    [DebuggerStepThrough]
+    private ValueTask<TResponse> InvokeBehaviorAsync<TResponse>(
+        object behavior,
+        Type requestType,
+        object request,
+        RequestHandlerDelegate<TResponse> next,
+        CancellationToken cancellationToken)
+    {
+        // Try source-generated typed invocation first (zero reflection)
+        if (_sourceGeneratedMediator != null)
+        {
+            try
+            {
+                return _sourceGeneratedMediator.InvokeBehavior<TResponse>(
+                    requestType,
+                    behavior.GetType(),
+                    behavior,
+                    request,
+                    next,
+                    cancellationToken);
+            }
+            catch (InvalidOperationException)
+            {
+                // Behavior type not known at compile-time, fall through to reflection
+            }
+        }
+
+        // Fallback: invoke behavior via reflection for dynamically registered behaviors
+        var pipelineInterface = behavior.GetType()
+            .GetInterfaces()
+            .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IPipelineBehavior<,>));
+
+        if (pipelineInterface != null)
+        {
+            var method = pipelineInterface.GetMethod("HandleAsync")!;
+            try
+            {
+                return (ValueTask<TResponse>)method.Invoke(behavior, [request, next, cancellationToken])!;
+            }
+            catch (TargetInvocationException ex) when (ex.InnerException != null)
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+                throw; // Unreachable
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Cannot invoke behavior {behavior.GetType().Name} for request type {requestType.Name}. " +
+            "Ensure the behavior implements IPipelineBehavior<,>.");
+    }
+
+    /// <summary>
+    /// Resolves pipeline behaviors from DI using reflection as a fallback
+    /// when the source generator is not available.
+    /// </summary>
+    private List<object> ResolveBehaviorsFromDI(Type requestType, Type responseType)
+    {
+        var behaviorInterfaceType = _behaviorTypeCache.GetOrAdd(
+            (requestType, responseType),
+            static key => typeof(IPipelineBehavior<,>).MakeGenericType(key.Item1, key.Item2));
+
+        var enumerableType = typeof(IEnumerable<>).MakeGenericType(behaviorInterfaceType);
+        var services = (System.Collections.IEnumerable)_serviceProvider.GetRequiredService(enumerableType);
+
+        var behaviors = new List<object>();
+        foreach (var service in services)
+        {
+            if (service != null) behaviors.Add(service);
+        }
+        return behaviors;
+    }
+
+    /// <summary>
+    /// Attempts to invoke a handler resolved from DI using reflection.
+    /// Returns null if no handler is registered.
+    /// </summary>
+    private ValueTask<TResponse>? InvokeHandlerFromDI<TResponse>(
+        Type requestType, object request, CancellationToken cancellationToken)
+    {
+        var handlerInterfaceType = _handlerTypeCache.GetOrAdd(
+            (requestType, typeof(TResponse)),
+            static key => typeof(IRequestHandler<,>).MakeGenericType(key.Item1, key.Item2));
+
+        var handler = _serviceProvider.GetService(handlerInterfaceType);
+        if (handler == null) return null;
+
+        var method = handlerInterfaceType.GetMethod("HandleAsync")!;
         try
         {
-            return await handlerDelegate();
+            return (ValueTask<TResponse>)method.Invoke(handler, [request, cancellationToken])!;
         }
-        catch (TargetInvocationException tie) when (tie.InnerException != null)
+        catch (TargetInvocationException ex) when (ex.InnerException != null)
         {
-            // Unwrap reflection-induced exception wrapping
-            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(tie.InnerException).Throw();
-            throw; // Unreachable but required for compiler
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+            throw; // Unreachable
         }
     }
 
-    private static List<INotificationHandler<TNotification>> OrderHandlers<TNotification>(
+    private List<INotificationHandler<TNotification>> OrderHandlers<TNotification>(
         List<INotificationHandler<TNotification>> handlers)
         where TNotification : INotification
     {
-        return [.. handlers.OrderBy(h =>
-        {
-            var orderAttr = h.GetType().GetCustomAttribute<NotificationHandlerOrderAttribute>();
-            return orderAttr?.Order ?? 0;
-        })];
-    }
+        if (handlers.Count <= 1)
+            return handlers;
 
-    private (NotificationExecutionStrategy, NotificationErrorStrategy) GetNotificationOptions(Type notificationType)
-    {
-        var attr = notificationType.GetCustomAttribute<NotificationOptionsAttribute>();
-
-        if (attr != null && attr.OverrideGlobal)
+        // Check if any handler has a non-default order to avoid unnecessary sorting
+        bool needsSort = false;
+        for (int i = 0; i < handlers.Count; i++)
         {
-            return (attr.ExecutionStrategy, attr.ErrorStrategy);
+            if (GetHandlerOrder(handlers[i].GetType()) != 0)
+            {
+                needsSort = true;
+                break;
+            }
         }
 
-        return (_options.NotificationExecutionStrategy, _options.NotificationErrorStrategy);
+        if (!needsSort)
+            return handlers;
+
+        return [.. handlers.OrderBy(h => GetHandlerOrder(h.GetType()))];
+    }
+
+    private int GetHandlerOrder(Type handlerType)
+    {
+        // Try source-generated order first
+        var sourceGenOrder = _sourceGeneratedMediator?.TryGetHandlerOrder(handlerType);
+        if (sourceGenOrder.HasValue)
+        {
+            return sourceGenOrder.Value;
+        }
+
+        // Fallback to cached attribute reflection for dynamically registered handlers
+        return _handlerOrderCache.GetOrAdd(handlerType, static type =>
+        {
+            var orderAttr = type.GetCustomAttribute<NotificationHandlerOrderAttribute>();
+            return orderAttr?.Order ?? 0;
+        });
+    }
+
+    private (NotificationExecutionStrategy, NotificationErrorStrategy) GetNotificationOptions(
+        Type notificationType)
+    {
+        // Try source-generated options first
+        var cachedOptions = _sourceGeneratedMediator?.TryGetNotificationOptions(notificationType);
+        if (cachedOptions.HasValue)
+        {
+            return cachedOptions.Value;
+        }
+
+        // Fallback to cached attribute reflection for dynamically defined notifications
+        var attrResult = _notificationOptionsCache.GetOrAdd(notificationType, type =>
+        {
+            var attr = type.GetCustomAttribute<NotificationOptionsAttribute>();
+            if (attr != null && attr.OverrideGlobal)
+            {
+                return (attr.ExecutionStrategy, attr.ErrorStrategy);
+            }
+            return null;
+        });
+
+        return attrResult ?? (_options.NotificationExecutionStrategy, _options.NotificationErrorStrategy);
     }
 
     private async ValueTask ExecuteNotificationHandlers<TNotification>(
@@ -314,11 +442,11 @@ internal sealed class Mediator : IMediator
                 break;
 
             case NotificationExecutionStrategy.Parallel:
-                await ExecuteParallel(notification, handlers, errorStrategy, cancellationToken);
+                await ExecuteParallel(notification, handlers, cancellationToken);
                 break;
 
             case NotificationExecutionStrategy.StopOnFirst:
-                await ExecuteStopOnFirst(notification, handlers, cancellationToken);
+                await ExecuteStopOnFirst(notification, handlers, errorStrategy, cancellationToken);
                 break;
 
             default:
@@ -326,14 +454,14 @@ internal sealed class Mediator : IMediator
         }
     }
 
-    private async ValueTask ExecuteSequential<TNotification>(
+    private static async ValueTask ExecuteSequential<TNotification>(
         TNotification notification,
         List<INotificationHandler<TNotification>> handlers,
         NotificationErrorStrategy errorStrategy,
         CancellationToken cancellationToken)
         where TNotification : INotification
     {
-        var exceptions = new List<Exception>();
+        List<Exception>? exceptions = null;
 
         foreach (var handler in handlers)
         {
@@ -353,11 +481,11 @@ internal sealed class Mediator : IMediator
                     throw;
                 }
 
-                exceptions.Add(ex);
+                (exceptions ??= []).Add(ex);
             }
         }
 
-        if (exceptions.Count > 0)
+        if (exceptions is { Count: > 0 })
         {
             throw new AggregateException(
                 $"One or more notification handlers for {typeof(TNotification).Name} threw exceptions.",
@@ -365,73 +493,99 @@ internal sealed class Mediator : IMediator
         }
     }
 
-    private async ValueTask ExecuteParallel<TNotification>(
+    private static async ValueTask ExecuteParallel<TNotification>(
         TNotification notification,
         List<INotificationHandler<TNotification>> handlers,
-        NotificationErrorStrategy errorStrategy,
         CancellationToken cancellationToken)
         where TNotification : INotification
     {
-        // Wrap each handler invocation to catch synchronous exceptions
-        // that would otherwise escape the LINQ Select before Task.WhenAll
-        var tasks = new List<Task>(handlers.Count);
-        foreach (var handler in handlers)
-        {
-            try
-            {
-                tasks.Add(handler.HandleAsync(notification, cancellationToken).AsTask());
-            }
-            catch (Exception ex)
-            {
-                // Synchronous exception - wrap in a faulted task
-                tasks.Add(Task.FromException(ex));
-            }
-        }
+        var count = handlers.Count;
 
-        if (errorStrategy == NotificationErrorStrategy.StopOnFirstError)
+        var rentedArray = ArrayPool<Task>.Shared.Rent(count);
+        try
         {
-            await Task.WhenAll(tasks);
-        }
-        else
-        {
-            var exceptions = new List<Exception>();
+            for (int i = 0; i < count; i++)
+            {
+                try
+                {
+                    rentedArray[i] = handlers[i].HandleAsync(notification, cancellationToken).AsTask();
+                }
+                catch (Exception ex)
+                {
+                    rentedArray[i] = Task.FromException(ex);
+                }
+            }
+
+            var tasksSpan = rentedArray.AsSpan(0, count);
+            List<Exception>? exceptions = null;
 
             try
             {
-                await Task.WhenAll(tasks);
+                await Task.WhenAll(tasksSpan.ToArray());
             }
             catch
             {
-                // Collect all exceptions from faulted tasks
-                foreach (var task in tasks)
+                for (int i = 0; i < count; i++)
                 {
+                    var task = rentedArray[i];
                     if (task.IsFaulted && task.Exception != null)
                     {
-                        exceptions.AddRange(task.Exception.InnerExceptions);
+                        (exceptions ??= []).AddRange(task.Exception.InnerExceptions);
                     }
                 }
             }
 
-            if (exceptions.Count > 0)
+            if (exceptions is { Count: > 0 })
             {
                 throw new AggregateException(
                     $"One or more notification handlers for {typeof(TNotification).Name} threw exceptions.",
                     exceptions);
             }
         }
+        finally
+        {
+            Array.Clear(rentedArray, 0, count);
+            ArrayPool<Task>.Shared.Return(rentedArray);
+        }
     }
 
     private static async ValueTask ExecuteStopOnFirst<TNotification>(
         TNotification notification,
         List<INotificationHandler<TNotification>> handlers,
+        NotificationErrorStrategy errorStrategy,
         CancellationToken cancellationToken)
         where TNotification : INotification
     {
+        List<Exception>? exceptions = null;
+
         foreach (var handler in handlers)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            await handler.HandleAsync(notification, cancellationToken);
-            return; // Stop after first handler completes
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await handler.HandleAsync(notification, cancellationToken);
+                return; // Success - stop here
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                if (errorStrategy == NotificationErrorStrategy.StopOnFirstError)
+                {
+                    throw;
+                }
+
+                (exceptions ??= []).Add(ex);
+            }
+        }
+
+        if (exceptions is { Count: > 0 })
+        {
+            throw new AggregateException(
+                $"All notification handlers for {typeof(TNotification).Name} threw exceptions.",
+                exceptions);
         }
     }
 }

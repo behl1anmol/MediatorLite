@@ -18,8 +18,8 @@ public sealed class PerformanceLoggingBehavior<TRequest, TResponse> : IPipelineB
     }
 
     public async ValueTask<TResponse> HandleAsync(
-        TRequest request, 
-        RequestHandlerDelegate<TResponse> next, 
+        TRequest request,
+        RequestHandlerDelegate<TResponse> next,
         CancellationToken cancellationToken = default)
     {
         var requestName = typeof(TRequest).Name;

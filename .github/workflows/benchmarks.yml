@@ -1,0 +1,147 @@
+name: Benchmarks
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'tests/MediatorLite.Benchmarks/**'
+      - '.github/workflows/benchmarks.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'tests/MediatorLite.Benchmarks/**'
+  workflow_dispatch:  # Allow manual trigger
+
+# Required permissions for commenting on PRs and pushing benchmark data
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  benchmark:
+    name: Run Benchmarks
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Build (Release)
+      run: dotnet build --configuration Release --no-restore
+
+    - name: Run Benchmarks
+      run: |
+        cd tests/MediatorLite.Benchmarks
+        dotnet run --configuration Release --no-build -- --filter='*' --exporters json markdown --memory
+
+    - name: Upload benchmark results
+      uses: actions/upload-artifact@v6
+      if: always()
+      with:
+        name: benchmark-results
+        path: |
+          tests/MediatorLite.Benchmarks/BenchmarkDotNet.Artifacts/results/*.json
+          tests/MediatorLite.Benchmarks/BenchmarkDotNet.Artifacts/results/*.md
+
+    - name: Combine benchmark results
+      if: github.event_name != 'pull_request'
+      run: |
+        results_dir="tests/MediatorLite.Benchmarks/BenchmarkDotNet.Artifacts/results"
+        if [ -d "$results_dir" ]; then
+          cd "$results_dir"
+          # Combine all JSON files into one array using jq
+          jq -s 'add' *-report-full.json > combined-benchmarks.json
+          echo "Combined benchmark files created"
+          ls -la combined-benchmarks.json
+        else
+          echo "Benchmark results directory not found"
+          exit 1
+        fi
+
+    - name: Store benchmark result
+      if: github.event_name != 'pull_request'
+      uses: benchmark-action/github-action-benchmark@v1
+      with:
+        tool: 'benchmarkdotnet'
+        output-file-path: tests/MediatorLite.Benchmarks/BenchmarkDotNet.Artifacts/results/combined-benchmarks.json
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        auto-push: true
+        alert-threshold: '150%'
+        comment-on-alert: true
+        fail-on-alert: false
+        alert-comment-cc-users: '@behl1anmol'
+
+    - name: Comment PR with benchmark results
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v8
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const fs = require('fs');
+          const path = './tests/MediatorLite.Benchmarks/BenchmarkDotNet.Artifacts/results';
+
+          // Check if the directory exists before trying to read it
+          if (!fs.existsSync(path)) {
+            console.log('Benchmark results directory not found, skipping PR comment');
+            return;
+          }
+
+          try {
+            // Find ALL markdown results files
+            const files = fs.readdirSync(path);
+            console.log('Files found:', files);
+
+            // BenchmarkDotNet creates files like "*-report-github.md" for GitHub-formatted output
+            let mdFiles = files.filter(f => f.endsWith('-report-github.md'));
+
+            // Fallback to any .md files if github-formatted not found
+            if (mdFiles.length === 0) {
+              mdFiles = files.filter(f => f.endsWith('.md'));
+            }
+
+            if (mdFiles.length === 0) {
+              console.log('No benchmark markdown files found');
+              return;
+            }
+
+            console.log('Markdown files to process:', mdFiles);
+
+            // Combine all benchmark results
+            let combinedResults = '## Benchmark Results\n\n';
+
+            for (const mdFile of mdFiles) {
+              const content = fs.readFileSync(`${path}/${mdFile}`, 'utf8');
+              // Extract benchmark class name from filename
+              let benchmarkName = mdFile
+                .replace('-report-github.md', '')
+                .replace('-report.md', '')
+                .replace('.md', '');
+              combinedResults += `### ${benchmarkName}\n\n${content}\n\n---\n\n`;
+            }
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: combinedResults
+            });
+          } catch (error) {
+            console.log('Error reading benchmark results:', error.message);
+          }

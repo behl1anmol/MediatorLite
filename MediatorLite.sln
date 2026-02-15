@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.0.31903.59
+# Visual Studio Version 18
+VisualStudioVersion = 18.3.11426.168
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MediatorLite", "src\MediatorLite\MediatorLite.csproj", "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
 EndProject
@@ -18,6 +18,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MediatorLite.Sample.SourceGen", "samples\MediatorLite.Sample.SourceGen\MediatorLite.Sample.SourceGen.csproj", "{9DB13F55-8B92-441C-849C-25756BEAA342}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{37515D50-C146-4183-9A79-E2155207D70C}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -106,6 +108,14 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
+		{A1B2C3D4-E5F6-7890-ABCD-EF1234567890} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{B2C3D4E5-F678-9012-BCDE-F12345678901} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{C3D4E5F6-7890-1234-CDEF-123456789012} = {37515D50-C146-4183-9A79-E2155207D70C}
+		{D4E5F678-9012-3456-DEF0-234567890123} = {37515D50-C146-4183-9A79-E2155207D70C}
+		{E5F67890-1234-5678-EF01-345678901234} = {5D20AA90-6969-D8BD-9DCD-8634F4692FDA}
 		{9DB13F55-8B92-441C-849C-25756BEAA342} = {5D20AA90-6969-D8BD-9DCD-8634F4692FDA}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {7F3FE5BA-571D-4CE7-A07C-D892C2EDFA5B}
 	EndGlobalSection
 EndGlobal

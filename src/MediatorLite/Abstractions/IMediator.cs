@@ -6,6 +6,11 @@ namespace MediatorLite;
 /// <remarks>
 /// The mediator acts as a dispatcher that routes requests to their handlers
 /// and publishes notifications to all registered handlers.
+/// <para>
+/// The public API uses <see cref="Task{TResult}"/> for maximum consumer ergonomics,
+/// enabling natural parallel execution patterns like <c>Task.WhenAll</c>. Internally,
+/// handlers use <see cref="ValueTask{TResult}"/> for performance on synchronous paths.
+/// </para>
 /// </remarks>
 /// <example>
 /// <code>
@@ -23,9 +28,13 @@ namespace MediatorLite;
 ///         return await _mediator.SendAsync(new GetUserQuery(id), ct);
 ///     }
 ///     
-///     public async Task NotifyUserCreatedAsync(int userId, CancellationToken ct)
+///     // Parallel execution is natural with Task-based API
+///     public async Task&lt;(User, Order)&gt; GetUserAndOrderAsync(int userId, int orderId, CancellationToken ct)
 ///     {
-///         await _mediator.PublishAsync(new UserCreatedNotification(userId), ct);
+///         var userTask = _mediator.SendAsync(new GetUserQuery(userId), ct);
+///         var orderTask = _mediator.SendAsync(new GetOrderQuery(orderId), ct);
+///         await Task.WhenAll(userTask, orderTask);
+///         return (userTask.Result, orderTask.Result);
 ///     }
 /// }
 /// </code>
@@ -38,9 +47,13 @@ public interface IMediator
     /// <typeparam name="TResponse">The type of response expected from the handler.</typeparam>
     /// <param name="request">The request to send.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <returns>A <see cref="ValueTask{TResponse}"/> representing the response from the handler.</returns>
+    /// <returns>A <see cref="Task{TResponse}"/> representing the response from the handler.</returns>
     /// <exception cref="InvalidOperationException">Thrown when no handler is registered for the request type.</exception>
-    ValueTask<TResponse> SendAsync<TResponse>(
+    /// <remarks>
+    /// Returns <see cref="Task{TResponse}"/> for consumer ergonomics, enabling parallel patterns.
+    /// Handlers internally use <see cref="ValueTask{TResponse}"/> for synchronous completion optimization.
+    /// </remarks>
+    Task<TResponse> SendAsync<TResponse>(
         IRequest<TResponse> request,
         CancellationToken cancellationToken = default);
 
@@ -50,8 +63,12 @@ public interface IMediator
     /// <typeparam name="TNotification">The type of notification to publish.</typeparam>
     /// <param name="notification">The notification to publish.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <returns>A <see cref="ValueTask"/> representing the asynchronous operation.</returns>
-    ValueTask PublishAsync<TNotification>(
+    /// <returns>A <see cref="Task"/> representing the asynchronous operation.</returns>
+    /// <remarks>
+    /// Returns <see cref="Task"/> for consumer ergonomics.
+    /// Notification handlers internally use <see cref="ValueTask"/> for synchronous completion optimization.
+    /// </remarks>
+    Task PublishAsync<TNotification>(
         TNotification notification,
         CancellationToken cancellationToken = default)
         where TNotification : INotification;

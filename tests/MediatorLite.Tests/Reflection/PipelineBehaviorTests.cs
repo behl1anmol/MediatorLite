@@ -3,7 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Xunit;
 
-namespace MediatorLite.Tests;
+namespace MediatorLite.Tests.Reflection;
 
 public class PipelineBehaviorTests
 {
@@ -11,6 +11,7 @@ public class PipelineBehaviorTests
 
     public record TestQuery(int Value) : IRequest<int>;
 
+    [MediatorGeneration(Skip = true)]
     public class TestQueryHandler : IRequestHandler<TestQuery, int>
     {
         public ValueTask<int> HandleAsync(TestQuery request, CancellationToken cancellationToken = default)
@@ -19,6 +20,7 @@ public class PipelineBehaviorTests
         }
     }
 
+    [MediatorGeneration(Skip = true)]
     public class AddOneBehavior : IPipelineBehavior<TestQuery, int>
     {
         public async ValueTask<int> HandleAsync(
@@ -31,6 +33,7 @@ public class PipelineBehaviorTests
         }
     }
 
+    [MediatorGeneration(Skip = true)]
     public class MultiplyByTwoBehavior : IPipelineBehavior<TestQuery, int>
     {
         public async ValueTask<int> HandleAsync(
@@ -43,6 +46,7 @@ public class PipelineBehaviorTests
         }
     }
 
+    [MediatorGeneration(Skip = true)]
     public class TrackingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
         where TRequest : IRequest<TResponse>
     {
@@ -74,7 +78,7 @@ public class PipelineBehaviorTests
         services.AddTransient<IRequestHandler<TestQuery, int>, TestQueryHandler>();
         services.AddTransient<IPipelineBehavior<TestQuery, int>, AddOneBehavior>();
         services.AddTransient<IPipelineBehavior<TestQuery, int>, MultiplyByTwoBehavior>();
-        services.AddMediatorLite(); // No options needed, DI registrations are sufficient
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -134,6 +138,7 @@ public class PipelineBehaviorTests
         result.Should().Be(999); // Short-circuit value
     }
 
+    [MediatorGeneration(Skip = true)]
     public class ShortCircuitBehavior : IPipelineBehavior<TestQuery, int>
     {
         public ValueTask<int> HandleAsync(

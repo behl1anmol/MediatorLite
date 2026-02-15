@@ -1,5 +1,5 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using System.Reflection;
 
 namespace MediatorLite.Configuration;
 
@@ -8,13 +8,7 @@ namespace MediatorLite.Configuration;
 /// </summary>
 public sealed class MediatorOptions
 {
-    private readonly List<Assembly> _assemblies = [];
     private readonly List<Type> _behaviorTypes = [];
-
-    /// <summary>
-    /// Gets the assemblies to scan for handlers.
-    /// </summary>
-    internal IReadOnlyList<Assembly> Assemblies => _assemblies;
 
     /// <summary>
     /// Gets the registered pipeline behavior types in order.
@@ -25,13 +19,15 @@ public sealed class MediatorOptions
     /// Gets or sets the default execution strategy for notifications.
     /// Default is <see cref="NotificationExecutionStrategy.Sequential"/>.
     /// </summary>
-    public NotificationExecutionStrategy NotificationExecutionStrategy { get; set; } = NotificationExecutionStrategy.Sequential;
+    public NotificationExecutionStrategy NotificationExecutionStrategy { get; set; } =
+        NotificationExecutionStrategy.Sequential;
 
     /// <summary>
     /// Gets or sets the default error handling strategy for notifications.
     /// Default is <see cref="NotificationErrorStrategy.ContinueAndAggregate"/>.
     /// </summary>
-    public NotificationErrorStrategy NotificationErrorStrategy { get; set; } = NotificationErrorStrategy.ContinueAndAggregate;
+    public NotificationErrorStrategy NotificationErrorStrategy { get; set; } =
+        NotificationErrorStrategy.ContinueAndAggregate;
 
     /// <summary>
     /// Gets or sets whether built-in logging is enabled.
@@ -53,49 +49,23 @@ public sealed class MediatorOptions
 
     /// <summary>
     /// Gets or sets the service lifetime for handlers.
-    /// Default is <see cref="Microsoft.Extensions.DependencyInjection.ServiceLifetime.Transient"/>.
+    /// Default is <see cref="ServiceLifetime.Transient"/>.
     /// </summary>
-    public Microsoft.Extensions.DependencyInjection.ServiceLifetime HandlerLifetime { get; set; } =
-        Microsoft.Extensions.DependencyInjection.ServiceLifetime.Transient;
+    public ServiceLifetime HandlerLifetime { get; set; } = ServiceLifetime.Transient;
 
     /// <summary>
     /// Gets or sets the service lifetime for the mediator.
-    /// Default is <see cref="Microsoft.Extensions.DependencyInjection.ServiceLifetime.Transient"/>.
+    /// Default is <see cref="ServiceLifetime.Transient"/>.
     /// </summary>
-    public Microsoft.Extensions.DependencyInjection.ServiceLifetime MediatorLifetime { get; set; } =
-        Microsoft.Extensions.DependencyInjection.ServiceLifetime.Transient;
-
-    /// <summary>
-    /// Registers handlers from the specified assembly.
-    /// </summary>
-    /// <param name="assembly">The assembly to scan for handlers.</param>
-    /// <returns>The <see cref="MediatorOptions"/> instance for chaining.</returns>
-    public MediatorOptions RegisterHandlersFromAssembly(Assembly assembly)
-    {
-        ArgumentNullException.ThrowIfNull(assembly);
-        if (!_assemblies.Contains(assembly))
-        {
-            _assemblies.Add(assembly);
-        }
-        return this;
-    }
-
-    /// <summary>
-    /// Registers handlers from the assembly containing the specified type.
-    /// </summary>
-    /// <typeparam name="T">A type in the target assembly.</typeparam>
-    /// <returns>The <see cref="MediatorOptions"/> instance for chaining.</returns>
-    public MediatorOptions RegisterHandlersFromAssemblyContaining<T>()
-    {
-        return RegisterHandlersFromAssembly(typeof(T).Assembly);
-    }
+    public ServiceLifetime MediatorLifetime { get; set; } = ServiceLifetime.Transient;
 
     /// <summary>
     /// Adds an open generic pipeline behavior type.
+    /// The behavior will be registered with the DI container as IPipelineBehavior&lt;,&gt;.
     /// </summary>
     /// <param name="behaviorType">The open generic behavior type (e.g., typeof(LoggingBehavior&lt;,&gt;)).</param>
     /// <returns>The <see cref="MediatorOptions"/> instance for chaining.</returns>
-    /// <exception cref="ArgumentException">Thrown when the type is not an open generic implementing IPipelineBehavior.</exception>
+    /// <exception cref="ArgumentException">Thrown when the type is not an open generic type.</exception>
     public MediatorOptions AddOpenBehavior(Type behaviorType)
     {
         ArgumentNullException.ThrowIfNull(behaviorType);
@@ -107,20 +77,12 @@ public sealed class MediatorOptions
                 nameof(behaviorType));
         }
 
-        // Verify it implements IPipelineBehavior<,>
-        var implementsInterface = behaviorType.GetInterfaces()
-            .Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IPipelineBehavior<,>));
-
-        if (!implementsInterface)
+        var hasCorrectArity = behaviorType.GetGenericArguments().Length == 2;
+        if (!hasCorrectArity)
         {
-            // Check if any base type or the type itself when closed would implement the interface
-            var hasConstrainedBehavior = behaviorType.GetGenericArguments().Length == 2;
-            if (!hasConstrainedBehavior)
-            {
-                throw new ArgumentException(
-                    $"Type {behaviorType.Name} must implement IPipelineBehavior<TRequest, TResponse>.",
-                    nameof(behaviorType));
-            }
+            throw new ArgumentException(
+                $"Type {behaviorType.Name} must have exactly 2 generic type parameters.",
+                nameof(behaviorType));
         }
 
         _behaviorTypes.Add(behaviorType);

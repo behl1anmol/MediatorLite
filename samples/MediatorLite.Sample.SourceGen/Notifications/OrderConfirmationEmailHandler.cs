@@ -19,7 +19,7 @@ public sealed class OrderConfirmationEmailHandler : INotificationHandler<OrderPl
     {
         // Simulate sending email
         await Task.Delay(100, cancellationToken);
-        
+
         _logger.LogInformation(
             "📧 Sent order confirmation email to {Email} for order {OrderId}. Total: {TotalAmount:C}",
             notification.CustomerEmail,
