@@ -5,7 +5,8 @@
     <Description>A lightweight, high-performance mediator library for .NET. Features source generators for zero-reflection handler discovery, pipeline behaviors, and built-in observability.</Description>
     <PackageTags>mediator;cqrs;command;query;handler;pipeline;source-generator</PackageTags>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    
+    <PackageIcon>icon.png</PackageIcon>
+
     <!-- Enable source generators to work with the main library -->
     <IsPackable>true</IsPackable>
   </PropertyGroup>
@@ -17,6 +18,7 @@
 
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\icon.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>

@@ -1,8 +1,12 @@
-# MediatorLite.SourceGeneration
+<p align="center">
+  <img src="../../icon.png" alt="MediatorLite Icon" width="350" />
+</p>
 
 [![CI](https://github.com/behl1anmol/MediatorLite/actions/workflows/ci.yml/badge.svg)](https://github.com/behl1anmol/MediatorLite/actions/workflows/ci.yml)
-[![NuGet](https://img.shields.io/nuget/v/MediatorLite.svg)](https://www.nuget.org/packages/MediatorLite.SourceGeneration/)
-[![NuGet Downloads](https://img.shields.io/nuget/dt/MediatorLite.svg)](https://www.nuget.org/packages/MediatorLite.SourceGeneration/)
+[![MediatorLite Version](https://img.shields.io/nuget/v/MediatorLite.svg?label=MediatorLite)](https://www.nuget.org/packages/MediatorLite/)
+[![MediatorLite Downloads](https://img.shields.io/nuget/dt/MediatorLite.svg?label=MediatorLite%20downloads)](https://www.nuget.org/packages/MediatorLite/)
+[![MediatorLite.SourceGeneration Version](https://img.shields.io/nuget/v/MediatorLite.SourceGeneration.svg?label=MediatorLite.SourceGeneration)](https://www.nuget.org/packages/MediatorLite.SourceGeneration/)
+[![MediatorLite.SourceGeneration Downloads](https://img.shields.io/nuget/dt/MediatorLite.SourceGeneration.svg?label=MediatorLite.SourceGeneration%20downloads)](https://www.nuget.org/packages/MediatorLite.SourceGeneration/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![.NET](https://img.shields.io/badge/.NET-10.0-blue.svg)](https://dotnet.microsoft.com/)
 

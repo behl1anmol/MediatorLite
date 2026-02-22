@@ -12,6 +12,7 @@
     <PackageTags>mediator;source-generator;roslyn;analyzers</PackageTags>
     <DevelopmentDependency>true</DevelopmentDependency>
     <IncludeBuildOutput>false</IncludeBuildOutput>
+    <PackageIcon>icon.png</PackageIcon>
 
     <!-- Suppress warning about missing lib/ref assemblies - expected for source generators -->
     <NoWarn>$(NoWarn);NU5128</NoWarn>
@@ -24,6 +25,7 @@
 
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\icon.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>
