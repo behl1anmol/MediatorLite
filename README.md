@@ -1,6 +1,4 @@
-<p align="center">
-    <img src="icon.png" alt="MediatorLite Icon" width="350" /> 
-</p>
+# ![MediatorLite Icon](icon-readme.png) MediatorLite
 
 [![CI](https://github.com/behl1anmol/MediatorLite/actions/workflows/ci.yml/badge.svg)](https://github.com/behl1anmol/MediatorLite/actions/workflows/ci.yml)
 [![MediatorLite Version](https://img.shields.io/nuget/v/MediatorLite.svg?label=MediatorLite)](https://www.nuget.org/packages/MediatorLite/)
