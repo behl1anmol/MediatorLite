@@ -109,6 +109,7 @@ That's it. The source generator discovers `GetUserQueryHandler` at compile time 
 | [Validation]({{ site.baseurl }}/validation) | Use `DataAnnotations` or custom `IValidator<T>` validator to validate requests before they reach handlers. |
 | [Notifications]({{ site.baseurl }}/notifications) | Publish events to multiple handlers with `Sequential`, `Parallel`, or `StopOnFirst` execution strategies. |
 | [Observability]({{ site.baseurl }}/observability) | Configure built-in structured logging and OpenTelemetry tracing. |
+| [Benchmarks]({{ site.baseurl }}/benchmarks) | Performance comparisons against MediatR across request dispatch, pipeline behaviors, and notifications. |
 | [Migrating from MediatR]({{ site.baseurl }}/migration-from-mediatr) | Step-by-step guide and interface mapping for teams moving from MediatR. |
 | [Contributing]({{ site.baseurl }}/contributing) | How to build, test, and contribute to MediatorLite. |
 
