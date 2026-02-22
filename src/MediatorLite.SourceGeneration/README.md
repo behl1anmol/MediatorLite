@@ -1,4 +1,4 @@
-# ![MediatorLite Icon](../../icon-readme.png) MediatorLite.SourceGeneration
+# ![MediatorLite Icon](https://raw.githubusercontent.com/behl1anmol/MediatorLite/main/icon-readme.png) MediatorLite.SourceGeneration
 
 [![CI](https://github.com/behl1anmol/MediatorLite/actions/workflows/ci.yml/badge.svg)](https://github.com/behl1anmol/MediatorLite/actions/workflows/ci.yml)
 [![MediatorLite Version](https://img.shields.io/nuget/v/MediatorLite.svg?label=MediatorLite)](https://www.nuget.org/packages/MediatorLite/)
