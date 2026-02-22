@@ -10,6 +10,8 @@
 
 Source generators for MediatorLite that enable compile-time handler discovery with zero runtime reflection.
 
+> **Documentation:** [behl1anmol.github.io/MediatorLite](https://behl1anmol.github.io/MediatorLite)
+
 ## What is this?
 
 MediatorLite.SourceGeneration is a Roslyn source generator that automatically discovers and registers handlers, behaviors, and validators at compile-time. This eliminates runtime reflection overhead and provides faster startup times and better performance.
@@ -317,6 +319,8 @@ services.AddMediatorLite();
 ```
 
 ## Source Code
+
+Full documentation is available at **[behl1anmol.github.io/MediatorLite](https://behl1anmol.github.io/MediatorLite)**.
 
 Visit the [MediatorLite repository](https://github.com/behl1anmol/MediatorLite) for:
 - Full documentation

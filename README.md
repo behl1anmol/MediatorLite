@@ -10,6 +10,8 @@
 
 A lightweight, high-performance mediator library for .NET 10+. Built from the ground up with source generators for zero-reflection dispatch and minimal allocations.
 
+> **Documentation:** [behl1anmol.github.io/MediatorLite](https://behl1anmol.github.io/MediatorLite)
+
 ## Features
 
 - **High Performance** - Source generators eliminate runtime reflection for handler dispatch
@@ -140,6 +142,8 @@ await mediator.PublishAsync(new UserCreatedNotification(user.Id, user.Email));
 ```
 
 ## Documentation
+
+Full documentation is available at **[behl1anmol.github.io/MediatorLite](https://behl1anmol.github.io/MediatorLite)**.
 
 - [Quick Start Guide](docs/quick-start.md)
 - [Pipeline Behaviors](docs/pipeline-behaviors.md)
