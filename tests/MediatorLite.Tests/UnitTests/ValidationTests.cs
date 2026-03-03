@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using MediatorLite.Validation;
+using MediatorLite.Validation.Models;
 using Xunit;
 
 namespace MediatorLite.Tests.UnitTests

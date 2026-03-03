@@ -521,7 +521,7 @@ internal sealed class Mediator : IMediator
 
             try
             {
-                await Task.WhenAll(tasksSpan.ToArray());
+                await Task.WhenAll(tasksSpan);
             }
             catch
             {

@@ -1,5 +1,6 @@
 using MediatorLite.Sample.SourceGen.Requests;
 using MediatorLite.Validation;
+using MediatorLite.Validation.Models;
 using Microsoft.Extensions.Logging;
 
 namespace MediatorLite.Sample.SourceGen.Validators;

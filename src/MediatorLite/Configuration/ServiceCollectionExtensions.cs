@@ -66,6 +66,13 @@ public static class ServiceCollectionExtensions
                         behaviorType,
                         options.HandlerLifetime));
                 }
+                else
+                {
+                    throw new ArgumentException(
+                        $"Type '{behaviorType.FullName}' does not implement IPipelineBehavior<TRequest, TResponse>. " +
+                        "Ensure the behavior type implements the IPipelineBehavior<,> interface.",
+                        nameof(configure));
+                }
             }
         }
 
@@ -104,7 +111,9 @@ public static class ServiceCollectionExtensions
             }
             else
             {
-                services.Add(new ServiceDescriptor(behaviorType, behaviorType, lifetime));
+                throw new ArgumentException(
+                    $"Type '{behaviorType.FullName}' does not implement IPipelineBehavior<TRequest, TResponse>. " +
+                    "Ensure the behavior type implements the IPipelineBehavior<,> interface.");
             }
         }
 
