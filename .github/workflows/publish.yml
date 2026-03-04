@@ -38,6 +38,16 @@ jobs:
         echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
         echo "Package version: $VERSION"
 
+    - name: Determine release tag
+      id: release_tag
+      run: |
+        if [[ "${{ github.ref }}" == refs/tags/* && -n "${{ github.ref_name }}" ]]; then
+          TAG_NAME="${{ github.ref_name }}"
+        else
+          TAG_NAME="v${{ steps.get_version.outputs.VERSION }}"
+        fi
+        echo "TAG_NAME=$TAG_NAME" >> $GITHUB_OUTPUT
+
     - name: Restore dependencies
       run: dotnet restore
 
@@ -72,9 +82,10 @@ jobs:
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
-      if: startsWith(github.ref, 'refs/tags/')
+      if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
       with:
         files: ./artifacts/*.nupkg
         generate_release_notes: true
+        tag_name: ${{ steps.release_tag.outputs.TAG_NAME }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

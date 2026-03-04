@@ -35,15 +35,13 @@ public class MediatorOptionsTests
     }
 
     [Fact]
-    public void AddOpenBehavior_WithNonBehaviorType_ButWithTwoGenericArgs_DoesNotThrow()
+    public void AddOpenBehavior_WithNonBehaviorType_ButWithTwoGenericArgs_ThrowsArgumentException()
     {
         var options = new MediatorOptions();
 
-        // InvalidBehavior<,> doesn't implement IPipelineBehavior but has 2 generic args
-        // The current validation logic allows this through - it only validates the generic arg count
-        var result = options.AddOpenBehavior(typeof(InvalidBehavior<,>));
-
-        Assert.Same(options, result);
+        // InvalidBehavior<,> doesn't implement IPipelineBehavior - should be rejected
+        var ex = Assert.Throws<ArgumentException>(() => options.AddOpenBehavior(typeof(InvalidBehavior<,>)));
+        Assert.Contains("IPipelineBehavior", ex.Message);
     }
 
     [Fact]

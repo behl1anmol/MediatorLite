@@ -1,8 +1,10 @@
+using MediatorLite.Validation.Models;
+
 namespace MediatorLite.Tests.SourceGeneration;
 
 using System.ComponentModel.DataAnnotations;
 using MediatorLite.Validation;
-using MediatorValidationResult = MediatorLite.Validation.ValidationResult;
+using MediatorValidationResult = MediatorLite.Validation.Models.ValidationResult;
 
 #region Request/Response Types
 

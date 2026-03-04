@@ -2,8 +2,9 @@ using FluentAssertions;
 using MediatorLite.Validation;
 using Microsoft.Extensions.DependencyInjection;
 using System.ComponentModel.DataAnnotations;
+using MediatorLite.Validation.Models;
 using Xunit;
-using MediatorValidationResult = MediatorLite.Validation.ValidationResult;
+using MediatorValidationResult = MediatorLite.Validation.Models.ValidationResult;
 
 namespace MediatorLite.Tests.Reflection;
 
