@@ -38,6 +38,16 @@ jobs:
         echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
         echo "Package version: $VERSION"
 
+    - name: Determine release tag
+      id: release_tag
+      run: |
+        if [[ "${{ github.ref }}" == refs/tags/* && -n "${{ github.ref_name }}" ]]; then
+          TAG_NAME="${{ github.ref_name }}"
+        else
+          TAG_NAME="v${{ steps.get_version.outputs.VERSION }}"
+        fi
+        echo "TAG_NAME=$TAG_NAME" >> $GITHUB_OUTPUT
+
     - name: Restore dependencies
       run: dotnet restore
 
@@ -76,8 +86,6 @@ jobs:
       with:
         files: ./artifacts/*.nupkg
         generate_release_notes: true
-        tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name != ''
-          ? github.ref_name
-          : format('v{0}', steps.get_version.outputs.VERSION) }}
+        tag_name: ${{ steps.release_tag.outputs.TAG_NAME }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
