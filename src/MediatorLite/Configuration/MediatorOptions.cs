@@ -84,7 +84,7 @@ public sealed class MediatorOptions
                 $"Type {behaviorType.Name} must have exactly 2 generic type parameters.",
                 nameof(behaviorType));
         }
-        
+
         var implementsPipelineBehavior = behaviorType.GetInterfaces()
             .Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IPipelineBehavior<,>));
         if (!implementsPipelineBehavior)
@@ -93,7 +93,7 @@ public sealed class MediatorOptions
                 $"Type '{behaviorType.Name}' must implement IPipelineBehavior<TRequest, TResponse>.",
                 nameof(behaviorType));
         }
-        
+
         _behaviorTypes.Add(behaviorType);
         return this;
     }

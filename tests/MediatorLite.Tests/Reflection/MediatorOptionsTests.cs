@@ -38,7 +38,7 @@ public class MediatorOptionsTests
     public void AddOpenBehavior_WithNonBehaviorType_ButWithTwoGenericArgs_ThrowsArgumentException()
     {
         var options = new MediatorOptions();
-        
+
         // InvalidBehavior<,> doesn't implement IPipelineBehavior - should be rejected
         var ex = Assert.Throws<ArgumentException>(() => options.AddOpenBehavior(typeof(InvalidBehavior<,>)));
         Assert.Contains("IPipelineBehavior", ex.Message);

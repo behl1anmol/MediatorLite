@@ -21,7 +21,7 @@ public sealed class ValidationException : Exception
         : this([.. errors])
     {
     }
-    
+
     /// <summary>
     /// Initializes a new instance of the <see cref="ValidationException"/> class.
     /// </summary>
