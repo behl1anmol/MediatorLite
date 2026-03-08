@@ -35,10 +35,18 @@
 
 - **Developer workflows**
   - Build/test: `dotnet test MediatorLite.sln` (runs xUnit + FluentAssertions tests under [tests/](tests)).
-  - Samples: manual DI registration sample in [samples/MediatorLite.Sample/Program.cs](samples/MediatorLite.Sample/Program.cs); source-gen sample in [samples/MediatorLite.Sample.SourceGen/Program.cs](samples/MediatorLite.Sample.SourceGen/Program.cs) showing `AddGeneratedHandlers` + performance logging behavior.
+  - Samples: manual DI registration sample in [samples/MediatorLite.Sample/Program.cs](samples/MediatorLite.Sample/Program.cs); source-gen sample in [samples/MediatorLite.Sample.SourceGen/Program.cs](samples/MediatorLite.Sample.SourceGen/Program.cs) showing `AddGeneratedHandlers` + performance logging behavior, handler composition, closed/open behaviors, dual-layer validation, and ordered notifications.
   - Source generator output class: `MediatorLite.Generated.MediatorLiteRegistration` exposes `AddGeneratedHandlers`, `AddGeneratedRequestHandlers`, `AddGeneratedNotificationHandlers`, `AddGeneratedBehaviors`, `RequestHandlerCount`, `NotificationHandlerCount`, and `BehaviorCount` for diagnostics.
 
 - **Common pitfalls**
   - Forgetting to call `AddGeneratedHandlers()` or register handlers manually results in `InvalidOperationException` when sending requests.
   - Open generic behaviors registered via `MediatorOptions.AddOpenBehavior` are automatically added to DI by `AddMediatorLite()`. When using manual DI registration, register them directly (e.g., `services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>))`).
   - When using parallel notification execution with `ContinueAndAggregate`, expect `AggregateException` wrapping handler failures.
+
+- **Knowledge skills** (detailed contextual guides for each project)
+  - **mediatorlite-core** — Use when working on the core library abstractions, interfaces, mediator dispatch, DI registration, or configuration. Covers `IMediator`, `IRequest`, `IRequestHandler`, `INotification`, `INotificationHandler`, `IPipelineBehavior`, `ISourceGeneratedMediator`, `Unit`, attributes, `MediatorOptions`, validation system, and observability.
+  - **mediatorlite-source-generation** — Use when working on the source generator, understanding generated code, extending handler/behavior/validator discovery, or fixing source-gen issues. Covers `HandlerDiscoveryGenerator`, the 4 parallel pipelines, generated registration methods, dispatch switch patterns, and the `ISourceGeneratedMediator` contract.
+  - **mediatorlite-testing** — Use when writing or debugging tests for any dispatch path (reflection or source-gen). Covers test organization (3 directories), DI setup patterns, the critical `[MediatorGeneration(Skip=true)]` convention, handler tracking, assertion patterns, and how to write new tests.
+  - **mediatorlite-sample** — Use when working on the manual DI sample project or creating examples of reflection-based handler registration. Shows how to register handlers/behaviors explicitly without source generation.
+  - **mediatorlite-sample-sourcegen** — Use when working on the source-gen sample or demonstrating full feature coverage. Covers handler composition, closed vs open behaviors, dual-layer validation, and ordered notifications with source-generated discovery.
+  - **mediatorlite-benchmarks** — Use when writing benchmarks, interpreting performance results, or optimizing MediatorLite. Covers BenchmarkDotNet setup, comparison methodology vs MediatR, results analysis, allocation patterns, and throughput tradeoffs.
