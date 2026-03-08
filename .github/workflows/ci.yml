@@ -3,8 +3,14 @@ name: CI
 on:
   push:
     branches: [ main, develop ]
+    paths-ignore:
+      - '.github/skills/**'
+      - '.github/copilot-instructions'
   pull_request:
     branches: [ main, develop ]
+    paths-ignore:
+      - '.github/skills/**'
+      - '.github/copilot-instructions'
 
 env:
   DOTNET_VERSION: '10.0.x'
