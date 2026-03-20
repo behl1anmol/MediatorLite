@@ -46,33 +46,14 @@ public static class ServiceCollectionExtensions
         // Register behaviors added via options (open generics registered as IPipelineBehavior<,>)
         foreach (var behaviorType in options.BehaviorTypes)
         {
-            if (behaviorType.IsGenericTypeDefinition)
+            var behaviorServiceTypes = PipelineBehaviorTypeResolver.GetServiceTypesForRegistration(behaviorType);
+
+            foreach (var behaviorServiceType in behaviorServiceTypes)
             {
                 services.Add(new ServiceDescriptor(
-                    typeof(IPipelineBehavior<,>),
+                    behaviorServiceType,
                     behaviorType,
                     options.HandlerLifetime));
-            }
-            else
-            {
-                // For closed types, find and register the specific interface
-                var behaviorInterface = behaviorType.GetInterfaces()
-                    .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IPipelineBehavior<,>));
-
-                if (behaviorInterface != null)
-                {
-                    services.Add(new ServiceDescriptor(
-                        behaviorInterface,
-                        behaviorType,
-                        options.HandlerLifetime));
-                }
-                else
-                {
-                    throw new ArgumentException(
-                        $"Type '{behaviorType.FullName}' does not implement IPipelineBehavior<TRequest, TResponse>. " +
-                        "Ensure the behavior type implements the IPipelineBehavior<,> interface.",
-                        nameof(configure));
-                }
             }
         }
 
@@ -93,28 +74,10 @@ public static class ServiceCollectionExtensions
     {
         var behaviorType = typeof(TBehavior);
 
-        if (behaviorType.IsGenericTypeDefinition)
+        var behaviorServiceTypes = PipelineBehaviorTypeResolver.GetServiceTypesForRegistration(behaviorType);
+        foreach (var behaviorServiceType in behaviorServiceTypes)
         {
-            services.Add(new ServiceDescriptor(
-                typeof(IPipelineBehavior<,>),
-                behaviorType,
-                lifetime));
-        }
-        else
-        {
-            var behaviorInterface = behaviorType.GetInterfaces()
-                .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IPipelineBehavior<,>));
-
-            if (behaviorInterface != null)
-            {
-                services.Add(new ServiceDescriptor(behaviorInterface, behaviorType, lifetime));
-            }
-            else
-            {
-                throw new ArgumentException(
-                    $"Type '{behaviorType.FullName}' does not implement IPipelineBehavior<TRequest, TResponse>. " +
-                    "Ensure the behavior type implements the IPipelineBehavior<,> interface.");
-            }
+            services.Add(new ServiceDescriptor(behaviorServiceType, behaviorType, lifetime));
         }
 
         return services;

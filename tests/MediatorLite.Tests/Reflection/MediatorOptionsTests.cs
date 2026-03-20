@@ -55,6 +55,17 @@ public class MediatorOptionsTests
     }
 
     [Fact]
+    public void AddBehavior_WithNonBehaviorType_ThrowsArgumentException()
+    {
+        var options = new MediatorOptions();
+
+        var ex = Assert.Throws<ArgumentException>(() => options.AddBehavior<InvalidClosedBehavior>());
+
+        Assert.Equal("behaviorType", ex.ParamName);
+        Assert.Contains("IPipelineBehavior", ex.Message);
+    }
+
+    [Fact]
     public void NotificationExecutionStrategy_DefaultIsSequential()
     {
         var options = new MediatorOptions();
@@ -159,6 +170,11 @@ public class MediatorOptionsTests
     }
 
     public class InvalidBehavior<TRequest, TResponse>
+    {
+        // Not implementing IPipelineBehavior
+    }
+
+    public class InvalidClosedBehavior
     {
         // Not implementing IPipelineBehavior
     }

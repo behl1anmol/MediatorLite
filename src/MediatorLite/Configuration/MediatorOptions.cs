@@ -68,31 +68,7 @@ public sealed class MediatorOptions
     /// <exception cref="ArgumentException">Thrown when the type is not an open generic type.</exception>
     public MediatorOptions AddOpenBehavior(Type behaviorType)
     {
-        ArgumentNullException.ThrowIfNull(behaviorType);
-
-        if (!behaviorType.IsGenericTypeDefinition)
-        {
-            throw new ArgumentException(
-                $"Type {behaviorType.Name} must be an open generic type definition.",
-                nameof(behaviorType));
-        }
-
-        var hasCorrectArity = behaviorType.GetGenericArguments().Length == 2;
-        if (!hasCorrectArity)
-        {
-            throw new ArgumentException(
-                $"Type {behaviorType.Name} must have exactly 2 generic type parameters.",
-                nameof(behaviorType));
-        }
-
-        var implementsPipelineBehavior = behaviorType.GetInterfaces()
-            .Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IPipelineBehavior<,>));
-        if (!implementsPipelineBehavior)
-        {
-            throw new ArgumentException(
-                $"Type '{behaviorType.Name}' must implement IPipelineBehavior<TRequest, TResponse>.",
-                nameof(behaviorType));
-        }
+        PipelineBehaviorTypeResolver.ValidateOpenBehaviorType(behaviorType);
 
         _behaviorTypes.Add(behaviorType);
         return this;
@@ -105,7 +81,10 @@ public sealed class MediatorOptions
     /// <returns>The <see cref="MediatorOptions"/> instance for chaining.</returns>
     public MediatorOptions AddBehavior<TBehavior>() where TBehavior : class
     {
-        _behaviorTypes.Add(typeof(TBehavior));
+        var behaviorType = typeof(TBehavior);
+        PipelineBehaviorTypeResolver.GetClosedBehaviorInterfacesOrThrow(behaviorType);
+
+        _behaviorTypes.Add(behaviorType);
         return this;
     }
 }

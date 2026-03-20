@@ -292,27 +292,21 @@ internal sealed class Mediator : IMediator
         }
 
         // Fallback: invoke behavior via reflection for dynamically registered behaviors
-        var pipelineInterface = behavior.GetType()
-            .GetInterfaces()
-            .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IPipelineBehavior<,>));
+        var pipelineInterface = PipelineBehaviorTypeResolver.GetClosedBehaviorInterfaceForInvocation(
+            behavior.GetType(),
+            requestType,
+            typeof(TResponse));
 
-        if (pipelineInterface != null)
+        var method = pipelineInterface.GetMethod("HandleAsync")!;
+        try
         {
-            var method = pipelineInterface.GetMethod("HandleAsync")!;
-            try
-            {
-                return (ValueTask<TResponse>)method.Invoke(behavior, [request, next, cancellationToken])!;
-            }
-            catch (TargetInvocationException ex) when (ex.InnerException != null)
-            {
-                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
-                throw; // Unreachable
-            }
+            return (ValueTask<TResponse>)method.Invoke(behavior, [request, next, cancellationToken])!;
         }
-
-        throw new InvalidOperationException(
-            $"Cannot invoke behavior {behavior.GetType().Name} for request type {requestType.Name}. " +
-            "Ensure the behavior implements IPipelineBehavior<,>.");
+        catch (TargetInvocationException ex) when (ex.InnerException != null)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+            throw; // Unreachable
+        }
     }
 
     /// <summary>
