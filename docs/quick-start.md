@@ -8,6 +8,47 @@ Get started with MediatorLite in minutes.
 dotnet add package MediatorLite
 ```
 
+Optional (when a project only needs request/notification/validation contracts):
+
+```bash
+dotnet add package MediatorLite.Abstractions
+```
+
+Optional (compile-time source-generated registration):
+
+```bash
+dotnet add package MediatorLite.SourceGeneration
+```
+
+## Package Selection and Versioning
+
+Use this as a quick rule set for new users.
+
+| Project Type | Install |
+|--------------|---------|
+| Application/API (recommended) | `MediatorLite` + `MediatorLite.SourceGeneration` |
+| Application/API (no source generation) | `MediatorLite` |
+| Shared contracts library | `MediatorLite.Abstractions` |
+
+How transitive install works:
+- Installing `MediatorLite` also installs `MediatorLite.Abstractions`.
+- Installing only `MediatorLite.SourceGeneration` does not install runtime contracts.
+
+Compatibility matrix (safe combinations):
+
+| Abstractions | MediatorLite | SourceGeneration | Supported |
+|--------------|--------------|------------------|-----------|
+| 1.0.x | 1.0.x | 1.0.x | Yes |
+| transitive | 1.0.x | 1.0.x | Yes |
+| 1.0.x | 1.0.x | not installed | Yes |
+| 1.0.x | not installed | 1.0.x | No |
+| 1.0.x | 2.0.x | 2.0.x | No |
+| 2.0.x | 2.0.x | 1.0.x | No |
+
+Versioning guideline:
+- Keep all packages on the same major and minor version.
+- Patch versions can differ, but lockstep is recommended for beginners.
+
 ## 1. Define a Request and Handler
 
 ```csharp

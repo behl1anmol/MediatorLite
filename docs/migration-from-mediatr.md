@@ -135,7 +135,18 @@ public class LoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, 
 
 <!-- Add -->
 <PackageReference Include="MediatorLite" Version="1.0.0" />
+<PackageReference Include="MediatorLite.SourceGeneration" Version="1.0.0" />
 ```
+
+If you keep requests/notifications in a separate shared project, use this there instead:
+
+```xml
+<PackageReference Include="MediatorLite.Abstractions" Version="1.0.0" />
+```
+
+Notes:
+- Installing `MediatorLite` pulls `MediatorLite.Abstractions` transitively.
+- Installing only `MediatorLite.SourceGeneration` does not provide runtime mediator contracts.
 
 ### Step 2: Update Using Statements
 

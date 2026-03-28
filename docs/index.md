@@ -62,6 +62,14 @@ Or for manual registration only:
 dotnet add package MediatorLite
 ```
 
+For shared contracts libraries (requests, notifications, and validation contracts only):
+
+```bash
+dotnet add package MediatorLite.Abstractions
+```
+
+`MediatorLite` already depends on `MediatorLite.Abstractions`, so application projects that install `MediatorLite` get abstractions transitively.
+
 ---
 
 ## Quick Example

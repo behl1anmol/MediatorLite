@@ -43,6 +43,41 @@ dotnet run -c Release
 4. Update CHANGELOG.md
 5. Submit PR with clear description
 
+## Package Versioning and Release Guidelines
+
+Use these rules to keep package restores predictable for new users.
+
+### Package roles
+
+- `MediatorLite.Abstractions`: contracts only
+- `MediatorLite`: runtime implementation, depends on `MediatorLite.Abstractions`
+- `MediatorLite.SourceGeneration`: analyzer/source generator package
+
+### Compatibility policy
+
+- Support same major/minor across all packages.
+- Treat cross-major combinations as unsupported.
+- Keep package versions lockstep when possible.
+
+### Version bump rules
+
+- Patch:
+	- bug fixes, docs, internal changes
+	- no public contract break in `MediatorLite.Abstractions`
+- Minor:
+	- additive, backward-compatible API changes
+- Major:
+	- breaking API or behavior changes
+
+### Release checklist
+
+1. Update versions for all affected projects.
+2. Run `dotnet restore`, `dotnet build -c Release`, and `dotnet test`.
+3. Pack projects and inspect generated nuspec files.
+4. Verify the generated `MediatorLite` nuspec (created under `obj/Release` after `dotnet pack`) contains dependency on `MediatorLite.Abstractions`.
+5. Update README compatibility matrix if support policy changes.
+6. Publish all packages in one release train.
+
 ## Reporting Issues
 
 - Use GitHub Issues
