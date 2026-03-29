@@ -29,6 +29,59 @@ A lightweight, high-performance mediator library for .NET 10+. Built from the gr
 dotnet add package MediatorLite
 ```
 
+Optional (contracts-only scenarios such as shared request assemblies):
+
+```bash
+dotnet add package MediatorLite.Abstractions
+```
+
+## Package and Versioning Guide
+
+### Which package should I install?
+
+| Project Type | Install | Why |
+|--------------|---------|-----|
+| Application/API that sends requests | `MediatorLite` + `MediatorLite.SourceGeneration` | Full runtime + compile-time handler discovery |
+| Application/API without source generation | `MediatorLite` | Full runtime, reflection fallback still works |
+| Shared contracts library (requests/notifications only) | `MediatorLite.Abstractions` | Keep shared package lightweight |
+
+### Will Abstractions be installed automatically?
+
+- If you install `MediatorLite`, yes. `MediatorLite.Abstractions` is pulled transitively.
+- If you install only `MediatorLite.SourceGeneration`, no. Source generation package does not pull runtime contracts by itself.
+- If you install both `MediatorLite` and `MediatorLite.SourceGeneration`, yes (via `MediatorLite`).
+
+### Compatibility Matrix
+
+Use this matrix as the default rule for safe upgrades.
+
+| MediatorLite.Abstractions | MediatorLite | MediatorLite.SourceGeneration | Supported | Notes |
+|---------------------------|--------------|-------------------------------|-----------|-------|
+| 1.0.x | 1.0.x | 1.0.x | Yes | Recommended lockstep |
+| (transitive) | 1.0.x | 1.0.x | Yes | Typical app setup; Abstractions arrives via MediatorLite |
+| 1.0.x | 1.0.x | not installed | Yes | Runtime works without source generation |
+| 1.0.x | not installed | 1.0.x | No | Missing runtime package for mediator usage |
+| 1.0.x | 2.0.x | 2.0.x | No | Cross-major mismatch with MediatorLite |
+| 2.0.x | 2.0.x | 1.0.x | No | Source generator major mismatch |
+| 1.1.x | 1.0.x | 1.0.x | Caution | May compile, but not a tested combination |
+
+### Versioning Policy
+
+- `MediatorLite.Abstractions` follows strict SemVer:
+    - Patch: docs/internal fixes, no API break
+    - Minor: additive API only, backward compatible
+    - Major: breaking contract changes
+- `MediatorLite` declares a dependency on `MediatorLite.Abstractions`.
+- For predictable restores, keep all three packages on the same major and minor version.
+- For pre-release builds, use matching pre-release versions across packages (for example, all `1.2.0-preview.3`).
+
+### Upgrade Checklist
+
+1. Upgrade `MediatorLite` first.
+2. Upgrade `MediatorLite.SourceGeneration` to the same major/minor.
+3. If you directly reference `MediatorLite.Abstractions`, align it to the same major/minor.
+4. Run `dotnet restore` and `dotnet build` to force source regeneration and verify compatibility.
+
 ## Quick Start
 
 ### 1. Define a Request and Handler

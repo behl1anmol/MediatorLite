@@ -83,3 +83,24 @@ dotnet run --configuration Release -- --filter '*' --exporters json markdown --m
 ```
 
 Results are written to `BenchmarkDotNet.Artifacts/results/`.
+
+## REST API Benchmarks (Production-Like)
+
+The repository also includes a REST API benchmark project at `tests/MediatorLite.RestApiBenchmarks`.
+This suite compares MediatorLite and MediatR in end-to-end API scenarios backed by SQLite:
+
+- In-process transport (`TestServer`) and real localhost transport (`Kestrel`)
+- Read-heavy and write-heavy API operations
+- Concurrency scenarios with multiple in-flight requests
+
+Run read/write benchmarks:
+
+```bash
+dotnet run -c Release --project tests/MediatorLite.RestApiBenchmarks -- --filter '*RestApiReadWriteBenchmarks*'
+```
+
+Run concurrency benchmarks:
+
+```bash
+dotnet run -c Release --project tests/MediatorLite.RestApiBenchmarks -- --filter '*RestApiConcurrencyBenchmarks*'
+```

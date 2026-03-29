@@ -52,6 +52,9 @@ nav_external_links:
   - title: MediatorLite on NuGet
     url: https://www.nuget.org/packages/MediatorLite/
     hide_icon: false
+  - title: MediatorLite.Abstractions on NuGet
+    url: https://www.nuget.org/packages/MediatorLite.Abstractions/
+    hide_icon: false
   - title: MediatorLite.SourceGeneration on NuGet
     url: https://www.nuget.org/packages/MediatorLite.SourceGeneration/
     hide_icon: false

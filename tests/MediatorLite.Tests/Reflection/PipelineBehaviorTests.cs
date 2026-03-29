@@ -64,6 +64,62 @@ public class PipelineBehaviorTests
         }
     }
 
+    public record FirstMultiQuery(int Value) : IRequest<int>;
+    public record SecondMultiQuery(int Value) : IRequest<int>;
+
+    [MediatorGeneration(Skip = true)]
+    public class FirstMultiQueryHandler : IRequestHandler<FirstMultiQuery, int>
+    {
+        public ValueTask<int> HandleAsync(FirstMultiQuery request, CancellationToken cancellationToken = default)
+        {
+            return ValueTask.FromResult(request.Value);
+        }
+    }
+
+    [MediatorGeneration(Skip = true)]
+    public class SecondMultiQueryHandler : IRequestHandler<SecondMultiQuery, int>
+    {
+        public ValueTask<int> HandleAsync(SecondMultiQuery request, CancellationToken cancellationToken = default)
+        {
+            return ValueTask.FromResult(request.Value);
+        }
+    }
+
+    [MediatorGeneration(Skip = true)]
+    public class MultiInterfaceBehavior :
+        IPipelineBehavior<FirstMultiQuery, int>,
+        IPipelineBehavior<SecondMultiQuery, int>
+    {
+        public static int FirstInterfaceCalls { get; private set; }
+        public static int SecondInterfaceCalls { get; private set; }
+
+        public static void Reset()
+        {
+            FirstInterfaceCalls = 0;
+            SecondInterfaceCalls = 0;
+        }
+
+        public async ValueTask<int> HandleAsync(
+            FirstMultiQuery request,
+            RequestHandlerDelegate<int> next,
+            CancellationToken cancellationToken = default)
+        {
+            FirstInterfaceCalls++;
+            var result = await next();
+            return result + 1;
+        }
+
+        public async ValueTask<int> HandleAsync(
+            SecondMultiQuery request,
+            RequestHandlerDelegate<int> next,
+            CancellationToken cancellationToken = default)
+        {
+            SecondInterfaceCalls++;
+            var result = await next();
+            return result * 2;
+        }
+    }
+
     #endregion
 
     [Fact]
@@ -136,6 +192,35 @@ public class PipelineBehaviorTests
 
         // Assert
         result.Should().Be(999); // Short-circuit value
+    }
+
+    [Fact]
+    public async Task ClosedBehavior_WithMultipleInterfaces_UsesMatchingInterfacePerRequest()
+    {
+        // Arrange
+        MultiInterfaceBehavior.Reset();
+
+        var services = new ServiceCollection();
+        services.AddTransient<IRequestHandler<FirstMultiQuery, int>, FirstMultiQueryHandler>();
+        services.AddTransient<IRequestHandler<SecondMultiQuery, int>, SecondMultiQueryHandler>();
+        services.AddMediatorLite(options =>
+        {
+            options.AddBehavior<MultiInterfaceBehavior>();
+        });
+        services.AddLogging();
+
+        var provider = services.BuildServiceProvider();
+        var mediator = provider.GetRequiredService<IMediator>();
+
+        // Act
+        var firstResult = await mediator.SendAsync(new FirstMultiQuery(5));
+        var secondResult = await mediator.SendAsync(new SecondMultiQuery(5));
+
+        // Assert
+        firstResult.Should().Be(6);
+        secondResult.Should().Be(10);
+        MultiInterfaceBehavior.FirstInterfaceCalls.Should().Be(1);
+        MultiInterfaceBehavior.SecondInterfaceCalls.Should().Be(1);
     }
 
     [MediatorGeneration(Skip = true)]

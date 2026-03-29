@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>MediatorLite.Abstractions</PackageId>
+    <Description>Contracts and abstractions for MediatorLite, including request/notification interfaces, pipeline abstractions, and validation contracts.</Description>
+    <PackageTags>mediator;cqrs;abstractions;contracts;pipeline;validation</PackageTags>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PackageIcon>icon.png</PackageIcon>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\icon.png" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>
