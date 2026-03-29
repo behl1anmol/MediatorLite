@@ -6,12 +6,14 @@ on:
     paths:
       - 'src/**'
       - 'tests/MediatorLite.Benchmarks/**'
+      - 'tests/MediatorLite.RestApiBenchmarks/**'
       - '.github/workflows/benchmarks.yml'
   pull_request:
     branches: [ main ]
     paths:
       - 'src/**'
       - 'tests/MediatorLite.Benchmarks/**'
+      - 'tests/MediatorLite.RestApiBenchmarks/**'
   workflow_dispatch:  # Allow manual trigger
 
 # Required permissions for commenting on PRs and pushing benchmark data
@@ -46,9 +48,14 @@ jobs:
     - name: Build (Release)
       run: dotnet build --configuration Release --no-restore
 
-    - name: Run Benchmarks
+    - name: Run Microbenchmarks
       run: |
         cd tests/MediatorLite.Benchmarks
+        dotnet run --configuration Release --no-build -- --filter='*' --exporters json markdown --memory
+
+    - name: Run REST API Benchmarks
+      run: |
+        cd tests/MediatorLite.RestApiBenchmarks
         dotnet run --configuration Release --no-build -- --filter='*' --exporters json markdown --memory
 
     - name: Upload benchmark results
@@ -59,6 +66,8 @@ jobs:
         path: |
           tests/MediatorLite.Benchmarks/BenchmarkDotNet.Artifacts/results/*.json
           tests/MediatorLite.Benchmarks/BenchmarkDotNet.Artifacts/results/*.md
+          tests/MediatorLite.RestApiBenchmarks/BenchmarkDotNet.Artifacts/results/*.json
+          tests/MediatorLite.RestApiBenchmarks/BenchmarkDotNet.Artifacts/results/*.md
 
     - name: Combine benchmark results
       if: github.event_name != 'pull_request'
@@ -128,45 +137,47 @@ jobs:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         script: |
           const fs = require('fs');
-          const path = './tests/MediatorLite.Benchmarks/BenchmarkDotNet.Artifacts/results';
-
-          // Check if the directory exists before trying to read it
-          if (!fs.existsSync(path)) {
-            console.log('Benchmark results directory not found, skipping PR comment');
-            return;
-          }
+          const resultDirs = [
+            './tests/MediatorLite.Benchmarks/BenchmarkDotNet.Artifacts/results',
+            './tests/MediatorLite.RestApiBenchmarks/BenchmarkDotNet.Artifacts/results'
+          ];
 
           try {
-            // Find ALL markdown results files
-            const files = fs.readdirSync(path);
-            console.log('Files found:', files);
-
-            // BenchmarkDotNet creates files like "*-report-github.md" for GitHub-formatted output
-            let mdFiles = files.filter(f => f.endsWith('-report-github.md'));
-
-            // Fallback to any .md files if github-formatted not found
-            if (mdFiles.length === 0) {
-              mdFiles = files.filter(f => f.endsWith('.md'));
-            }
-
-            if (mdFiles.length === 0) {
-              console.log('No benchmark markdown files found');
-              return;
-            }
-
-            console.log('Markdown files to process:', mdFiles);
-
-            // Combine all benchmark results
             let combinedResults = '## Benchmark Results\n\n';
 
-            for (const mdFile of mdFiles) {
-              const content = fs.readFileSync(`${path}/${mdFile}`, 'utf8');
-              // Extract benchmark class name from filename
-              let benchmarkName = mdFile
-                .replace('-report-github.md', '')
-                .replace('-report.md', '')
-                .replace('.md', '');
-              combinedResults += `### ${benchmarkName}\n\n${content}\n\n---\n\n`;
+            for (const path of resultDirs) {
+              if (!fs.existsSync(path)) {
+                console.log(`Benchmark results directory not found: ${path}`);
+                continue;
+              }
+
+              const files = fs.readdirSync(path);
+              console.log(`Files found in ${path}:`, files);
+
+              let mdFiles = files.filter(f => f.endsWith('-report-github.md'));
+              if (mdFiles.length === 0) {
+                mdFiles = files.filter(f => f.endsWith('.md'));
+              }
+
+              if (mdFiles.length === 0) {
+                continue;
+              }
+
+              combinedResults += `### ${path.includes('RestApi') ? 'REST API Benchmarks' : 'Microbenchmarks'}\n\n`;
+
+              for (const mdFile of mdFiles) {
+                const content = fs.readFileSync(`${path}/${mdFile}`, 'utf8');
+                let benchmarkName = mdFile
+                  .replace('-report-github.md', '')
+                  .replace('-report.md', '')
+                  .replace('.md', '');
+                combinedResults += `#### ${benchmarkName}\n\n${content}\n\n---\n\n`;
+              }
+            }
+
+            if (combinedResults.trim() === '## Benchmark Results') {
+              console.log('No benchmark markdown files found in either directory');
+              return;
             }
 
             github.rest.issues.createComment({
