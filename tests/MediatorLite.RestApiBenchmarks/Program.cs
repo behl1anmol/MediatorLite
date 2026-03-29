@@ -3,6 +3,6 @@ using MediatorLite.RestApiBenchmarks.Benchmarking;
 
 BenchmarkSwitcher.FromTypes(
 [
-	typeof(RestApiReadWriteBenchmarks),
-	typeof(RestApiConcurrencyBenchmarks)
+    typeof(RestApiReadWriteBenchmarks),
+    typeof(RestApiConcurrencyBenchmarks)
 ]).Run(args);
