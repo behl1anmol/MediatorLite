@@ -65,7 +65,10 @@ jobs:
 
     - name: Pack MediatorLite.SourceGeneration
       run: dotnet pack src/MediatorLite.SourceGeneration/MediatorLite.SourceGeneration.csproj --configuration Release --no-build --output ./artifacts /p:PackageVersion=${{ steps.get_version.outputs.VERSION }}
-
+    
+    - name: Pack MediatorLite.Abstractions
+      run: dotnet pack src/MediatorLite.Abstractions/MediatorLite.Abstractions.csproj --configuration Release --no-build --output ./artifacts /p:PackageVersion=${{ steps.get_version.outputs.VERSION }}
+    
     - name: Upload NuGet packages as artifacts
       uses: actions/upload-artifact@v6
       with:
