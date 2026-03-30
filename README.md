@@ -5,6 +5,8 @@
 [![MediatorLite Downloads](https://img.shields.io/nuget/dt/MediatorLite.svg?label=MediatorLite%20downloads)](https://www.nuget.org/packages/MediatorLite/)
 [![MediatorLite.SourceGeneration Version](https://img.shields.io/nuget/v/MediatorLite.SourceGeneration.svg?label=MediatorLite.SourceGeneration)](https://www.nuget.org/packages/MediatorLite.SourceGeneration/)
 [![MediatorLite.SourceGeneration Downloads](https://img.shields.io/nuget/dt/MediatorLite.SourceGeneration.svg?label=MediatorLite.SourceGeneration%20downloads)](https://www.nuget.org/packages/MediatorLite.SourceGeneration/)
+[![MediatorLite.Abstractions Version](https://img.shields.io/nuget/v/MediatorLite.Abstractions.svg?label=MediatorLite.Abstractions)](https://www.nuget.org/packages/MediatorLite.Abstractions/)
+[![MediatorLite.SourceGeneration Downloads](https://img.shields.io/nuget/dt/MediatorLite.Abstractions.svg?label=MediatorLite.Abstractions%20downloads)](https://www.nuget.org/packages/MediatorLite.Abstractions/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![.NET](https://img.shields.io/badge/.NET-10.0-blue.svg)](https://dotnet.microsoft.com/)
 
