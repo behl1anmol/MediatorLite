@@ -49,6 +49,26 @@ public record StopOnFirstEvent(string Message) : INotification;
     OverrideGlobal = true)]
 public record StopOnFirstFallbackEvent(string Message) : INotification;
 
+/// <summary>
+/// Notification configured for StopOnFirst + StopOnFirstError (default error strategy).
+/// When the first handler fails, it should throw immediately without trying other handlers.
+/// </summary>
+[NotificationOptions(
+    ExecutionStrategy = NotificationExecutionStrategy.StopOnFirst,
+    ErrorStrategy = NotificationErrorStrategy.StopOnFirstError,
+    OverrideGlobal = true)]
+public record StopOnFirstWithStopOnFirstErrorEvent(string Message) : INotification;
+
+/// <summary>
+/// Notification configured for StopOnFirst + ContinueAndAggregate where ALL handlers fail.
+/// Should throw AggregateException with all handler failures.
+/// </summary>
+[NotificationOptions(
+    ExecutionStrategy = NotificationExecutionStrategy.StopOnFirst,
+    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate,
+    OverrideGlobal = true)]
+public record AllFailStopOnFirstWithAggregateEvent(string Message) : INotification;
+
 #endregion
 
 #region Request Handlers
@@ -91,7 +111,7 @@ public class FailingRequestHandler : IRequestHandler<FailingRequest, string>
 {
     public ValueTask<string> HandleAsync(FailingRequest request, CancellationToken cancellationToken = default)
     {
-        throw new InvalidOperationException("Handler failed intentionally");
+        return ValueTask.FromException<string>(new InvalidOperationException("Handler failed intentionally"));
     }
 }
 
@@ -163,7 +183,7 @@ public class ParallelEventFailingHandler : INotificationHandler<ParallelEvent>
 {
     public ValueTask HandleAsync(ParallelEvent notification, CancellationToken cancellationToken = default)
     {
-        throw new InvalidOperationException("Parallel handler failed");
+        return ValueTask.FromException(new InvalidOperationException("Parallel handler failed"));
     }
 }
 
@@ -217,7 +237,7 @@ public class StopOnFirstFallbackEventHandler1 : INotificationHandler<StopOnFirst
     {
         WasCalled = true;
         ThrownException = new InvalidOperationException("Primary handler failed");
-        throw ThrownException;
+        return ValueTask.FromException(ThrownException);
     }
 }
 
@@ -250,6 +270,68 @@ public class StopOnFirstFallbackEventHandler3 : INotificationHandler<StopOnFirst
     {
         WasCalled = true;
         return ValueTask.CompletedTask;
+    }
+}
+
+/// <summary>
+/// Handler that fails for StopOnFirstWithStopOnFirstErrorEvent - tests immediate throw behavior.
+/// </summary>
+public class StopOnFirstWithStopOnFirstErrorEventFailingHandler : INotificationHandler<StopOnFirstWithStopOnFirstErrorEvent>
+{
+    public static bool WasCalled { get; private set; }
+    public static void Reset() => WasCalled = false;
+
+    public ValueTask HandleAsync(StopOnFirstWithStopOnFirstErrorEvent notification, CancellationToken cancellationToken = default)
+    {
+        WasCalled = true;
+        return ValueTask.FromException(new InvalidOperationException("StopOnFirst handler failed"));
+    }
+}
+
+/// <summary>
+/// Success handler for StopOnFirstWithStopOnFirstErrorEvent - should NOT be called when first handler fails.
+/// </summary>
+[NotificationHandlerOrder(1)]
+public class StopOnFirstWithStopOnFirstErrorEventSuccessHandler : INotificationHandler<StopOnFirstWithStopOnFirstErrorEvent>
+{
+    public static bool WasCalled { get; private set; }
+    public static void Reset() => WasCalled = false;
+
+    public ValueTask HandleAsync(StopOnFirstWithStopOnFirstErrorEvent notification, CancellationToken cancellationToken = default)
+    {
+        WasCalled = true;
+        return ValueTask.CompletedTask;
+    }
+}
+
+/// <summary>
+/// First failing handler for AllFailStopOnFirstWithAggregateEvent - tests aggregate exception.
+/// </summary>
+public class AllFailStopOnFirstWithAggregateEventHandler1 : INotificationHandler<AllFailStopOnFirstWithAggregateEvent>
+{
+    public static bool WasCalled { get; private set; }
+    public static void Reset() => WasCalled = false;
+
+    public ValueTask HandleAsync(AllFailStopOnFirstWithAggregateEvent notification, CancellationToken cancellationToken = default)
+    {
+        WasCalled = true;
+        return ValueTask.FromException(new InvalidOperationException("Handler1 failed"));
+    }
+}
+
+/// <summary>
+/// Second failing handler for AllFailStopOnFirstWithAggregateEvent - tests aggregate exception.
+/// </summary>
+[NotificationHandlerOrder(1)]
+public class AllFailStopOnFirstWithAggregateEventHandler2 : INotificationHandler<AllFailStopOnFirstWithAggregateEvent>
+{
+    public static bool WasCalled { get; private set; }
+    public static void Reset() => WasCalled = false;
+
+    public ValueTask HandleAsync(AllFailStopOnFirstWithAggregateEvent notification, CancellationToken cancellationToken = default)
+    {
+        WasCalled = true;
+        return ValueTask.FromException(new InvalidOperationException("Handler2 failed"));
     }
 }
 

@@ -1,6 +1,7 @@
 using MediatorLite.Configuration;
 using MediatorLite.Internal;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace MediatorLite;
 
@@ -42,6 +43,10 @@ public static class ServiceCollectionExtensions
             typeof(IMediator),
             typeof(Mediator),
             options.MediatorLifetime));
+
+        // Register null source-generated mediator as fallback if not already registered
+        // The source-generated AddGeneratedHandlers() will register the actual implementation
+        services.TryAddSingleton<ISourceGeneratedMediator>(NullSourceGeneratedMediator.Instance);
 
         // Register behaviors added via options (open generics registered as IPipelineBehavior<,>)
         foreach (var behaviorType in options.BehaviorTypes)

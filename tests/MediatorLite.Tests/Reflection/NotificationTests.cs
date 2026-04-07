@@ -1,4 +1,5 @@
 using FluentAssertions;
+using MediatorLite.Generated;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Xunit;
@@ -16,7 +17,25 @@ public class NotificationTests
         ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate)]
     public record ParallelNotification(string Message) : INotification;
 
-    [MediatorGeneration(Skip = true)]
+    // Separate notification type for testing per-type settings without side effects from FailingHandler
+    [NotificationOptions(
+        ExecutionStrategy = NotificationExecutionStrategy.Parallel,
+        ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate)]
+    public record PerTypeSettingsNotification(string Message) : INotification;
+
+    public class PerTypeSettingsHandler : INotificationHandler<PerTypeSettingsNotification>
+    {
+        public static bool WasCalled { get; private set; }
+
+        public ValueTask HandleAsync(PerTypeSettingsNotification notification, CancellationToken cancellationToken = default)
+        {
+            WasCalled = true;
+            return ValueTask.CompletedTask;
+        }
+
+        public static void Reset() => WasCalled = false;
+    }
+
     public class FirstHandler : INotificationHandler<UserCreatedNotification>
     {
         public static List<int> CallOrder { get; } = [];
@@ -36,7 +55,6 @@ public class NotificationTests
         }
     }
 
-    [MediatorGeneration(Skip = true)]
     [NotificationHandlerOrder(2)]
     public class SecondHandler : INotificationHandler<UserCreatedNotification>
     {
@@ -52,7 +70,6 @@ public class NotificationTests
         public static void Reset() => CallCount = 0;
     }
 
-    [MediatorGeneration(Skip = true)]
     [NotificationHandlerOrder(1)]
     public class OrderedFirstHandler : INotificationHandler<UserCreatedNotification>
     {
@@ -68,16 +85,14 @@ public class NotificationTests
         public static void Reset() => CallCount = 0;
     }
 
-    [MediatorGeneration(Skip = true)]
     public class FailingHandler : INotificationHandler<ParallelNotification>
     {
         public ValueTask HandleAsync(ParallelNotification notification, CancellationToken cancellationToken = default)
         {
-            throw new InvalidOperationException("Handler failed");
+            return ValueTask.FromException(new InvalidOperationException("Handler failed"));
         }
     }
 
-    [MediatorGeneration(Skip = true)]
     public class SuccessHandler : INotificationHandler<ParallelNotification>
     {
         public static bool WasCalled { get; private set; }
@@ -107,6 +122,7 @@ public class NotificationTests
         services.AddTransient<INotificationHandler<UserCreatedNotification>, OrderedFirstHandler>();
         services.AddMediatorLite();
         services.AddLogging();
+        services.AddGeneratedHandlers();
 
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
@@ -137,6 +153,7 @@ public class NotificationTests
             options.NotificationExecutionStrategy = NotificationExecutionStrategy.Sequential;
         });
         services.AddLogging();
+        services.AddGeneratedHandlers();
 
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
@@ -155,6 +172,7 @@ public class NotificationTests
         var services = new ServiceCollection();
         services.AddMediatorLite();
         services.AddLogging();
+        services.AddGeneratedHandlers();
 
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
@@ -182,6 +200,7 @@ public class NotificationTests
             options.NotificationErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate;
         });
         services.AddLogging();
+        services.AddGeneratedHandlers();
 
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
@@ -201,32 +220,32 @@ public class NotificationTests
     public async Task PublishAsync_UsesPerNotificationTypeSettings()
     {
         // Arrange
-        SuccessHandler.Reset();
+        PerTypeSettingsHandler.Reset();
 
         var services = new ServiceCollection();
-        services.AddTransient<INotificationHandler<ParallelNotification>, SuccessHandler>();
         services.AddMediatorLite(options =>
         {
             // Global setting is Sequential
             options.NotificationExecutionStrategy = NotificationExecutionStrategy.Sequential;
         });
         services.AddLogging();
+        services.AddGeneratedHandlers();
 
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
 
-        // Act - ParallelNotification has [NotificationOptions] attribute overriding to Parallel
-        await mediator.PublishAsync(new ParallelNotification("test"));
+        // Act - PerTypeSettingsNotification has [NotificationOptions] attribute overriding to Parallel
+        await mediator.PublishAsync(new PerTypeSettingsNotification("test"));
 
         // Assert
-        SuccessHandler.WasCalled.Should().BeTrue();
+        PerTypeSettingsHandler.WasCalled.Should().BeTrue();
     }
 
     #region StopOnFirst Tests
 
+    [NotificationOptions(ExecutionStrategy = NotificationExecutionStrategy.StopOnFirst)]
     public record StopOnFirstNotification(string Message) : INotification;
 
-    [MediatorGeneration(Skip = true)]
     public class StopOnFirstHandler1 : INotificationHandler<StopOnFirstNotification>
     {
         public static bool WasCalled { get; private set; }
@@ -239,7 +258,6 @@ public class NotificationTests
         }
     }
 
-    [MediatorGeneration(Skip = true)]
     [NotificationHandlerOrder(1)]
     public class StopOnFirstHandler2 : INotificationHandler<StopOnFirstNotification>
     {
@@ -253,9 +271,11 @@ public class NotificationTests
         }
     }
 
+    [NotificationOptions(
+        ExecutionStrategy = NotificationExecutionStrategy.StopOnFirst,
+        ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate)]
     public record FallbackNotification(string Message) : INotification;
 
-    [MediatorGeneration(Skip = true)]
     public class FallbackHandler1_Fails : INotificationHandler<FallbackNotification>
     {
         public static bool WasCalled { get; private set; }
@@ -264,11 +284,10 @@ public class NotificationTests
         public ValueTask HandleAsync(FallbackNotification notification, CancellationToken cancellationToken = default)
         {
             WasCalled = true;
-            throw new InvalidOperationException("Primary failed");
+            return ValueTask.FromException(new InvalidOperationException("Primary failed"));
         }
     }
 
-    [MediatorGeneration(Skip = true)]
     [NotificationHandlerOrder(1)]
     public class FallbackHandler2_Succeeds : INotificationHandler<FallbackNotification>
     {
@@ -282,7 +301,6 @@ public class NotificationTests
         }
     }
 
-    [MediatorGeneration(Skip = true)]
     [NotificationHandlerOrder(2)]
     public class FallbackHandler3_NotReached : INotificationHandler<FallbackNotification>
     {
@@ -293,6 +311,60 @@ public class NotificationTests
         {
             WasCalled = true;
             return ValueTask.CompletedTask;
+        }
+    }
+
+    // Notification type for testing StopOnFirst with StopOnFirstError strategy
+    [NotificationOptions(
+        ExecutionStrategy = NotificationExecutionStrategy.StopOnFirst,
+        ErrorStrategy = NotificationErrorStrategy.StopOnFirstError)]
+    public record StopOnFirstErrorNotification(string Message) : INotification;
+
+    public class StopOnFirstErrorHandler_Fails : INotificationHandler<StopOnFirstErrorNotification>
+    {
+        public static bool WasCalled { get; private set; }
+        public static void Reset() => WasCalled = false;
+
+        public ValueTask HandleAsync(StopOnFirstErrorNotification notification, CancellationToken cancellationToken = default)
+        {
+            WasCalled = true;
+            return ValueTask.FromException(new InvalidOperationException("Primary failed"));
+        }
+    }
+
+    [NotificationHandlerOrder(1)]
+    public class StopOnFirstErrorHandler_Succeeds : INotificationHandler<StopOnFirstErrorNotification>
+    {
+        public static bool WasCalled { get; private set; }
+        public static void Reset() => WasCalled = false;
+
+        public ValueTask HandleAsync(StopOnFirstErrorNotification notification, CancellationToken cancellationToken = default)
+        {
+            WasCalled = true;
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    // Notification type for testing all handlers failing scenario
+    [NotificationOptions(
+        ExecutionStrategy = NotificationExecutionStrategy.StopOnFirst,
+        ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate)]
+    public record AllFailNotification(string Message) : INotification;
+
+    public class AllFailHandler1 : INotificationHandler<AllFailNotification>
+    {
+        public ValueTask HandleAsync(AllFailNotification notification, CancellationToken cancellationToken = default)
+        {
+            return ValueTask.FromException(new InvalidOperationException("Handler1 failed"));
+        }
+    }
+
+    [NotificationHandlerOrder(1)]
+    public class AllFailHandler2 : INotificationHandler<AllFailNotification>
+    {
+        public ValueTask HandleAsync(AllFailNotification notification, CancellationToken cancellationToken = default)
+        {
+            return ValueTask.FromException(new InvalidOperationException("Handler2 failed"));
         }
     }
 
@@ -311,6 +383,7 @@ public class NotificationTests
             options.NotificationExecutionStrategy = NotificationExecutionStrategy.StopOnFirst;
         });
         services.AddLogging();
+        services.AddGeneratedHandlers();
 
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
@@ -341,6 +414,7 @@ public class NotificationTests
             options.NotificationErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate;
         });
         services.AddLogging();
+        services.AddGeneratedHandlers();
 
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
@@ -358,62 +432,43 @@ public class NotificationTests
     public async Task PublishAsync_StopOnFirst_WithStopOnFirstError_ThrowsImmediately()
     {
         // Arrange
-        FallbackHandler1_Fails.Reset();
-        FallbackHandler2_Succeeds.Reset();
+        StopOnFirstErrorHandler_Fails.Reset();
+        StopOnFirstErrorHandler_Succeeds.Reset();
 
         var services = new ServiceCollection();
-        services.AddTransient<INotificationHandler<FallbackNotification>, FallbackHandler1_Fails>();
-        services.AddTransient<INotificationHandler<FallbackNotification>, FallbackHandler2_Succeeds>();
-        services.AddMediatorLite(options =>
-        {
-            options.NotificationExecutionStrategy = NotificationExecutionStrategy.StopOnFirst;
-            options.NotificationErrorStrategy = NotificationErrorStrategy.StopOnFirstError;
-        });
+        services.AddMediatorLite();
         services.AddLogging();
+        services.AddGeneratedHandlers();
 
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
 
-        // Act & Assert - Should throw immediately
-        Func<Task> act = async () => await mediator.PublishAsync(new FallbackNotification("test"));
+        // Act & Assert - Should throw immediately (StopOnFirstErrorNotification has StopOnFirstError attribute)
+        Func<Task> act = async () => await mediator.PublishAsync(new StopOnFirstErrorNotification("test"));
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Primary failed");
 
-        // Handler2 should NOT have been called
-        FallbackHandler2_Succeeds.WasCalled.Should().BeFalse();
+        // Handler_Succeeds (order 1) should NOT have been called because Handler_Fails (order 0) throws
+        StopOnFirstErrorHandler_Fails.WasCalled.Should().BeTrue();
+        StopOnFirstErrorHandler_Succeeds.WasCalled.Should().BeFalse();
     }
 
     [Fact]
     public async Task PublishAsync_StopOnFirst_AllFail_ThrowsAggregateException()
     {
-        // Arrange - All handlers fail
+        // Arrange - AllFailNotification has only failing handlers
         var services = new ServiceCollection();
-        services.AddTransient<INotificationHandler<FallbackNotification>, FallbackHandler1_Fails>();
-        services.AddTransient<INotificationHandler<FallbackNotification>>(_ =>
-            new ThrowingFallbackHandler("Handler2 also failed"));
-        services.AddMediatorLite(options =>
-        {
-            options.NotificationExecutionStrategy = NotificationExecutionStrategy.StopOnFirst;
-            options.NotificationErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate;
-        });
+        services.AddMediatorLite();
+        services.AddGeneratedHandlers();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
 
         // Act & Assert - Should throw AggregateException with all failures
-        Func<Task> act = async () => await mediator.PublishAsync(new FallbackNotification("test"));
+        Func<Task> act = async () => await mediator.PublishAsync(new AllFailNotification("test"));
         var exception = await act.Should().ThrowAsync<AggregateException>();
         exception.Which.InnerExceptions.Should().HaveCount(2);
-    }
-
-    [MediatorGeneration(Skip = true)]
-    public class ThrowingFallbackHandler(string message) : INotificationHandler<FallbackNotification>
-    {
-        public ValueTask HandleAsync(FallbackNotification notification, CancellationToken cancellationToken = default)
-        {
-            throw new InvalidOperationException(message);
-        }
     }
 
     #endregion
@@ -434,6 +489,7 @@ public class NotificationTests
             options.NotificationExecutionStrategy = NotificationExecutionStrategy.Parallel;
             options.NotificationErrorStrategy = NotificationErrorStrategy.StopOnFirstError; // Should be ignored!
         });
+        services.AddGeneratedHandlers();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();

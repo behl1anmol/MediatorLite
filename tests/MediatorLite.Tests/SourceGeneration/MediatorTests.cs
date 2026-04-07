@@ -159,14 +159,11 @@ public class MediatorTests
         var mediator = provider.GetRequiredService<IMediator>();
         var sourceGenMediator = provider.GetService<ISourceGeneratedMediator>();
 
-        // Verify source-gen mediator can dispatch our request type
-        var canDispatch = sourceGenMediator?.TrySendAsync<UserDto>(
-            provider,
-            new GetUserByIdQuery(1),
-            CancellationToken.None);
+        // Verify source-gen mediator has a dispatcher for our request type
+        var dispatcher = sourceGenMediator?.GetDispatcher(typeof(GetUserByIdQuery));
 
         // Assert
-        canDispatch.Should().NotBeNull("Source-generated mediator should recognize GetUserByIdQuery");
+        dispatcher.Should().NotBeNull("Source-generated mediator should have dispatcher for GetUserByIdQuery");
 
         // Execute through mediator
         var result = await mediator.SendAsync(new GetUserByIdQuery(1));

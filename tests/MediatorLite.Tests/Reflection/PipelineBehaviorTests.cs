@@ -1,4 +1,5 @@
 using FluentAssertions;
+using MediatorLite.Generated;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Xunit;
@@ -11,7 +12,6 @@ public class PipelineBehaviorTests
 
     public record TestQuery(int Value) : IRequest<int>;
 
-    [MediatorGeneration(Skip = true)]
     public class TestQueryHandler : IRequestHandler<TestQuery, int>
     {
         public ValueTask<int> HandleAsync(TestQuery request, CancellationToken cancellationToken = default)
@@ -20,7 +20,18 @@ public class PipelineBehaviorTests
         }
     }
 
-    [MediatorGeneration(Skip = true)]
+    // Query type specifically for short-circuit testing
+    public record ShortCircuitQuery(int Value) : IRequest<int>;
+
+    public class ShortCircuitQueryHandler : IRequestHandler<ShortCircuitQuery, int>
+    {
+        public ValueTask<int> HandleAsync(ShortCircuitQuery request, CancellationToken cancellationToken = default)
+        {
+            return ValueTask.FromResult(request.Value * 2);
+        }
+    }
+
+    [BehaviorOrder(1)]
     public class AddOneBehavior : IPipelineBehavior<TestQuery, int>
     {
         public async ValueTask<int> HandleAsync(
@@ -33,7 +44,7 @@ public class PipelineBehaviorTests
         }
     }
 
-    [MediatorGeneration(Skip = true)]
+    [BehaviorOrder(2)]
     public class MultiplyByTwoBehavior : IPipelineBehavior<TestQuery, int>
     {
         public async ValueTask<int> HandleAsync(
@@ -46,7 +57,7 @@ public class PipelineBehaviorTests
         }
     }
 
-    [MediatorGeneration(Skip = true)]
+    [BehaviorOrder(3)]
     public class TrackingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
         where TRequest : IRequest<TResponse>
     {
@@ -67,7 +78,6 @@ public class PipelineBehaviorTests
     public record FirstMultiQuery(int Value) : IRequest<int>;
     public record SecondMultiQuery(int Value) : IRequest<int>;
 
-    [MediatorGeneration(Skip = true)]
     public class FirstMultiQueryHandler : IRequestHandler<FirstMultiQuery, int>
     {
         public ValueTask<int> HandleAsync(FirstMultiQuery request, CancellationToken cancellationToken = default)
@@ -76,7 +86,6 @@ public class PipelineBehaviorTests
         }
     }
 
-    [MediatorGeneration(Skip = true)]
     public class SecondMultiQueryHandler : IRequestHandler<SecondMultiQuery, int>
     {
         public ValueTask<int> HandleAsync(SecondMultiQuery request, CancellationToken cancellationToken = default)
@@ -85,7 +94,6 @@ public class PipelineBehaviorTests
         }
     }
 
-    [MediatorGeneration(Skip = true)]
     public class MultiInterfaceBehavior :
         IPipelineBehavior<FirstMultiQuery, int>,
         IPipelineBehavior<SecondMultiQuery, int>
@@ -136,6 +144,7 @@ public class PipelineBehaviorTests
         services.AddTransient<IPipelineBehavior<TestQuery, int>, MultiplyByTwoBehavior>();
         services.AddMediatorLite();
         services.AddLogging();
+        services.AddGeneratedHandlers();
 
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
@@ -162,6 +171,7 @@ public class PipelineBehaviorTests
         services.AddTransient(typeof(IPipelineBehavior<,>), typeof(TrackingBehavior<,>));
         services.AddMediatorLite();
         services.AddLogging();
+        services.AddGeneratedHandlers();
 
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
@@ -179,16 +189,17 @@ public class PipelineBehaviorTests
     {
         // Arrange
         var services = new ServiceCollection();
-        services.AddTransient<IRequestHandler<TestQuery, int>, TestQueryHandler>();
-        services.AddTransient<IPipelineBehavior<TestQuery, int>, ShortCircuitBehavior>();
+        services.AddTransient<IRequestHandler<ShortCircuitQuery, int>, ShortCircuitQueryHandler>();
+        services.AddTransient<IPipelineBehavior<ShortCircuitQuery, int>, ShortCircuitBehavior>();
         services.AddMediatorLite();
         services.AddLogging();
+        services.AddGeneratedHandlers();
 
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
 
         // Act
-        var result = await mediator.SendAsync(new TestQuery(5));
+        var result = await mediator.SendAsync(new ShortCircuitQuery(5));
 
         // Assert
         result.Should().Be(999); // Short-circuit value
@@ -207,6 +218,7 @@ public class PipelineBehaviorTests
         {
             options.AddBehavior<MultiInterfaceBehavior>();
         });
+        services.AddGeneratedHandlers();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -223,11 +235,10 @@ public class PipelineBehaviorTests
         MultiInterfaceBehavior.SecondInterfaceCalls.Should().Be(1);
     }
 
-    [MediatorGeneration(Skip = true)]
-    public class ShortCircuitBehavior : IPipelineBehavior<TestQuery, int>
+    public class ShortCircuitBehavior : IPipelineBehavior<ShortCircuitQuery, int>
     {
         public ValueTask<int> HandleAsync(
-            TestQuery request,
+            ShortCircuitQuery request,
             RequestHandlerDelegate<int> next,
             CancellationToken cancellationToken = default)
         {

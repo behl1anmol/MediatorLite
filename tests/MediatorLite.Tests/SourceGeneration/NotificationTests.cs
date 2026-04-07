@@ -66,7 +66,8 @@ public class NotificationTests
     [Fact]
     public async Task PublishAsync_UsesSourceGenHandlerOrder()
     {
-        // This test verifies that source-generated TryGetHandlerOrder is used
+        // This test verifies that source-generated notification publisher
+        // has handlers ordered correctly (order is baked into generated code)
 
         // Arrange
         var services = new ServiceCollection();
@@ -77,13 +78,22 @@ public class NotificationTests
         var provider = services.BuildServiceProvider();
         var sourceGenMediator = provider.GetRequiredService<ISourceGeneratedMediator>();
 
-        // Act - Check if source-gen knows the handler order
-        var handler2Order = sourceGenMediator.TryGetHandlerOrder(typeof(UserCreatedEventHandler2));
-        var handler3Order = sourceGenMediator.TryGetHandlerOrder(typeof(UserCreatedEventHandler3));
+        // Act - Check if source-gen has a publisher for this notification type
+        var publisher = sourceGenMediator.GetPublisher(typeof(UserCreatedEvent));
 
-        // Assert
-        handler2Order.Should().Be(1);
-        handler3Order.Should().Be(2);
+        // Assert - Publisher should exist
+        publisher.Should().NotBeNull("GetPublisher should recognize UserCreatedEvent");
+        
+        // Execute and verify handlers ran in order
+        UserCreatedEventHandler1.Reset();
+        UserCreatedEventHandler2.Reset();
+        UserCreatedEventHandler3.Reset();
+        
+        var mediator = provider.GetRequiredService<IMediator>();
+        await mediator.PublishAsync(new UserCreatedEvent(1, "test@test.com"));
+        
+        // Order should be: Handler1 (default 0), Handler2 (order 1), Handler3 (order 2)
+        UserCreatedEventHandler1.CallOrder.Should().ContainInOrder(1, 2, 3);
     }
 
     [Fact]
@@ -138,7 +148,7 @@ public class NotificationTests
         var sourceGenMediator = provider.GetRequiredService<ISourceGeneratedMediator>();
 
         // Act - Check if source-gen knows the notification options
-        var parallelOptions = sourceGenMediator.TryGetNotificationOptions(typeof(ParallelEvent));
+        var parallelOptions = sourceGenMediator.GetNotificationOptions(typeof(ParallelEvent));
 
         // Assert
         parallelOptions.Should().NotBeNull();
@@ -297,96 +307,50 @@ public class NotificationTests
     [Fact]
     public async Task PublishAsync_StopOnFirst_WithStopOnFirstError_ThrowsImmediately()
     {
-        // Arrange - StopOnFirstEvent is configured with StopOnFirst + StopOnFirstError (default)
-        StopOnFirstEventHandler1.Reset();
-        StopOnFirstEventHandler2.Reset();
+        // Arrange - StopOnFirstWithStopOnFirstErrorEvent has [NotificationOptions] with StopOnFirst + StopOnFirstError
+        // In v2 source-generated dispatch, notification strategies are determined at compile-time via attributes,
+        // NOT via runtime MediatorOptions. This test verifies the attribute-based configuration works.
+        StopOnFirstWithStopOnFirstErrorEventFailingHandler.Reset();
+        StopOnFirstWithStopOnFirstErrorEventSuccessHandler.Reset();
 
         var services = new ServiceCollection();
-        services.AddTransient<INotificationHandler<StopOnFirstWithErrorEvent>, StopOnFirstWithErrorEventFailingHandler>();
-        services.AddTransient<INotificationHandler<StopOnFirstWithErrorEvent>, StopOnFirstWithErrorEventSuccessHandler>();
-        services.AddMediatorLite(options =>
-        {
-            options.NotificationExecutionStrategy = NotificationExecutionStrategy.StopOnFirst;
-            options.NotificationErrorStrategy = NotificationErrorStrategy.StopOnFirstError;
-        });
+        services.AddGeneratedHandlers();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
 
-        // Act & Assert - Should throw immediately because StopOnFirstError
-        Func<Task> act = async () => await mediator.PublishAsync(new StopOnFirstWithErrorEvent("test"));
+        // Act & Assert - Should throw immediately because StopOnFirstError (from attribute)
+        Func<Task> act = async () => await mediator.PublishAsync(new StopOnFirstWithStopOnFirstErrorEvent("test"));
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("StopOnFirst handler failed");
 
-        // Success handler should NOT have been called
-        StopOnFirstWithErrorEventSuccessHandler.WasCalled.Should().BeFalse();
+        // Success handler should NOT have been called (StopOnFirstError stops on first failure)
+        StopOnFirstWithStopOnFirstErrorEventSuccessHandler.WasCalled.Should().BeFalse();
     }
 
     [Fact]
     public async Task PublishAsync_StopOnFirst_AllHandlersFail_ThrowsAggregateException()
     {
-        // Arrange - Create notification where all handlers fail with ContinueAndAggregate
+        // Arrange - AllFailStopOnFirstWithAggregateEvent has [NotificationOptions] with StopOnFirst + ContinueAndAggregate
+        // In v2 source-generated dispatch, notification strategies are determined at compile-time via attributes,
+        // NOT via runtime MediatorOptions. This test verifies aggregate exception with multiple failures.
+        AllFailStopOnFirstWithAggregateEventHandler1.Reset();
+        AllFailStopOnFirstWithAggregateEventHandler2.Reset();
+
         var services = new ServiceCollection();
-        services.AddTransient<INotificationHandler<AllFailStopOnFirstEvent>, AllFailStopOnFirstEventHandler1>();
-        services.AddTransient<INotificationHandler<AllFailStopOnFirstEvent>, AllFailStopOnFirstEventHandler2>();
-        services.AddMediatorLite(options =>
-        {
-            options.NotificationExecutionStrategy = NotificationExecutionStrategy.StopOnFirst;
-            options.NotificationErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate;
-        });
+        services.AddGeneratedHandlers();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
 
         // Act & Assert - Should throw AggregateException with all failures
-        Func<Task> act = async () => await mediator.PublishAsync(new AllFailStopOnFirstEvent("test"));
+        Func<Task> act = async () => await mediator.PublishAsync(new AllFailStopOnFirstWithAggregateEvent("test"));
         var exception = await act.Should().ThrowAsync<AggregateException>();
         exception.Which.InnerExceptions.Should().HaveCount(2);
     }
 }
 
-#region Additional Test Types for StopOnFirst Error Handling
-
-public record StopOnFirstWithErrorEvent(string Message) : INotification;
-
-public class StopOnFirstWithErrorEventFailingHandler : INotificationHandler<StopOnFirstWithErrorEvent>
-{
-    public ValueTask HandleAsync(StopOnFirstWithErrorEvent notification, CancellationToken cancellationToken = default)
-    {
-        throw new InvalidOperationException("StopOnFirst handler failed");
-    }
-}
-
-public class StopOnFirstWithErrorEventSuccessHandler : INotificationHandler<StopOnFirstWithErrorEvent>
-{
-    public static bool WasCalled { get; private set; }
-    public static void Reset() => WasCalled = false;
-
-    public ValueTask HandleAsync(StopOnFirstWithErrorEvent notification, CancellationToken cancellationToken = default)
-    {
-        WasCalled = true;
-        return ValueTask.CompletedTask;
-    }
-}
-
-public record AllFailStopOnFirstEvent(string Message) : INotification;
-
-public class AllFailStopOnFirstEventHandler1 : INotificationHandler<AllFailStopOnFirstEvent>
-{
-    public ValueTask HandleAsync(AllFailStopOnFirstEvent notification, CancellationToken cancellationToken = default)
-    {
-        throw new InvalidOperationException("Handler1 failed");
-    }
-}
-
-public class AllFailStopOnFirstEventHandler2 : INotificationHandler<AllFailStopOnFirstEvent>
-{
-    public ValueTask HandleAsync(AllFailStopOnFirstEvent notification, CancellationToken cancellationToken = default)
-    {
-        throw new InvalidOperationException("Handler2 failed");
-    }
-}
-
-#endregion

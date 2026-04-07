@@ -8,6 +8,17 @@ using MediatorValidationResult = MediatorLite.Validation.Models.ValidationResult
 
 namespace MediatorLite.Tests.Reflection;
 
+/// <summary>
+/// Tests for validation behavior with manual DI registration (no source generation).
+/// 
+/// IMPORTANT (v2 Architecture):
+/// v2 deprecates the reflection fallback path. Handlers with [MediatorGeneration(Skip = true)]
+/// are not discovered at compile time, so no dispatcher is generated for them.
+/// When sending a request with no source-generated dispatcher, v2 throws InvalidOperationException.
+/// 
+/// These tests verify that v2 correctly rejects manually-registered handlers that weren't
+/// discovered at compile time.
+/// </summary>
 public class ValidationTests
 {
     #region Test Types
@@ -48,9 +59,9 @@ public class ValidationTests
     #endregion
 
     [Fact]
-    public async Task ValidationBehavior_WithValidRequest_PassesThrough()
+    public async Task ManuallyRegisteredHandler_ThrowsInv2_NoSourceGenDispatcher()
     {
-        // Arrange
+        // Arrange - Handler has [MediatorGeneration(Skip = true)], so no dispatcher generated
         var services = new ServiceCollection();
         services.AddTransient<IRequestHandler<CreateUserCommand, int>, CreateUserCommandHandler>();
         services.AddTransient<IValidator<CreateUserCommand>, DataAnnotationsValidator<CreateUserCommand>>();
@@ -61,21 +72,21 @@ public class ValidationTests
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
 
-        // Act
-        var result = await mediator.SendAsync(new CreateUserCommand("John", "john@example.com"));
-
-        // Assert
-        result.Should().Be(42);
+        // Act & Assert - v2 throws because no source-gen dispatcher exists for this request type
+        Func<Task> act = async () => await mediator.SendAsync(new CreateUserCommand("John", "john@example.com"));
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*No handler*");
     }
 
     [Fact]
-    public async Task ValidationBehavior_WithInvalidRequest_ThrowsValidationException()
+    public async Task V2Architecture_RequiresSourceGeneration_ForDispatch()
     {
-        // Arrange
+        // This test documents v2's source-gen-only architecture.
+        // Handlers marked with [MediatorGeneration(Skip = true)] are NOT discovered,
+        // so manually registering them in DI does NOT make them dispatchable.
+        
         var services = new ServiceCollection();
         services.AddTransient<IRequestHandler<CreateUserCommand, int>, CreateUserCommandHandler>();
-        services.AddTransient<IValidator<CreateUserCommand>, DataAnnotationsValidator<CreateUserCommand>>();
-        services.AddTransient<IPipelineBehavior<CreateUserCommand, int>, ValidationBehavior<CreateUserCommand, int>>();
         services.AddMediatorLite();
         services.AddLogging();
 
@@ -83,14 +94,14 @@ public class ValidationTests
         var mediator = provider.GetRequiredService<IMediator>();
 
         // Act & Assert
-        Func<Task> act = async () => await mediator.SendAsync(new CreateUserCommand("J", "invalid-email"));
-        await act.Should().ThrowAsync<MediatorLite.Validation.ValidationException>();
+        Func<Task> act = async () => await mediator.SendAsync(new CreateUserCommand("Test", "test@test.com"));
+        await act.Should().ThrowAsync<InvalidOperationException>();
     }
 
     [Fact]
-    public async Task CustomValidator_IsInvoked()
+    public async Task CustomValidator_WithManualRegistration_NotReachable()
     {
-        // Arrange
+        // In v2, manually registered handlers are not dispatchable
         var services = new ServiceCollection();
         services.AddTransient<IRequestHandler<CreateUserCommand, int>, CreateUserCommandHandler>();
         services.AddTransient<IValidator<CreateUserCommand>, CustomValidator>();
@@ -101,10 +112,9 @@ public class ValidationTests
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
 
-        // Act & Assert
+        // Act & Assert - Throws because no source-gen dispatcher (validation never reached)
         Func<Task> act = async () => await mediator.SendAsync(new CreateUserCommand("admin_user", "admin@example.com"));
-        var exception = await act.Should().ThrowAsync<MediatorLite.Validation.ValidationException>();
-        exception.Which.Errors.Should().Contain(e => e.ErrorMessage.Contains("admin"));
+        await act.Should().ThrowAsync<InvalidOperationException>();
     }
 
     [Fact]

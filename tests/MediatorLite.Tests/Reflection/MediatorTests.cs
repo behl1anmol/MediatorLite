@@ -1,5 +1,6 @@
 using FluentAssertions;
 using MediatorLite.Configuration;
+using MediatorLite.Generated;
 using MediatorLite.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -17,7 +18,6 @@ public class MediatorTests
 
     public record User(int Id, string Name);
 
-    [MediatorGeneration(Skip = true)]
     public class GetUserQueryHandler : IRequestHandler<GetUserQuery, User>
     {
         public ValueTask<User> HandleAsync(GetUserQuery request, CancellationToken cancellationToken = default)
@@ -28,7 +28,6 @@ public class MediatorTests
 
     public record DeleteUserCommand(int Id) : IRequest;
 
-    [MediatorGeneration(Skip = true)]
     public class DeleteUserCommandHandler : IRequestHandler<DeleteUserCommand>
     {
         public bool WasCalled { get; private set; }
@@ -42,12 +41,11 @@ public class MediatorTests
 
     public record FailingQuery : IRequest<string>;
 
-    [MediatorGeneration(Skip = true)]
     public class FailingQueryHandler : IRequestHandler<FailingQuery, string>
     {
         public ValueTask<string> HandleAsync(FailingQuery request, CancellationToken cancellationToken = default)
         {
-            throw new InvalidOperationException("Handler failed intentionally");
+            return ValueTask.FromException<string>(new InvalidOperationException("Handler failed intentionally"));
         }
     }
 
@@ -60,6 +58,7 @@ public class MediatorTests
         var services = new ServiceCollection();
         services.AddTransient<IRequestHandler<GetUserQuery, User>, GetUserQueryHandler>();
         services.AddMediatorLite();
+        services.AddGeneratedHandlers();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -81,6 +80,7 @@ public class MediatorTests
         var services = new ServiceCollection();
         services.AddTransient<IRequestHandler<DeleteUserCommand, Unit>, DeleteUserCommandHandler>();
         services.AddMediatorLite();
+        services.AddGeneratedHandlers();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -133,6 +133,7 @@ public class MediatorTests
         var services = new ServiceCollection();
         services.AddTransient<IRequestHandler<FailingQuery, string>, FailingQueryHandler>();
         services.AddMediatorLite();
+        services.AddGeneratedHandlers();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -151,6 +152,7 @@ public class MediatorTests
         var services = new ServiceCollection();
         services.AddTransient<IRequestHandler<DelayedQuery, string>, DelayedQueryHandler>();
         services.AddMediatorLite();
+        services.AddGeneratedHandlers();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -166,7 +168,6 @@ public class MediatorTests
 
     public record DelayedQuery : IRequest<string>;
 
-    [MediatorGeneration(Skip = true)]
     public class DelayedQueryHandler : IRequestHandler<DelayedQuery, string>
     {
         public async ValueTask<string> HandleAsync(DelayedQuery request, CancellationToken cancellationToken = default)
