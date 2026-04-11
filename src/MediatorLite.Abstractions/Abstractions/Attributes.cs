@@ -18,8 +18,32 @@ public enum NotificationExecutionStrategy
 
     /// <summary>
     /// Stop execution after the first handler completes successfully.
-    /// Useful for "first handler wins" scenarios.
+    /// Useful for "first handler wins" or fallback scenarios.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Handlers are attempted in order (respecting <see cref="NotificationHandlerOrderAttribute"/>).
+    /// Execution stops as soon as one handler succeeds without throwing.
+    /// </para>
+    /// <para>
+    /// Behavior depends on the <see cref="NotificationErrorStrategy"/>:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>
+    /// <description>
+    /// <see cref="NotificationErrorStrategy.StopOnFirstError"/>: The first handler failure
+    /// throws immediately; no fallback to subsequent handlers occurs.
+    /// </description>
+    /// </item>
+    /// <item>
+    /// <description>
+    /// <see cref="NotificationErrorStrategy.ContinueAndAggregate"/>: On failure, the next
+    /// handler is tried. If all handlers fail, an <see cref="AggregateException"/> containing
+    /// all collected exceptions is thrown.
+    /// </description>
+    /// </item>
+    /// </list>
+    /// </remarks>
     StopOnFirst = 2
 }
 
@@ -32,12 +56,22 @@ public enum NotificationErrorStrategy
     /// Stop execution immediately when a handler throws an exception.
     /// The exception is propagated to the caller.
     /// </summary>
+    /// <remarks>
+    /// When combined with <see cref="NotificationExecutionStrategy.StopOnFirst"/>,
+    /// the first handler failure throws immediately with no fallback to subsequent handlers.
+    /// </remarks>
     StopOnFirstError = 0,
 
     /// <summary>
     /// Continue executing all handlers even if some throw exceptions.
     /// All exceptions are collected and thrown as an <see cref="AggregateException"/>.
     /// </summary>
+    /// <remarks>
+    /// When combined with <see cref="NotificationExecutionStrategy.StopOnFirst"/>,
+    /// a failing handler does not stop execution; the next handler is attempted.
+    /// If all handlers fail, an <see cref="AggregateException"/> with all collected
+    /// exceptions is thrown. If at least one handler succeeds, no exception is thrown.
+    /// </remarks>
     ContinueAndAggregate = 1
 }
 
@@ -137,6 +171,7 @@ public sealed class MediatorLoggingAttribute : Attribute
 /// Use this attribute to skip automatic source generation for specific handlers
 /// when you need custom registration logic.
 /// </remarks>
+[Obsolete("This attribute is no longer valid with the complete source generator implementation.")]
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
 public sealed class MediatorGenerationAttribute : Attribute
 {

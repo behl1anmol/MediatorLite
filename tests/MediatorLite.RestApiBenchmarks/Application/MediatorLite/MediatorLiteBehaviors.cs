@@ -3,7 +3,6 @@ using ML = global::MediatorLite;
 
 namespace MediatorLite.RestApiBenchmarks.Application.MediatorLite;
 
-[ML.MediatorGeneration(Skip = true)]
 public sealed class MediatorLiteValidationBehavior<TRequest, TResponse> : ML.IPipelineBehavior<TRequest, TResponse>
     where TRequest : ML.IRequest<TResponse>
 {

@@ -46,12 +46,5 @@ namespace MediatorLite.Tests.UnitTests
             Assert.True(attr.IncludePayload);
             Assert.Equal(2, attr.LogLevel);
         }
-
-        [Fact]
-        public void MediatorGenerationAttribute_SetsSkip()
-        {
-            var attr = new MediatorGenerationAttribute { Skip = true };
-            Assert.True(attr.Skip);
-        }
     }
 }

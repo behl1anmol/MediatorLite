@@ -14,10 +14,29 @@ A lightweight, high-performance mediator library for .NET 10+. Built from the gr
 
 > **Documentation:** [behl1anmol.github.io/MediatorLite](https://behl1anmol.github.io/MediatorLite)
 
+## v2 Architecture
+
+MediatorLite v2 is **source-generation-first**. The compile-time generated code provides:
+
+- **O(1) dispatch** via generated switch expressions — no dictionary lookups or reflection
+- **Compile-time attributes** control behavior ordering, notification strategies, and handler execution
+- **Reflection fallback is deprecated** — manual DI registration still works but is no longer recommended
+
+### Key Changes in v2
+
+| Aspect | v1 | v2 |
+|--------|----|----|
+| **Primary dispatch** | Reflection with caching | Source-generated O(1) switch |
+| **Behavior ordering** | DI registration order | `[BehaviorOrder]` attribute |
+| **Notification strategies** | `MediatorOptions` at runtime | `[NotificationOptions]` attribute at compile-time |
+| **Handler ordering** | `[NotificationHandlerOrder]` | `[NotificationHandlerOrder]` (unchanged) |
+| **Reflection fallback** | Supported | Deprecated (still functional) |
+
 ## Features
 
-- **High Performance** - Source generators eliminate runtime reflection for handler dispatch
+- **O(1) Dispatch** - Source-generated switch expressions for constant-time handler resolution
 - **Zero-Reflection Dispatch** - Compile-time handler discovery and typed dispatch via source generation
+- **Compile-Time Configuration** - Attributes control behavior ordering, notification strategies, and more
 - **Lightweight** - Minimal dependencies, focused core
 - **Extensible** - Pipeline behaviors for cross-cutting concerns
 - **Request/Response** - Type-safe command and query handling with `ValueTask`
@@ -29,6 +48,7 @@ A lightweight, high-performance mediator library for .NET 10+. Built from the gr
 
 ```bash
 dotnet add package MediatorLite
+dotnet add package MediatorLite.SourceGeneration   # Required for v2 source-generation-first architecture
 ```
 
 Optional (contracts-only scenarios such as shared request assemblies):
@@ -43,9 +63,11 @@ dotnet add package MediatorLite.Abstractions
 
 | Project Type | Install | Why |
 |--------------|---------|-----|
-| Application/API that sends requests | `MediatorLite` + `MediatorLite.SourceGeneration` | Full runtime + compile-time handler discovery |
-| Application/API without source generation | `MediatorLite` | Full runtime, reflection fallback still works |
+| Application/API (recommended) | `MediatorLite` + `MediatorLite.SourceGeneration` | Full runtime + compile-time O(1) dispatch |
+| Application/API (legacy) | `MediatorLite` | Reflection fallback only (deprecated) |
 | Shared contracts library (requests/notifications only) | `MediatorLite.Abstractions` | Keep shared package lightweight |
+
+> ⚠️ **v2 Breaking Change:** Source generation is now the primary dispatch mechanism. Applications without `MediatorLite.SourceGeneration` will use the deprecated reflection fallback.
 
 ### Will Abstractions be installed automatically?
 
@@ -102,23 +124,23 @@ public class GetUserQueryHandler : IRequestHandler<GetUserQuery, User>
 
 ### 2. Register Services
 
-The source generator automatically discovers all handlers at compile time. Use `AddGeneratedHandlers()` to register them with the DI container:
+The source generator automatically discovers all handlers at compile time. **You must call `AddGeneratedHandlers()` before `AddMediatorLite()`:**
 
 ```csharp
 using MediatorLite.Generated;
 
 services
-    .AddGeneratedHandlers()   // Source-generated: registers all handlers, notifications, behaviors
-    .AddMediatorLite();       // Registers the mediator and options
+    .AddGeneratedHandlers()   // MUST be called first — registers handlers and O(1) dispatch
+    .AddMediatorLite();       // Registers the mediator runtime
 ```
 
 `AddGeneratedHandlers()` registers:
 - All `IRequestHandler<,>` implementations
 - All `INotificationHandler<>` implementations
-- All `IPipelineBehavior<,>` implementations
-- The `ISourceGeneratedMediator` for zero-reflection dispatch
+- All `IPipelineBehavior<,>` implementations (ordered by `[BehaviorOrder]`)
+- The `ISourceGeneratedMediator` for O(1) dispatch
 
-To configure options:
+To configure observability options:
 
 ```csharp
 services
@@ -127,9 +149,11 @@ services
     {
         options.EnableBuiltInLogging = true;
         options.EnableTracing = true;
-        options.NotificationExecutionStrategy = NotificationExecutionStrategy.Parallel;
+        // Note: NotificationExecutionStrategy is now controlled via [NotificationOptions] attribute
     });
 ```
+
+> ⚠️ **v2 Change:** Runtime options like `NotificationExecutionStrategy` and `NotificationErrorStrategy` are ignored in favor of compile-time `[NotificationOptions]` attributes on notification types.
 
 #### Granular Registration
 
@@ -143,15 +167,17 @@ services
     .AddMediatorLite();
 ```
 
-#### Manual DI Registration (Without Source Generation)
+#### Manual DI Registration (Deprecated)
 
-You can register handlers manually with standard DI if preferred:
+> ⚠️ **Deprecated in v2:** Manual DI registration uses the reflection fallback which is deprecated. Use source generation for O(1) dispatch.
+
+You can register handlers manually with standard DI, but this falls back to reflection-based dispatch:
 
 ```csharp
 services.AddTransient<IRequestHandler<GetUserQuery, User>, GetUserQueryHandler>();
 services.AddTransient<INotificationHandler<UserCreatedNotification>, SendWelcomeEmailHandler>();
 services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
-services.AddMediatorLite();
+services.AddMediatorLite();  // Uses reflection fallback when ISourceGeneratedMediator is not registered
 ```
 
 #### Excluding Types from Source Generation
@@ -206,9 +232,17 @@ Full documentation is available at **[behl1anmol.github.io/MediatorLite](https:/
 - [Notifications](docs/notifications.md)
 - [Migration from MediatR](docs/migration-from-mediatr.md)
 
-## Notification Execution Strategies
+## Notification Execution Strategies (v2)
 
-MediatorLite provides flexible notification execution with three strategies:
+In v2, notification strategies are controlled via **compile-time attributes**, not runtime options:
+
+```csharp
+// Apply strategy to a specific notification type
+[NotificationOptions(
+    ExecutionStrategy = NotificationExecutionStrategy.Parallel,
+    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate)]
+public record UserCreatedNotification(int UserId, string Email) : INotification;
+```
 
 | Strategy | Description | Error Handling |
 |----------|-------------|----------------|
@@ -218,22 +252,26 @@ MediatorLite provides flexible notification execution with three strategies:
 
 > *Parallel mode always aggregates exceptions because concurrent tasks cannot be cancelled mid-execution.
 
+Control handler execution order with `[NotificationHandlerOrder]`:
+
 ```csharp
-services.AddMediatorLite(options =>
-{
-    options.NotificationExecutionStrategy = NotificationExecutionStrategy.Parallel;
-    options.NotificationErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate;
-});
+[NotificationHandlerOrder(1)]  // Executes first
+public class SendWelcomeEmailHandler : INotificationHandler<UserCreatedNotification> { }
+
+[NotificationHandlerOrder(2)]  // Executes second
+public class CreateAuditLogHandler : INotificationHandler<UserCreatedNotification> { }
 ```
 
 See [Notifications documentation](docs/notifications.md) for detailed strategy behavior and error handling patterns.
 
 ## Why MediatorLite?
 
-| Feature | MediatorLite | MediatR |
-|---------|-------------|---------|
+| Feature | MediatorLite v2 | MediatR |
+|---------|----------------|---------|
+| Handler Dispatch | O(1) source-generated switch | Reflection-based |
 | Handler Discovery | Compile-time (source gen) | Runtime reflection |
-| Handler Dispatch | Zero-reflection typed dispatch | Reflection-based |
+| Behavior Ordering | `[BehaviorOrder]` attribute | Registration order |
+| Notification Strategies | `[NotificationOptions]` attribute | Runtime configuration |
 | ValueTask Support | Native | Task only |
 | OpenTelemetry | Built-in | Manual |
 | Notification Strategies | Sequential, Parallel, StopOnFirst | Sequential only |

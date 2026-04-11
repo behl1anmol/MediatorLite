@@ -1153,7 +1153,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             // So we only need to call the first handler to avoid unreachable code warnings
             sb.AppendLine("            ct.ThrowIfCancellationRequested();");
             sb.AppendLine($"            await h1.HandleAsync(notification, ct).ConfigureAwait(false);");
-            sb.AppendLine("            // First handler succeeded — done");
+            sb.AppendLine("            // StopOnFirstError: if h1 throws, exception propagates; if completes, we're done");
         }
     }
 

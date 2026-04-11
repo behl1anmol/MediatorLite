@@ -9,6 +9,20 @@ namespace MediatorLite;
 /// <param name="request">The request object (will be cast to concrete type).</param>
 /// <param name="cancellationToken">Cancellation token.</param>
 /// <returns>A task containing the boxed response.</returns>
+/// <remarks>
+/// <para>
+/// <b>Boxing tradeoff:</b> This delegate returns <c>Task&lt;object&gt;</c> which causes boxing
+/// for value type responses (e.g., <c>int</c>, <c>bool</c>, <c>Guid</c>, custom structs).
+/// Each value type response incurs a heap allocation when boxed to <c>object</c>.
+/// </para>
+/// <para>
+/// This is a deliberate design tradeoff for compile-time simplicity: a single delegate signature
+/// allows the source generator to produce a unified dispatch table (<c>Dictionary&lt;Type, RequestDispatcher&gt;</c>)
+/// without requiring generic delegate instantiation per request type. The boxing cost is typically
+/// negligible compared to I/O-bound handler work, but may be measurable in high-throughput,
+/// CPU-bound scenarios with value type responses.
+/// </para>
+/// </remarks>
 public delegate Task<object> RequestDispatcher(
     IServiceProvider serviceProvider,
     object request,
@@ -21,6 +35,11 @@ public delegate Task<object> RequestDispatcher(
 /// <param name="notification">The notification object (will be cast to concrete type).</param>
 /// <param name="cancellationToken">Cancellation token.</param>
 /// <returns>A task representing the publish operation.</returns>
+/// <remarks>
+/// Unlike <see cref="RequestDispatcher"/>, this delegate returns <c>Task</c> (non-generic),
+/// so notifications do not incur boxing overhead for responses. The notification object itself
+/// is passed as <c>object</c> and cast to the concrete type in the generated dispatch method.
+/// </remarks>
 public delegate Task NotificationPublisher(
     IServiceProvider serviceProvider,
     object notification,
