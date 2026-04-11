@@ -1,23 +1,20 @@
 # Quick Start Guide
 
-Get started with MediatorLite in minutes.
+Get started with MediatorLite v2 in minutes.
 
 ## Installation
 
 ```bash
 dotnet add package MediatorLite
+dotnet add package MediatorLite.SourceGeneration   # Required for O(1 dispatch
 ```
+
+> ⚠️ **v2 Requirement:** Source generation is now the primary dispatch mechanism. Without `MediatorLite.SourceGeneration`, the library falls back to deprecated reflection-based dispatch.
 
 Optional (when a project only needs request/notification/validation contracts):
 
 ```bash
 dotnet add package MediatorLite.Abstractions
-```
-
-Optional (compile-time source-generated registration):
-
-```bash
-dotnet add package MediatorLite.SourceGeneration
 ```
 
 ## Package Selection and Versioning
@@ -26,8 +23,8 @@ Use this as a quick rule set for new users.
 
 | Project Type | Install |
 |--------------|---------|
-| Application/API (recommended) | `MediatorLite` + `MediatorLite.SourceGeneration` |
-| Application/API (no source generation) | `MediatorLite` |
+| Application/API (v2 recommended) | `MediatorLite` + `MediatorLite.SourceGeneration` |
+| Application/API (deprecated) | `MediatorLite` only (reflection fallback) |
 | Shared contracts library | `MediatorLite.Abstractions` |
 
 How transitive install works:
@@ -38,12 +35,12 @@ Compatibility matrix (safe combinations):
 
 | Abstractions | MediatorLite | SourceGeneration | Supported |
 |--------------|--------------|------------------|-----------|
-| 1.0.x | 1.0.x | 1.0.x | Yes |
-| transitive | 1.0.x | 1.0.x | Yes |
-| 1.0.x | 1.0.x | not installed | Yes |
-| 1.0.x | not installed | 1.0.x | No |
-| 1.0.x | 2.0.x | 2.0.x | No |
-| 2.0.x | 2.0.x | 1.0.x | No |
+| 2.x | 2.x | 2.x | Yes (recommended) |
+| transitive | 2.x | 2.x | Yes |
+| 2.x | 2.x | not installed | Yes (deprecated reflection fallback) |
+| 2.x | not installed | 2.x | No |
+| 1.x | 2.x | 2.x | No |
+| 2.x | 2.x | 1.x | No |
 
 Versioning guideline:
 - Keep all packages on the same major and minor version.
@@ -77,26 +74,27 @@ public class GetUserQueryHandler : IRequestHandler<GetUserQuery, User>
 
 ## 2. Register Services
 
-### Source-Generated Registration (Recommended)
+### Source-Generated Registration (Required for v2)
 
-The source generator discovers all handlers at compile time. No runtime reflection needed:
+**You must call `AddGeneratedHandlers()` before `AddMediatorLite()`** to enable O(1) dispatch:
 
 ```csharp
 using MediatorLite.Generated;
 
 services
-    .AddGeneratedHandlers()   // Registers all handlers, notifications, behaviors
+    .AddGeneratedHandlers()   // MUST be called first — registers handlers and O(1) dispatch
     .AddMediatorLite(options =>
     {
-        options.AddOpenBehavior(typeof(LoggingBehavior<,>));
+        options.EnableBuiltInLogging = true;   // Observability options still work
+        options.EnableTracing = true;
     });
 ```
 
 `AddGeneratedHandlers()` registers:
 - All `IRequestHandler<,>` implementations
 - All `INotificationHandler<>` implementations
-- All `IPipelineBehavior<,>` implementations
-- The `ISourceGeneratedMediator` for zero-reflection dispatch
+- All `IPipelineBehavior<,>` implementations (ordered by `[BehaviorOrder]`)
+- The `ISourceGeneratedMediator` for O(1) dispatch
 
 For granular control, use the individual registration methods:
 
@@ -108,15 +106,15 @@ services
     .AddMediatorLite();
 ```
 
-### Manual DI Registration
+### Manual DI Registration (Deprecated)
 
-You can also register handlers directly with the DI container:
+> ⚠️ **Deprecated in v2:** Manual DI registration uses the reflection fallback which is deprecated. Use source generation for O(1) dispatch.
 
 ```csharp
 services.AddTransient<IRequestHandler<GetUserQuery, User>, GetUserQueryHandler>();
 services.AddTransient<INotificationHandler<UserCreatedNotification>, SendWelcomeEmailHandler>();
 services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
-services.AddMediatorLite();
+services.AddMediatorLite();  // Falls back to reflection when ISourceGeneratedMediator is not registered
 ```
 
 ### Excluding Types from Source Generation
@@ -194,22 +192,19 @@ public class CreateAuditLogHandler : INotificationHandler<UserCreatedNotificatio
 await _mediator.PublishAsync(new UserCreatedNotification(user.Id, user.Email));
 ```
 
-## 6. Notification Execution Strategies
+## 6. Notification Execution Strategies (v2)
 
-Control how notification handlers execute:
+In v2, notification strategies are controlled via **compile-time attributes**, not runtime options:
 
 ```csharp
-services.AddMediatorLite(options =>
-{
-    // Choose execution strategy
-    options.NotificationExecutionStrategy = NotificationExecutionStrategy.Sequential; // Default
-    // options.NotificationExecutionStrategy = NotificationExecutionStrategy.Parallel;
-    // options.NotificationExecutionStrategy = NotificationExecutionStrategy.StopOnFirst;
-
-    // Choose error strategy
-    options.NotificationErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate;
-});
+// Apply strategy via attribute (v2 approach)
+[NotificationOptions(
+    ExecutionStrategy = NotificationExecutionStrategy.Parallel,
+    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate)]
+public record UserCreatedNotification(int UserId, string Email) : INotification;
 ```
+
+> ⚠️ **v2 Change:** Runtime `MediatorOptions.NotificationExecutionStrategy` and `NotificationErrorStrategy` are ignored in favor of the `[NotificationOptions]` attribute.
 
 | Strategy | Behavior | Error Strategy |
 |----------|----------|----------------|

@@ -12,7 +12,7 @@ nav_order: 1
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![.NET](https://img.shields.io/badge/.NET-10.0-blue.svg)](https://dotnet.microsoft.com/)
 
-A lightweight, high-performance mediator for .NET with **zero-reflection dispatch** and **compile-time source generation**.
+A lightweight, high-performance mediator for .NET with **O(1) source-generated dispatch** and **compile-time configuration**.
 {: .fs-6 .fw-300 }
 
 [Get Started]({{ site.baseurl }}/quick-start){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
@@ -20,14 +20,32 @@ A lightweight, high-performance mediator for .NET with **zero-reflection dispatc
 
 ---
 
+## v2 Architecture
+
+MediatorLite v2 is **source-generation-first**:
+
+- **O(1) dispatch** via compile-time generated switch expressions — no dictionary lookups or reflection
+- **Compile-time attributes** control behavior ordering and notification strategies
+- **Reflection fallback is deprecated** — manual DI registration still works but uses slower reflection-based dispatch
+
+| Aspect | v1 | v2 |
+|--------|----|----|
+| **Primary dispatch** | Reflection with caching | O(1) generated switch |
+| **Behavior ordering** | DI registration order | `[BehaviorOrder]` attribute |
+| **Notification strategies** | `MediatorOptions` runtime | `[NotificationOptions]` compile-time |
+| **Reflection fallback** | Supported | Deprecated |
+
+---
+
 ## Why MediatorLite?
 
-MediatorLite implements the [Mediator pattern](https://en.wikipedia.org/wiki/Mediator_pattern) for .NET applications, decoupling request senders from their handlers. Unlike other mediator libraries, MediatorLite uses **Roslyn source generators** to discover and register handlers at compile time — no runtime reflection required.
+MediatorLite implements the [Mediator pattern](https://en.wikipedia.org/wiki/Mediator_pattern) for .NET applications, decoupling request senders from their handlers. Unlike other mediator libraries, MediatorLite v2 uses **Roslyn source generators** to generate O(1) dispatch code at compile time.
 
-| Feature | MediatorLite | Traditional Mediators |
+| Feature | MediatorLite v2 | Traditional Mediators |
 |---|---|---|
+| Handler dispatch | O(1) switch expression | Reflection/dictionary lookup |
 | Handler discovery | Compile-time | Runtime reflection |
-| Dispatch overhead | Near-zero | Reflection-based |
+| Configuration | Compile-time attributes | Runtime options |
 | Native AOT support | Yes | Limited |
 | Assembly trimming | Yes | Limited |
 | Startup cost | None | Assembly scanning |
@@ -36,7 +54,8 @@ MediatorLite implements the [Mediator pattern](https://en.wikipedia.org/wiki/Med
 
 ## Key Features
 
-- **Zero-Reflection Dispatch** — Handler registration and dispatch are generated at compile time via Roslyn source generators.
+- **O(1) Dispatch** — Source-generated switch expressions provide constant-time handler resolution.
+- **Compile-Time Configuration** — `[BehaviorOrder]`, `[NotificationOptions]`, and `[NotificationHandlerOrder]` attributes control behavior at compile time.
 - **High Performance** — `ValueTask`-based handlers with minimal overhead and no boxing.
 - **Pipeline Behaviors** — Composable middleware for cross-cutting concerns (logging, validation, caching, etc.).
 - **Notifications** — Pub/sub pattern with configurable execution strategies: `Sequential`, `Parallel`, and `StopOnFirst`.
@@ -49,18 +68,14 @@ MediatorLite implements the [Mediator pattern](https://en.wikipedia.org/wiki/Med
 
 ## Installation
 
-Install the core library plus the optional source generator:
+Install the core library plus the source generator (required for v2):
 
 ```bash
 dotnet add package MediatorLite
-dotnet add package MediatorLite.SourceGeneration   # Recommended
+dotnet add package MediatorLite.SourceGeneration   # Required for O(1) dispatch
 ```
 
-Or for manual registration only:
-
-```bash
-dotnet add package MediatorLite
-```
+> ⚠️ **v2 Note:** Without `MediatorLite.SourceGeneration`, the library falls back to deprecated reflection-based dispatch.
 
 For shared contracts libraries (requests, notifications, and validation contracts only):
 
@@ -90,11 +105,11 @@ public class GetUserQueryHandler : IRequestHandler<GetUserQuery, User>
 }
 ```
 
-**2. Register services (source-generated):**
+**2. Register services (source-generated — must call `AddGeneratedHandlers()` first):**
 
 ```csharp
 services
-    .AddGeneratedHandlers()
+    .AddGeneratedHandlers()   // MUST be called first for O(1) dispatch
     .AddMediatorLite();
 ```
 

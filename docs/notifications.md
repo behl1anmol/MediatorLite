@@ -2,6 +2,19 @@
 
 Notifications implement a pub-sub pattern where multiple handlers can respond to a single notification.
 
+## v2 Changes
+
+In v2, notification execution strategies are controlled via **compile-time `[NotificationOptions]` attributes**, not runtime options:
+
+```csharp
+[NotificationOptions(
+    ExecutionStrategy = NotificationExecutionStrategy.Parallel,
+    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate)]
+public record UserCreatedNotification(int UserId, string Email) : INotification;
+```
+
+> ⚠️ **v2 Change:** `MediatorOptions.NotificationExecutionStrategy` and `NotificationErrorStrategy` runtime options are ignored in favor of compile-time attributes.
+
 ## Defining Notifications
 
 ```csharp
@@ -34,19 +47,17 @@ public class CreateAuditLogHandler : INotificationHandler<UserCreatedNotificatio
 await mediator.PublishAsync(new UserCreatedNotification(user.Id, user.Email));
 ```
 
-## Execution Strategies
+## Execution Strategies (v2)
 
-MediatorLite provides three execution strategies, each with specific error handling behavior.
+MediatorLite provides three execution strategies configured via the `[NotificationOptions]` attribute.
 
 ### Sequential (Default)
 
 Handlers execute one after another in order. Best for handlers with dependencies or when order matters.
 
 ```csharp
-services.AddMediatorLite(options =>
-{
-    options.NotificationExecutionStrategy = NotificationExecutionStrategy.Sequential;
-});
+[NotificationOptions(ExecutionStrategy = NotificationExecutionStrategy.Sequential)]
+public record OrderCompletedNotification(int OrderId) : INotification;
 ```
 
 **Error Strategy Behavior:**
@@ -61,10 +72,8 @@ services.AddMediatorLite(options =>
 All handlers execute concurrently using `Task.WhenAll`. Best for independent handlers.
 
 ```csharp
-services.AddMediatorLite(options =>
-{
-    options.NotificationExecutionStrategy = NotificationExecutionStrategy.Parallel;
-});
+[NotificationOptions(ExecutionStrategy = NotificationExecutionStrategy.Parallel)]
+public record UserCreatedNotification(int UserId) : INotification;
 ```
 
 **Error Strategy Behavior:**
@@ -81,10 +90,8 @@ Since all handlers start immediately and run concurrently, it's impossible to "s
 Executes handlers in order until one completes successfully ("first handler wins"). Useful for fallback patterns.
 
 ```csharp
-services.AddMediatorLite(options =>
-{
-    options.NotificationExecutionStrategy = NotificationExecutionStrategy.StopOnFirst;
-});
+[NotificationOptions(ExecutionStrategy = NotificationExecutionStrategy.StopOnFirst)]
+public record CacheInvalidationNotification(string Key) : INotification;
 ```
 
 **Error Strategy Behavior:**
@@ -118,25 +125,29 @@ public record GetDataNotification(string Key) : INotification;
 | Parallel | ❌ No | ❌ No | ❌ Always aggregates |
 | StopOnFirst | ✅ Yes | ✅ On success | ✅ Applies |
 
-## Per-Notification Configuration
+## Per-Notification Configuration (v2)
 
-Override global settings using `[NotificationOptions]`:
+Use `[NotificationOptions]` attribute to configure strategy at compile time:
 
 ```csharp
 [NotificationOptions(
     ExecutionStrategy = NotificationExecutionStrategy.Parallel,
-    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate,
-    OverrideGlobal = true)]
+    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate)]
 public record HighPriorityNotification(string Message) : INotification;
 ```
 
-## Global Configuration
+This is the **only way** to configure notification strategies in v2. The `OverrideGlobal` parameter is deprecated since there are no longer global runtime options to override.
+
+## Global Configuration (Deprecated)
+
+> ⚠️ **Deprecated in v2:** Runtime configuration via `MediatorOptions` is ignored. Use `[NotificationOptions]` attribute instead.
 
 ```csharp
+// This no longer affects notification behavior in v2
 services.AddMediatorLite(options =>
 {
-    options.NotificationExecutionStrategy = NotificationExecutionStrategy.Sequential;
-    options.NotificationErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate;
+    options.NotificationExecutionStrategy = NotificationExecutionStrategy.Sequential;  // Ignored
+    options.NotificationErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate;  // Ignored
 });
 ```
 

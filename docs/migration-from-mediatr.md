@@ -1,6 +1,18 @@
 # Migration from MediatR
 
-This guide helps you migrate from MediatR to MediatorLite.
+This guide helps you migrate from MediatR to MediatorLite v2.
+
+## v2 Key Changes
+
+MediatorLite v2 introduces a **source-generation-first architecture**:
+
+| Aspect | MediatR | MediatorLite v2 |
+|--------|---------|-----------------|
+| Handler dispatch | Reflection | O(1) source-generated switch |
+| Behavior ordering | Registration order | `[BehaviorOrder]` attribute |
+| Notification strategies | Runtime configuration | `[NotificationOptions]` attribute |
+| Handler ordering | N/A | `[NotificationHandlerOrder]` attribute |
+| Required registration | `AddMediatR()` | `AddGeneratedHandlers()` + `AddMediatorLite()` |
 
 ## Interface Mapping
 
@@ -74,23 +86,25 @@ services.AddMediatR(cfg =>
 });
 ```
 
-**MediatorLite** uses compile-time source generation:
+**MediatorLite v2** uses compile-time source generation. **You must call `AddGeneratedHandlers()` before `AddMediatorLite()`:**
 ```csharp
 using MediatorLite.Generated;
 
 services
-    .AddGeneratedHandlers()   // Source-generated: zero reflection at startup
+    .AddGeneratedHandlers()   // MUST be called first — O(1 dispatch + [BehaviorOrder] support
     .AddMediatorLite(options =>
     {
-        options.AddOpenBehavior(typeof(LoggingBehavior<,>));
+        options.EnableBuiltInLogging = true;  // Observability options still work
     });
 ```
 
-Or register handlers manually with standard DI:
+> ⚠️ **v2 Change:** `options.AddOpenBehavior()` is no longer needed. Behaviors are auto-discovered and ordered by `[BehaviorOrder]`.
+
+Or register handlers manually with standard DI (deprecated):
 ```csharp
 services.AddTransient<IRequestHandler<MyQuery, Result>, MyQueryHandler>();
 services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
-services.AddMediatorLite();
+services.AddMediatorLite();  // Falls back to reflection (deprecated)
 ```
 
 ### 5. Pipeline Behaviors
@@ -110,8 +124,9 @@ public class LoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, 
 }
 ```
 
-**MediatorLite:**
+**MediatorLite v2** — use `[BehaviorOrder]` to control execution order:
 ```csharp
+[BehaviorOrder(1)]  // Executes first
 public class LoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
     where TRequest : IRequest<TResponse>
 {
@@ -124,6 +139,8 @@ public class LoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, 
     }
 }
 ```
+
+> ⚠️ **v2 Change:** Behavior execution order is determined by `[BehaviorOrder]` attribute, not DI registration order.
 
 ## Migration Steps
 
@@ -181,27 +198,44 @@ await _mediator.PublishAsync(notification);
 
 ### Step 5: Update Registration
 
-Replace MediatR's runtime assembly scanning with source-generated registration:
+Replace MediatR's runtime assembly scanning with v2 source-generated registration:
 
 ```csharp
 // Before (MediatR)
 services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(...));
 
-// After (MediatorLite - source generation)
+// After (MediatorLite v2)
 using MediatorLite.Generated;
 
 services
-    .AddGeneratedHandlers()   // Compile-time handler discovery
+    .AddGeneratedHandlers()   // MUST be called first for O(1 dispatch
     .AddMediatorLite();
-
-// Or: manual DI registration
-services.AddTransient<IRequestHandler<MyQuery, MyResult>, MyQueryHandler>();
-services.AddMediatorLite();
 ```
 
-## Source Generation
+### Step 6: Add Compile-Time Attributes
 
-MediatorLite includes a Roslyn source generator (`MediatorLite.SourceGeneration`) that discovers handlers, notification handlers, and pipeline behaviors at compile time.
+**Behavior ordering** — add `[BehaviorOrder]` to your behaviors:
+
+```csharp
+[BehaviorOrder(1)]  // LoggingBehavior runs first
+public class LoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse> { }
+
+[BehaviorOrder(2)]  // ValidationBehavior runs second
+public class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse> { }
+```
+
+**Notification strategies** — add `[NotificationOptions]` to notification types:
+
+```csharp
+[NotificationOptions(
+    ExecutionStrategy = NotificationExecutionStrategy.Parallel,
+    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate)]
+public record UserCreatedNotification(int UserId) : INotification;
+```
+
+## Source Generation (v2)
+
+MediatorLite v2 requires the Roslyn source generator (`MediatorLite.SourceGeneration`) for O(1) dispatch.
 
 ### How It Works
 
@@ -210,14 +244,18 @@ The source generator scans your project for types implementing:
 - `INotificationHandler<TNotification>`
 - `IPipelineBehavior<TRequest, TResponse>`
 
-It generates a `MediatorLiteRegistration` class with extension methods to register all discovered types with the DI container.
+It generates:
+- O(1) switch expressions for handler dispatch (no dictionary lookups)
+- Behavior ordering based on `[BehaviorOrder]` attributes
+- Notification strategy lookup based on `[NotificationOptions]` attributes
+- Handler ordering based on `[NotificationHandlerOrder]` attributes
 
 ### Registration Methods
 
 ```csharp
 using MediatorLite.Generated;
 
-// Register everything at once
+// Register everything at once (MUST be called before AddMediatorLite)
 services.AddGeneratedHandlers();
 
 // Or register specific categories
@@ -226,15 +264,26 @@ services.AddGeneratedNotificationHandlers();   // Only notification handlers
 services.AddGeneratedBehaviors();              // Only pipeline behaviors
 ```
 
-### Zero-Reflection Dispatch
+### O(1) Dispatch
 
-`AddGeneratedHandlers()` also registers a `SourceGeneratedMediator` that implements `ISourceGeneratedMediator`. This enables the mediator to dispatch requests to handlers using direct typed method calls instead of reflection-based `MethodInfo.Invoke()`.
+`AddGeneratedHandlers()` registers a `SourceGeneratedMediator` that implements `ISourceGeneratedMediator`. This provides O(1) dispatch via generated switch expressions:
+
+```csharp
+// Generated code (simplified)
+public ValueTask<TResponse> SendAsync<TRequest, TResponse>(TRequest request, ...) =>
+    request switch
+    {
+        GetUserQuery q => HandleGetUserQuery(q, ct),
+        CreateOrderCommand c => HandleCreateOrderCommand(c, ct),
+        // ... O(1) lookup, not dictionary-based
+    };
+```
 
 The source-generated mediator provides:
-- **Typed request dispatch** - Direct handler invocation without `MakeGenericType`/`MethodInfo.Invoke`
-- **Typed behavior resolution** - Resolve `IPipelineBehavior<TRequest, TResponse>` without reflection
-- **Handler ordering** - Compile-time lookup of `[NotificationHandlerOrder]` attributes
-- **Notification options** - Compile-time lookup of `[NotificationOptions]` attributes
+- **O(1) request dispatch** — Generated switch expression instead of `MakeGenericType`/`MethodInfo.Invoke`
+- **Typed behavior resolution** — Resolve `IPipelineBehavior<TRequest, TResponse>` without reflection
+- **Handler ordering** — Compile-time lookup of `[NotificationHandlerOrder]` attributes
+- **Notification options** — Compile-time lookup of `[NotificationOptions]` attributes
 
 ### Excluding Types
 
@@ -275,17 +324,17 @@ public $1ValueTask<$2> HandleAsync($3 request, CancellationToken $4 = default)
 Find: `\.Send\(` -> Replace: `.SendAsync(`
 Find: `\.Publish\(` -> Replace: `.PublishAsync(`
 
-## Notification Execution Strategies
+## Notification Execution Strategies (v2)
 
-MediatorLite provides enhanced control over notification execution that differs from MediatR's default behavior.
+MediatorLite v2 provides enhanced control over notification execution via compile-time attributes.
 
 ### Strategy Options
 
-| Strategy | MediatR | MediatorLite |
-|----------|---------|--------------|
-| Sequential execution | Default (no option) | `NotificationExecutionStrategy.Sequential` |
-| Parallel execution | Not built-in | `NotificationExecutionStrategy.Parallel` |
-| Stop on first success | Not available | `NotificationExecutionStrategy.StopOnFirst` |
+| Strategy | MediatR | MediatorLite v2 |
+|----------|---------|-----------------|
+| Sequential execution | Default (no option) | `[NotificationOptions(ExecutionStrategy = Sequential)]` |
+| Parallel execution | Not built-in | `[NotificationOptions(ExecutionStrategy = Parallel)]` |
+| Stop on first success | Not available | `[NotificationOptions(ExecutionStrategy = StopOnFirst)]` |
 
 ### Error Handling Strategies
 
@@ -306,37 +355,44 @@ MediatorLite applies error strategies based on the execution mode:
 
 > *Parallel mode always aggregates exceptions because concurrent tasks cannot be cancelled mid-execution. This is by design.
 
-### Configuration Example
+### Configuration Example (v2)
+
+Configure via attributes on your notification types:
 
 ```csharp
-services.AddMediatorLite(options =>
-{
-    // MediatR-like behavior (sequential, stop on first error)
-    options.NotificationExecutionStrategy = NotificationExecutionStrategy.Sequential;
-    options.NotificationErrorStrategy = NotificationErrorStrategy.StopOnFirstError;
+// MediatR-like behavior (sequential, stop on first error)
+[NotificationOptions(
+    ExecutionStrategy = NotificationExecutionStrategy.Sequential,
+    ErrorStrategy = NotificationErrorStrategy.StopOnFirstError)]
+public record OrderPlacedNotification(int OrderId) : INotification;
 
-    // Or: More resilient production setup
-    options.NotificationExecutionStrategy = NotificationExecutionStrategy.Parallel;
-    options.NotificationErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate;
-});
+// More resilient production setup
+[NotificationOptions(
+    ExecutionStrategy = NotificationExecutionStrategy.Parallel,
+    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate)]
+public record UserCreatedNotification(int UserId) : INotification;
 ```
 
-### Per-Notification Override
+> ⚠️ **v2 Change:** `MediatorOptions` runtime configuration is ignored. Use `[NotificationOptions]` attributes.
+
+### Per-Notification Handler Ordering
 
 ```csharp
-[NotificationOptions(
-    ExecutionStrategy = NotificationExecutionStrategy.StopOnFirst,
-    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate,
-    OverrideGlobal = true)]
-public record FallbackNotification(string Message) : INotification;
+[NotificationHandlerOrder(1)]  // Executes first
+public class FirstHandler : INotificationHandler<MyNotification> { }
+
+[NotificationHandlerOrder(2)]  // Executes second
+public class SecondHandler : INotificationHandler<MyNotification> { }
 ```
 
 See [Notifications documentation](notifications.md) for detailed strategy behavior.
 
-## Features Not Available in MediatorLite v1.0
+## Features Not Available in MediatorLite v2
 
-| MediatR Feature | MediatorLite Status |
-|-----------------|---------------------|
-| `IStreamRequest<T>` | Not in v1.0 |
+| MediatR Feature | MediatorLite v2 Status |
+|-----------------|------------------------|
+| `IStreamRequest<T>` | Not in v2 |
 | `CreateScope()` | Not needed (use DI scopes) |
-| `ServiceFactory` | Not in v1.0 (use DI directly) |
+| `ServiceFactory` | Not in v2 (use DI directly) |
+| Runtime behavior ordering | Replaced by `[BehaviorOrder]` attribute |
+| Runtime notification strategy | Replaced by `[NotificationOptions]` attribute |

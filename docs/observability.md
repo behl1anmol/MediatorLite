@@ -2,6 +2,10 @@
 
 MediatorLite provides built-in observability through logging and OpenTelemetry tracing.
 
+## v2 Note
+
+Observability options (`EnableBuiltInLogging`, `EnableTracing`) remain runtime-configurable via `MediatorOptions`. Only notification strategies and behavior ordering have moved to compile-time attributes.
+
 ## Logging Configuration
 
 ### Enable/Disable Built-in Logging
