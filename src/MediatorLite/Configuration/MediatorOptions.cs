@@ -8,13 +8,6 @@ namespace MediatorLite.Configuration;
 /// </summary>
 public sealed class MediatorOptions
 {
-    private readonly List<Type> _behaviorTypes = [];
-
-    /// <summary>
-    /// Gets the registered pipeline behavior types in order.
-    /// </summary>
-    internal IReadOnlyList<Type> BehaviorTypes => _behaviorTypes;
-
     /// <summary>
     /// Gets or sets the default execution strategy for notifications.
     /// Default is <see cref="NotificationExecutionStrategy.Sequential"/>.
@@ -58,33 +51,4 @@ public sealed class MediatorOptions
     /// Default is <see cref="ServiceLifetime.Transient"/>.
     /// </summary>
     public ServiceLifetime MediatorLifetime { get; set; } = ServiceLifetime.Transient;
-
-    /// <summary>
-    /// Adds an open generic pipeline behavior type.
-    /// The behavior will be registered with the DI container as IPipelineBehavior&lt;,&gt;.
-    /// </summary>
-    /// <param name="behaviorType">The open generic behavior type (e.g., typeof(LoggingBehavior&lt;,&gt;)).</param>
-    /// <returns>The <see cref="MediatorOptions"/> instance for chaining.</returns>
-    /// <exception cref="ArgumentException">Thrown when the type is not an open generic type.</exception>
-    public MediatorOptions AddOpenBehavior(Type behaviorType)
-    {
-        PipelineBehaviorTypeResolver.ValidateOpenBehaviorType(behaviorType);
-
-        _behaviorTypes.Add(behaviorType);
-        return this;
-    }
-
-    /// <summary>
-    /// Adds a closed pipeline behavior type.
-    /// </summary>
-    /// <typeparam name="TBehavior">The behavior type.</typeparam>
-    /// <returns>The <see cref="MediatorOptions"/> instance for chaining.</returns>
-    public MediatorOptions AddBehavior<TBehavior>() where TBehavior : class
-    {
-        var behaviorType = typeof(TBehavior);
-        PipelineBehaviorTypeResolver.GetClosedBehaviorInterfacesOrThrow(behaviorType);
-
-        _behaviorTypes.Add(behaviorType);
-        return this;
-    }
 }

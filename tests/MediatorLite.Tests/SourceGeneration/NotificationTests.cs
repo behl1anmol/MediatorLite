@@ -102,6 +102,7 @@ public class NotificationTests
         // Arrange - Create a notification type that has no handlers registered
         var services = new ServiceCollection();
         services.AddMediatorLite();
+        services.AddGeneratedHandlers();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();

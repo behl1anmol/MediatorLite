@@ -22,6 +22,8 @@ public record ComputeValueQuery(int Value) : IRequest<int>;
 
 public record DelayedRequest : IRequest<string>;
 
+public record ShortCircuitQuery : IRequest;
+
 #endregion
 
 #region Notification Types
@@ -72,6 +74,14 @@ public record AllFailStopOnFirstWithAggregateEvent(string Message) : INotificati
 #endregion
 
 #region Request Handlers
+
+public class ShortCircuitCommandHandler : IRequestHandler<ShortCircuitQuery>
+{
+    public ValueTask HandleAsync(ShortCircuitQuery request, CancellationToken cancellationToken = default)
+    {
+        return ValueTask.CompletedTask;
+    }
+}
 
 public class GetUserByIdQueryHandler : IRequestHandler<GetUserByIdQuery, UserDto>
 {
@@ -339,7 +349,7 @@ public class AllFailStopOnFirstWithAggregateEventHandler2 : INotificationHandler
 
 #region Pipeline Behaviors
 
-[MediatorGeneration(Skip = true)]
+[BehaviorOrder(1)]
 public class AddOneBehavior : IPipelineBehavior<ComputeValueQuery, int>
 {
     public async ValueTask<int> HandleAsync(
@@ -352,7 +362,7 @@ public class AddOneBehavior : IPipelineBehavior<ComputeValueQuery, int>
     }
 }
 
-[MediatorGeneration(Skip = true)]
+[BehaviorOrder(2)]
 public class MultiplyByTwoBehavior : IPipelineBehavior<ComputeValueQuery, int>
 {
     public async ValueTask<int> HandleAsync(
@@ -365,7 +375,6 @@ public class MultiplyByTwoBehavior : IPipelineBehavior<ComputeValueQuery, int>
     }
 }
 
-[MediatorGeneration(Skip = true)]
 public class GenericLoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
     where TRequest : IRequest<TResponse>
 {
@@ -384,15 +393,31 @@ public class GenericLoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRe
     }
 }
 
-[MediatorGeneration(Skip = true)]
-public class ShortCircuitBehavior : IPipelineBehavior<ComputeValueQuery, int>
+[BehaviorOrder(1)]
+public class ShortCircuitBehavior : IPipelineBehavior<ShortCircuitQuery, Unit>
 {
-    public ValueTask<int> HandleAsync(
-        ComputeValueQuery request,
-        RequestHandlerDelegate<int> next,
+    public static bool Executed = false;
+    public ValueTask<Unit> HandleAsync(
+        ShortCircuitQuery request,
+        RequestHandlerDelegate<Unit> next,
         CancellationToken cancellationToken = default)
     {
-        return ValueTask.FromResult(999);
+        Executed = true;
+        return Unit.CompletedTask;
+    }
+}
+
+[BehaviorOrder(2)]
+public class ShortCircuitLoggerBehavior : IPipelineBehavior<ShortCircuitQuery, Unit>
+{
+    public static bool Executed = false;
+    public ValueTask<Unit> HandleAsync(
+        ShortCircuitQuery request,
+        RequestHandlerDelegate<Unit> next,
+        CancellationToken cancellationToken = default)
+    {
+        Executed = true;
+        return Unit.CompletedTask;
     }
 }
 
@@ -453,9 +478,7 @@ public class ValidatedCommandCustomValidator : IValidator<ValidatedCommand>
 
 /// <summary>
 /// Behavior for tracking execution order in tests.
-/// Marked as Skip so it's not auto-registered - each test controls its own registration.
 /// </summary>
-[MediatorGeneration(Skip = true)]
 public class ExecutionOrderTrackingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
     where TRequest : IRequest<TResponse>
 {

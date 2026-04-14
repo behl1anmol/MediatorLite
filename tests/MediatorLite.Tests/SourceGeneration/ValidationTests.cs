@@ -43,7 +43,7 @@ public class ValidationTests
     }
 
     [Fact]
-    public async Task RuntimeRegisteredBehaviors_AreNotCalledInSourceGenPipeline()
+    public async Task ValidationBehavior_CalledSuccessfully()
     {
         // Arrange
         ValidatedCommandHandler.Reset();
@@ -51,8 +51,6 @@ public class ValidationTests
 
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        // Runtime-registered behavior - will NOT be in the unrolled pipeline
-        services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ExecutionOrderTrackingBehavior<,>));
         services.AddMediatorLite();
         services.AddLogging();
 
@@ -62,11 +60,9 @@ public class ValidationTests
         // Act
         await mediator.SendAsync(new ValidatedCommand { Name = "ValidName", Value = 42 });
 
-        // Assert - Runtime behavior was NOT called (v2 behavior)
-        // The tracking behavior has [MediatorGeneration(Skip = true)] so it's not discovered
-        // at compile-time, and runtime registration doesn't affect the unrolled pipeline
         ExecutionOrderTrackingBehavior<ValidatedCommand, string>.ExecutionLog
-            .Should().BeEmpty("runtime-registered behaviors are not in the source-gen pipeline");
+            .Should().Contain("TrackingBehavior:Before:ValidatedCommand");
+            
     }
 
     [Fact]
