@@ -6,26 +6,18 @@ using Xunit;
 namespace MediatorLite.Tests.SourceGeneration;
 
 /// <summary>
-/// Tests for pipeline behavior functionality when using source-generated handler registration.
-/// 
-/// IMPORTANT v2 CHANGE: Behaviors must be discovered at compile-time to be included in the
-/// unrolled pipeline. Runtime registration via DI does NOT affect the pipeline.
-/// 
-/// Behaviors with [MediatorGeneration(Skip = true)] will NOT be discovered and thus
-/// will NOT be part of the generated pipeline, even if registered in DI.
+/// Tests for pipeline behavior functionality.
+/// Behaviors are discovered at compile-time to be included in the unrolled pipeline.
 /// </summary>
 public class PipelineBehaviorTests
 {
     /// <summary>
-    /// v2: This test documents that runtime behavior registration does NOT affect the pipeline.
-    /// Since test behaviors have [MediatorGeneration(Skip=true)], they are not discovered
-    /// at compile time and therefore not included in the unrolled pipeline.
+    /// Verifies that a request with multiple compile-time discovered behaviors executes all behaviors and the handler correctly.
     /// </summary>
     [Fact]
     public async Task ComputeValueQueryBehaviorExecution_ReturnsCorrectResult()
     {
         // Arrange - Register behaviors at runtime
-        // In v2, these won't be used because they weren't discovered at compile time
         var services = new ServiceCollection();
         services.AddMediatorLite();
         services.AddGeneratedHandlers();
@@ -42,7 +34,7 @@ public class PipelineBehaviorTests
     }
 
     /// <summary>
-    /// v2: Short-circuit behaviors must be compile-time discovered to work.
+    /// Verifies that a short-circuiting behavior prevents subsequent behaviors and the handler from executing.
     /// </summary>
     [Fact]
     public async Task ShortCircuitBehavior_ShotCircuitSuccessfully()
@@ -120,7 +112,7 @@ public class PipelineBehaviorTests
     /// Verifies direct handler dispatch without any behaviors (fast path).
     /// </summary>
     [Fact]
-    public async Task OpenBenaviors_UsesDirectSourceGenDispatch()
+    public async Task OpenBehaviors_UsesDirectSourceGenDispatch()
     {
         // Arrange - No behaviors registered
         var services = new ServiceCollection();
@@ -143,7 +135,7 @@ public class PipelineBehaviorTests
     /// Verifies that source-gen dispatch recognizes request types.
     /// </summary>
     [Fact]
-    public async Task SourceGenDispatch_RecognizesRequestTypes()
+    public void SourceGenDispatch_RecognizesRequestTypes()
     {
         // Verify that source-gen dispatch has a dispatcher for the request type
         var services = new ServiceCollection();
