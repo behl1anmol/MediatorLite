@@ -48,19 +48,67 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 transform: static (context, ct) => GetValidatorInfo(context, ct))
             .Where(static info => info is not null);
 
+        // Assembly-level defaults for notification strategies (compile-time)
+        var assemblyDefaults = context.CompilationProvider
+            .Select(static (compilation, _) => GetAssemblyDefaults(compilation));
+
         // Combine with compilation
         var compilationAndData = context.CompilationProvider
             .Combine(handlerDeclarations.Collect())
             .Combine(notificationDeclarations.Collect())
             .Combine(behaviorDeclarations.Collect())
-            .Combine(validatorDeclarations.Collect());
+            .Combine(validatorDeclarations.Collect())
+            .Combine(assemblyDefaults);
 
         // Generate the output
         context.RegisterSourceOutput(compilationAndData, static (spc, source) =>
         {
-            var ((((compilation, handlers), notifications), behaviors), validators) = source;
-            Execute(spc, compilation, handlers!, notifications!, behaviors!, validators!);
+            var (((((compilation, handlers), notifications), behaviors), validators), defaults) = source;
+            Execute(spc, compilation, handlers!, notifications!, behaviors!, validators!, defaults);
         });
+    }
+
+    /// <summary>
+    /// Reads assembly-level defaults for notification strategies from
+    /// <see cref="DefaultNotificationExecutionAttribute"/> and <see cref="DefaultNotificationErrorAttribute"/>.
+    /// </summary>
+    private static AssemblyDefaults GetAssemblyDefaults(Compilation compilation)
+    {
+        int? execution = null;
+        int? error = null;
+
+        foreach (var attr in compilation.Assembly.GetAttributes())
+        {
+            var name = attr.AttributeClass?.Name;
+            if (name == "DefaultNotificationExecutionAttribute"
+                && attr.ConstructorArguments.Length > 0
+                && attr.ConstructorArguments[0].Value is int es)
+            {
+                execution = es;
+            }
+            else if (name == "DefaultNotificationErrorAttribute"
+                && attr.ConstructorArguments.Length > 0
+                && attr.ConstructorArguments[0].Value is int ers)
+            {
+                error = ers;
+            }
+        }
+
+        return new AssemblyDefaults(execution, error);
+    }
+
+    /// <summary>
+    /// Resolves the final (execution, error) strategy tuple for a notification type.
+    /// Precedence per strategy: per-notification attribute &gt; assembly default &gt; library default
+    /// (Sequential=0 for execution, StopOnFirstError=0 for error).
+    /// </summary>
+    private static (int Execution, int Error) ResolveStrategies(
+        NotificationTypeInfo? perType,
+        AssemblyDefaults globals)
+    {
+        int execution = perType?.ExecutionStrategy ?? globals.ExecutionStrategy ?? 0;
+        int error = perType?.ErrorStrategy ?? globals.ErrorStrategy ?? 0;
+        return (execution, error);
     }
 
     private static bool IsHandlerCandidate(SyntaxNode node)
@@ -91,27 +139,27 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         if (!implementsNotification)
             return null;
 
-        var optionsAttr = typeSymbol.GetAttributes()
-            .FirstOrDefault(a => a.AttributeClass?.Name == "NotificationOptionsAttribute");
+        int? executionStrategy = null;
+        int? errorStrategy = null;
 
-        if (optionsAttr == null)
-            return null;
-
-        int executionStrategy = 0;
-        int errorStrategy = 1;
-        bool overrideGlobal = true;
-
-        foreach (var arg in optionsAttr.NamedArguments)
+        foreach (var attr in typeSymbol.GetAttributes())
         {
-            if (arg.Key == "ExecutionStrategy" && arg.Value.Value is int es)
+            var name = attr.AttributeClass?.Name;
+            if (name == "NotificationExecutionAttribute"
+                && attr.ConstructorArguments.Length > 0
+                && attr.ConstructorArguments[0].Value is int es)
+            {
                 executionStrategy = es;
-            else if (arg.Key == "ErrorStrategy" && arg.Value.Value is int ers)
+            }
+            else if (name == "NotificationErrorAttribute"
+                && attr.ConstructorArguments.Length > 0
+                && attr.ConstructorArguments[0].Value is int ers)
+            {
                 errorStrategy = ers;
-            else if (arg.Key == "OverrideGlobal" && arg.Value.Value is bool og)
-                overrideGlobal = og;
+            }
         }
 
-        if (!overrideGlobal)
+        if (executionStrategy is null && errorStrategy is null)
             return null;
 
         return new NotificationTypeInfo(
@@ -356,7 +404,8 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         ImmutableArray<HandlerInfo?> handlers,
         ImmutableArray<NotificationTypeInfo?> notifications,
         ImmutableArray<BehaviorInfo?> behaviors,
-        ImmutableArray<ValidatorInfo?> validators)
+        ImmutableArray<ValidatorInfo?> validators,
+        AssemblyDefaults assemblyDefaults)
     {
         var validHandlers = handlers.Where(h => h is not null).Cast<HandlerInfo>().ToList();
         var validNotifications = notifications.Where(n => n is not null).Cast<NotificationTypeInfo>().ToList();
@@ -385,7 +434,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         }
 
         GenerateRegistrationCode(context, validHandlers, expandedBehaviors, validValidators, requestTypesWithValidation);
-        GenerateSourceGeneratedMediator(context, validHandlers, validNotifications, validBehaviors, expandedBehaviors);
+        GenerateSourceGeneratedMediator(context, validHandlers, validNotifications, validBehaviors, expandedBehaviors, assemblyDefaults);
     }
 
     /// <summary>
@@ -748,7 +797,8 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         List<HandlerInfo> handlers,
         List<NotificationTypeInfo> notifications,
         List<BehaviorInfo> behaviors,
-        List<ExpandedBehaviorInfo> expandedBehaviors)
+        List<ExpandedBehaviorInfo> expandedBehaviors,
+        AssemblyDefaults assemblyDefaults)
     {
         var requestHandlers = handlers.SelectMany(h =>
             h.RequestHandlers.Select(r => (Handler: h, Interface: r))).ToList();
@@ -815,19 +865,6 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("        };");
         sb.AppendLine();
 
-        // === NOTIFICATION OPTIONS MAP ===
-        if (notifications.Count > 0)
-        {
-            sb.AppendLine("        private static readonly Dictionary<Type, (global::MediatorLite.NotificationExecutionStrategy, global::MediatorLite.NotificationErrorStrategy)> _notificationOptionsMap = new()");
-            sb.AppendLine("        {");
-            foreach (var notification in notifications)
-            {
-                sb.AppendLine($"            [typeof({notification.TypeName})] = ((global::MediatorLite.NotificationExecutionStrategy){notification.ExecutionStrategy}, (global::MediatorLite.NotificationErrorStrategy){notification.ErrorStrategy}),");
-            }
-            sb.AppendLine("        };");
-            sb.AppendLine();
-        }
-
         // === INTERFACE METHODS ===
         sb.AppendLine("        /// <inheritdoc />");
         sb.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
@@ -839,20 +876,6 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
         sb.AppendLine("        public global::MediatorLite.NotificationPublisher? GetPublisher(Type notificationType)");
         sb.AppendLine("            => _publishers.GetValueOrDefault(notificationType);");
-        sb.AppendLine();
-
-        sb.AppendLine("        /// <inheritdoc />");
-        sb.AppendLine("        public (global::MediatorLite.NotificationExecutionStrategy ExecutionStrategy, global::MediatorLite.NotificationErrorStrategy ErrorStrategy)? GetNotificationOptions(Type notificationType)");
-        sb.AppendLine("        {");
-        if (notifications.Count > 0)
-        {
-            sb.AppendLine("            return _notificationOptionsMap.TryGetValue(notificationType, out var options) ? options : null;");
-        }
-        else
-        {
-            sb.AppendLine("            return null;");
-        }
-        sb.AppendLine("        }");
         sb.AppendLine();
 
         // === UNROLLED REQUEST PIPELINES ===
@@ -882,16 +905,21 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("        // ═══════════════════════════════════════════════════════════════════════════════");
         sb.AppendLine();
 
+        var notificationsByType = notifications
+            .GroupBy(n => n.TypeName)
+            .ToDictionary(g => g.Key, g => g.First());
+
         foreach (var notifGroup in handlersByNotification)
         {
             var notificationType = notifGroup.Key;
             var safeName = GetSafeTypeName(notificationType);
             var handlersForNotification = notifGroup.Value;
 
-            // Check if this notification has custom options
-            var notificationOptions = notifications.FirstOrDefault(n => n.TypeName == notificationType);
-            
-            GenerateUnrolledNotificationPublisher(sb, safeName, notificationType, handlersForNotification, notificationOptions);
+            notificationsByType.TryGetValue(notificationType, out var perTypeOptions);
+            var (executionStrategy, errorStrategy) = ResolveStrategies(perTypeOptions, assemblyDefaults);
+
+            GenerateUnrolledNotificationPublisher(
+                sb, safeName, notificationType, handlersForNotification, executionStrategy, errorStrategy);
         }
 
         sb.AppendLine("    }");
@@ -963,18 +991,17 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
 
     /// <summary>
     /// Generates an unrolled notification publisher method.
+    /// Strategies are fully resolved at compile time by <see cref="ResolveStrategies"/>,
+    /// so the emitted body has exactly one code path with no runtime branching on strategy.
     /// </summary>
     private static void GenerateUnrolledNotificationPublisher(
         StringBuilder sb,
         string safeName,
         string notificationType,
         List<(HandlerInfo Handler, NotificationHandlerInterfaceInfo Interface)> handlers,
-        NotificationTypeInfo? options)
+        int executionStrategy,
+        int errorStrategy)
     {
-        // Determine execution strategy (default: Sequential)
-        int executionStrategy = options?.ExecutionStrategy ?? 0; // 0 = Sequential
-        int errorStrategy = options?.ErrorStrategy ?? 0; // 0 = StopOnFirstError
-
         sb.AppendLine($"        private static async Task Publish_{safeName}(");
         sb.AppendLine($"            IServiceProvider sp, {notificationType} notification, CancellationToken ct)");
         sb.AppendLine("        {");
@@ -1191,8 +1218,10 @@ internal sealed record NotificationHandlerInterfaceInfo(
 
 internal sealed record NotificationTypeInfo(
     string TypeName,
-    int ExecutionStrategy,
-    int ErrorStrategy);
+    int? ExecutionStrategy,
+    int? ErrorStrategy);
+
+internal readonly record struct AssemblyDefaults(int? ExecutionStrategy, int? ErrorStrategy);
 
 internal sealed record BehaviorInfo(
     string ClassName,

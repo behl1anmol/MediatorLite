@@ -4,16 +4,28 @@ Notifications implement a pub-sub pattern where multiple handlers can respond to
 
 ## v2 Changes
 
-In v2, notification execution strategies are controlled via **compile-time `[NotificationOptions]` attributes**, not runtime options:
+In v2, notification execution and error strategies are **compile-time only**. They are baked into the generated `Publish_*` methods, so there is no runtime branching. Two orthogonal per-type attributes control strategy:
 
 ```csharp
-[NotificationOptions(
-    ExecutionStrategy = NotificationExecutionStrategy.Parallel,
-    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate)]
+[NotificationExecution(NotificationExecutionStrategy.Parallel)]
+[NotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
 public record UserCreatedNotification(int UserId, string Email) : INotification;
 ```
 
-> ⚠️ **v2 Change:** `MediatorOptions.NotificationExecutionStrategy` and `NotificationErrorStrategy` runtime options are ignored in favor of compile-time attributes.
+Assembly-level attributes provide defaults for every notification type in the assembly:
+
+```csharp
+[assembly: DefaultNotificationExecution(NotificationExecutionStrategy.Parallel)]
+[assembly: DefaultNotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
+```
+
+Precedence (resolved per strategy, per notification, at compile time):
+
+1. Per-notification attribute (`[NotificationExecution]` / `[NotificationError]`) — wins when present.
+2. Assembly-level default (`[assembly: DefaultNotificationExecution]` / `[assembly: DefaultNotificationError]`).
+3. Library defaults — `Sequential` for execution, `StopOnFirstError` for error.
+
+> ⚠️ **Hard break in v2:** `MediatorOptions.NotificationExecutionStrategy`, `MediatorOptions.NotificationErrorStrategy`, `NotificationOptionsAttribute`, and `ISourceGeneratedMediator.GetNotificationOptions` have been **removed**. Use the attributes above.
 
 ## Defining Notifications
 
@@ -49,14 +61,14 @@ await mediator.PublishAsync(new UserCreatedNotification(user.Id, user.Email));
 
 ## Execution Strategies (v2)
 
-MediatorLite provides three execution strategies configured via the `[NotificationOptions]` attribute.
+MediatorLite provides three execution strategies, selected via `[NotificationExecution]` (or the assembly-level default).
 
 ### Sequential (Default)
 
 Handlers execute one after another in order. Best for handlers with dependencies or when order matters.
 
 ```csharp
-[NotificationOptions(ExecutionStrategy = NotificationExecutionStrategy.Sequential)]
+[NotificationExecution(NotificationExecutionStrategy.Sequential)]
 public record OrderCompletedNotification(int OrderId) : INotification;
 ```
 
@@ -72,13 +84,13 @@ public record OrderCompletedNotification(int OrderId) : INotification;
 All handlers execute concurrently using `Task.WhenAll`. Best for independent handlers.
 
 ```csharp
-[NotificationOptions(ExecutionStrategy = NotificationExecutionStrategy.Parallel)]
+[NotificationExecution(NotificationExecutionStrategy.Parallel)]
 public record UserCreatedNotification(int UserId) : INotification;
 ```
 
 **Error Strategy Behavior:**
 
-> ⚠️ **Important:** `NotificationErrorStrategy` is **ignored** for parallel execution.
+> ⚠️ **Important:** `[NotificationError]` is **ignored** for parallel execution.
 
 Since all handlers start immediately and run concurrently, it's impossible to "stop on first error" - handlers cannot be cancelled mid-execution. Parallel mode **always aggregates exceptions**:
 
@@ -90,7 +102,7 @@ Since all handlers start immediately and run concurrently, it's impossible to "s
 Executes handlers in order until one completes successfully ("first handler wins"). Useful for fallback patterns.
 
 ```csharp
-[NotificationOptions(ExecutionStrategy = NotificationExecutionStrategy.StopOnFirst)]
+[NotificationExecution(NotificationExecutionStrategy.StopOnFirst)]
 public record CacheInvalidationNotification(string Key) : INotification;
 ```
 
@@ -111,9 +123,8 @@ public class PrimaryCacheHandler : INotificationHandler<GetDataNotification> { }
 public class FallbackDatabaseHandler : INotificationHandler<GetDataNotification> { }
 
 // Configure to try next handler on failure
-[NotificationOptions(
-    ExecutionStrategy = NotificationExecutionStrategy.StopOnFirst,
-    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate)]
+[NotificationExecution(NotificationExecutionStrategy.StopOnFirst)]
+[NotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
 public record GetDataNotification(string Key) : INotification;
 ```
 
@@ -127,29 +138,36 @@ public record GetDataNotification(string Key) : INotification;
 
 ## Per-Notification Configuration (v2)
 
-Use `[NotificationOptions]` attribute to configure strategy at compile time:
+Apply one or both of the per-type attributes at compile time:
 
 ```csharp
-[NotificationOptions(
-    ExecutionStrategy = NotificationExecutionStrategy.Parallel,
-    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate)]
+[NotificationExecution(NotificationExecutionStrategy.Parallel)]
+[NotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
 public record HighPriorityNotification(string Message) : INotification;
 ```
 
-This is the **only way** to configure notification strategies in v2. The `OverrideGlobal` parameter is deprecated since there are no longer global runtime options to override.
+Each attribute is independent: you can set only execution, only error, or both. Any strategy you do not set falls back — first to the assembly-level default (if declared), otherwise to the library default.
 
-## Global Configuration (Deprecated)
+## Assembly-Level Defaults (v2)
 
-> ⚠️ **Deprecated in v2:** Runtime configuration via `MediatorOptions` is ignored. Use `[NotificationOptions]` attribute instead.
+Declare defaults once per assembly instead of repeating the per-type attributes on every notification:
 
 ```csharp
-// This no longer affects notification behavior in v2
-services.AddMediatorLite(options =>
-{
-    options.NotificationExecutionStrategy = NotificationExecutionStrategy.Sequential;  // Ignored
-    options.NotificationErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate;  // Ignored
-});
+// AssemblyInfo.cs (or any file in the assembly)
+[assembly: DefaultNotificationExecution(NotificationExecutionStrategy.Parallel)]
+[assembly: DefaultNotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
 ```
+
+Both attributes are optional and independent. Per-type `[NotificationExecution]` / `[NotificationError]` always win when present.
+
+## Removed APIs (v2)
+
+The following runtime APIs have been **removed** — they are replaced by the compile-time attributes above:
+
+- `MediatorOptions.NotificationExecutionStrategy`
+- `MediatorOptions.NotificationErrorStrategy`
+- `NotificationOptionsAttribute` (replaced by split `[NotificationExecution]` + `[NotificationError]`)
+- `ISourceGeneratedMediator.GetNotificationOptions(Type)` (strategies are now inlined into `Publish_*`)
 
 ## Handler Ordering
 

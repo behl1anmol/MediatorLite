@@ -93,14 +93,4 @@ public interface ISourceGeneratedMediator
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     NotificationPublisher? GetPublisher(Type notificationType);
-
-    /// <summary>
-    /// Gets the notification options for a notification type.
-    /// </summary>
-    /// <param name="notificationType">The notification type to get options for.</param>
-    /// <returns>
-    /// A tuple of (ExecutionStrategy, ErrorStrategy) if the notification has options configured
-    /// via <see cref="NotificationOptionsAttribute"/>; otherwise, null indicating default options should be used.
-    /// </returns>
-    (NotificationExecutionStrategy ExecutionStrategy, NotificationErrorStrategy ErrorStrategy)? GetNotificationOptions(Type notificationType);
 }

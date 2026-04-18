@@ -13,17 +13,31 @@ namespace MediatorLite.Tests.UnitTests
         }
 
         [Fact]
-        public void NotificationOptionsAttribute_SetsProperties()
+        public void NotificationExecutionAttribute_SetsStrategy()
         {
-            var attr = new NotificationOptionsAttribute
-            {
-                ExecutionStrategy = NotificationExecutionStrategy.Parallel,
-                ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate,
-                OverrideGlobal = true
-            };
-            Assert.Equal(NotificationExecutionStrategy.Parallel, attr.ExecutionStrategy);
-            Assert.Equal(NotificationErrorStrategy.ContinueAndAggregate, attr.ErrorStrategy);
-            Assert.True(attr.OverrideGlobal);
+            var attr = new NotificationExecutionAttribute(NotificationExecutionStrategy.Parallel);
+            Assert.Equal(NotificationExecutionStrategy.Parallel, attr.Strategy);
+        }
+
+        [Fact]
+        public void NotificationErrorAttribute_SetsStrategy()
+        {
+            var attr = new NotificationErrorAttribute(NotificationErrorStrategy.ContinueAndAggregate);
+            Assert.Equal(NotificationErrorStrategy.ContinueAndAggregate, attr.Strategy);
+        }
+
+        [Fact]
+        public void DefaultNotificationExecutionAttribute_SetsStrategy()
+        {
+            var attr = new DefaultNotificationExecutionAttribute(NotificationExecutionStrategy.StopOnFirst);
+            Assert.Equal(NotificationExecutionStrategy.StopOnFirst, attr.Strategy);
+        }
+
+        [Fact]
+        public void DefaultNotificationErrorAttribute_SetsStrategy()
+        {
+            var attr = new DefaultNotificationErrorAttribute(NotificationErrorStrategy.StopOnFirstError);
+            Assert.Equal(NotificationErrorStrategy.StopOnFirstError, attr.Strategy);
         }
 
         [Fact]

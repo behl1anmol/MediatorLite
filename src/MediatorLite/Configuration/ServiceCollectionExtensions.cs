@@ -24,8 +24,15 @@ public static class ServiceCollectionExtensions
     ///     .AddMediatorLite(options =>
     ///     {
     ///         options.EnableBuiltInLogging = false;
-    ///         options.NotificationExecutionStrategy = NotificationExecutionStrategy.Parallel;
+    ///         options.EnableTracing = true;
     ///     });
+    ///
+    /// // Notification execution/error strategies are compile-time only. Use attributes:
+    /// //   [NotificationExecution(NotificationExecutionStrategy.Parallel)]
+    /// //   [NotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
+    /// // on notification types, or assembly-level defaults:
+    /// //   [assembly: DefaultNotificationExecution(NotificationExecutionStrategy.Parallel)]
+    /// //   [assembly: DefaultNotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
     /// </code>
     /// </example>
     public static IServiceCollection AddMediatorLite(

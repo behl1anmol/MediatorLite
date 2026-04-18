@@ -9,20 +9,6 @@ namespace MediatorLite.Configuration;
 public sealed class MediatorOptions
 {
     /// <summary>
-    /// Gets or sets the default execution strategy for notifications.
-    /// Default is <see cref="NotificationExecutionStrategy.Sequential"/>.
-    /// </summary>
-    public NotificationExecutionStrategy NotificationExecutionStrategy { get; set; } =
-        NotificationExecutionStrategy.Sequential;
-
-    /// <summary>
-    /// Gets or sets the default error handling strategy for notifications.
-    /// Default is <see cref="NotificationErrorStrategy.ContinueAndAggregate"/>.
-    /// </summary>
-    public NotificationErrorStrategy NotificationErrorStrategy { get; set; } =
-        NotificationErrorStrategy.ContinueAndAggregate;
-
-    /// <summary>
     /// Gets or sets whether built-in logging is enabled.
     /// Default is true.
     /// </summary>

@@ -8,9 +8,10 @@
   - Pipeline behaviors (`IPipelineBehavior<TRequest,TResponse>`) wrap handlers; they are resolved in DI registration order plus any types added through `MediatorOptions.BehaviorTypes`.
   - Notifications support execution strategies (sequential/parallel/stop-on-first) and error strategies (stop-first vs continue+aggregate) configured globally or per-notification.
 
-- **Key options & attributes** (see [src/MediatorLite/Configuration/MediatorOptions.cs](src/MediatorLite/Configuration/MediatorOptions.cs) and [src/MediatorLite/Abstractions/Attributes.cs](src/MediatorLite/Abstractions/Attributes.cs))
-  - `NotificationExecutionStrategy`, `NotificationErrorStrategy`, `EnableBuiltInLogging`, `EnableTracing`, `HandlerLifetime`, `MediatorLifetime`.
-  - `[NotificationOptions]` overrides strategies per notification; `[NotificationHandlerOrder]` controls ordering; `[MediatorGeneration(Skip=true)]` omits a handler from source-gen registration.
+- **Key options & attributes** (see [src/MediatorLite/Configuration/MediatorOptions.cs](src/MediatorLite/Configuration/MediatorOptions.cs) and [src/MediatorLite.Abstractions/Abstractions/Attributes.cs](src/MediatorLite.Abstractions/Abstractions/Attributes.cs))
+  - Runtime options: `EnableBuiltInLogging`, `EnableTracing`, `HandlerLifetime`, `MediatorLifetime`.
+  - Compile-time notification strategy attributes: `[NotificationExecution]` / `[NotificationError]` on notification types; `[assembly: DefaultNotificationExecution]` / `[assembly: DefaultNotificationError]` for assembly-wide defaults. Resolution precedence: per-type > assembly default > library default (`Sequential` / `StopOnFirstError`).
+  - `[NotificationHandlerOrder]` controls ordering; `[MediatorGeneration(Skip=true)]` omits a handler from source-gen registration.
   - `[MediatorLogging]` toggles logging or payload inclusion per request.
 
 - **Behavior conventions**
@@ -20,7 +21,7 @@
 
 - **Notifications**
   - Ordering is applied via `[NotificationHandlerOrder]` before executing handlers.
-  - `PublishAsync` can run handlers sequentially, in parallel, or stop after the first handler completes; `NotificationErrorStrategy.ContinueAndAggregate` aggregates exceptions when parallel/sequential.
+  - `PublishAsync` can run handlers sequentially, in parallel, or stop after the first handler completes; `NotificationErrorStrategy.ContinueAndAggregate` aggregates exceptions when parallel/sequential. Strategy is resolved at compile time and baked into each generated `Publish_*` method.
 
 - **Validation**
   - Built-in `ValidationBehavior<TReq,TRes>` and `DataAnnotationsValidator<T>` are in [src/MediatorLite/Validation/Validation.cs](src/MediatorLite/Validation/Validation.cs); register validators in DI and add the open behavior to enforce.

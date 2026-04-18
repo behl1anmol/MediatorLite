@@ -28,7 +28,7 @@ MediatorLite v2 is **source-generation-first**. The compile-time generated code 
 |--------|----|----|
 | **Primary dispatch** | Reflection with caching | Source-generated O(1) switch |
 | **Behavior ordering** | DI registration order | `[BehaviorOrder]` attribute |
-| **Notification strategies** | `MediatorOptions` at runtime | `[NotificationOptions]` attribute at compile-time |
+| **Notification strategies** | `MediatorOptions` at runtime | `[NotificationExecution]` / `[NotificationError]` attributes at compile-time (plus assembly-level defaults) |
 | **Handler ordering** | `[NotificationHandlerOrder]` | `[NotificationHandlerOrder]` (unchanged) |
 | **Reflection fallback** | Supported | Deprecated (still functional) |
 
@@ -149,11 +149,13 @@ services
     {
         options.EnableBuiltInLogging = true;
         options.EnableTracing = true;
-        // Note: NotificationExecutionStrategy is now controlled via [NotificationOptions] attribute
+        // Note: notification execution/error strategies are compile-time only.
+        // Use [NotificationExecution] / [NotificationError] on notification types,
+        // or [assembly: DefaultNotificationExecution] / [assembly: DefaultNotificationError].
     });
 ```
 
-> ⚠️ **v2 Change:** Runtime options like `NotificationExecutionStrategy` and `NotificationErrorStrategy` are ignored in favor of compile-time `[NotificationOptions]` attributes on notification types.
+> ⚠️ **v2 Change:** `MediatorOptions.NotificationExecutionStrategy` / `NotificationErrorStrategy` and the old `[NotificationOptions]` attribute have been **removed**. Use `[NotificationExecution]` / `[NotificationError]` (or their `[assembly: Default...]` counterparts) instead.
 
 #### Granular Registration
 
@@ -238,10 +240,13 @@ In v2, notification strategies are controlled via **compile-time attributes**, n
 
 ```csharp
 // Apply strategy to a specific notification type
-[NotificationOptions(
-    ExecutionStrategy = NotificationExecutionStrategy.Parallel,
-    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate)]
+[NotificationExecution(NotificationExecutionStrategy.Parallel)]
+[NotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
 public record UserCreatedNotification(int UserId, string Email) : INotification;
+
+// Or set an assembly-wide default once:
+[assembly: DefaultNotificationExecution(NotificationExecutionStrategy.Parallel)]
+[assembly: DefaultNotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
 ```
 
 | Strategy | Description | Error Handling |
@@ -271,7 +276,7 @@ See [Notifications documentation](docs/notifications.md) for detailed strategy b
 | Handler Dispatch | O(1) source-generated switch | Reflection-based |
 | Handler Discovery | Compile-time (source gen) | Runtime reflection |
 | Behavior Ordering | `[BehaviorOrder]` attribute | Registration order |
-| Notification Strategies | `[NotificationOptions]` attribute | Runtime configuration |
+| Notification Strategies | `[NotificationExecution]` / `[NotificationError]` attributes + assembly-level defaults | Runtime configuration |
 | ValueTask Support | Native | Task only |
 | OpenTelemetry | Built-in | Manual |
 | Notification Strategies | Sequential, Parallel, StopOnFirst | Sequential only |

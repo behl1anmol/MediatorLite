@@ -30,45 +30,35 @@ public record ShortCircuitQuery : IRequest;
 
 public record UserCreatedEvent(int UserId, string Email) : INotification;
 
-[NotificationOptions(
-    ExecutionStrategy = NotificationExecutionStrategy.Parallel,
-    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate,
-    OverrideGlobal = true)]
+[NotificationExecution(NotificationExecutionStrategy.Parallel)]
+[NotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
 public record ParallelEvent(string Message) : INotification;
 
-[NotificationOptions(
-    ExecutionStrategy = NotificationExecutionStrategy.StopOnFirst,
-    OverrideGlobal = true)]
+[NotificationExecution(NotificationExecutionStrategy.StopOnFirst)]
 public record StopOnFirstEvent(string Message) : INotification;
 
 /// <summary>
 /// Notification configured for StopOnFirst execution with ContinueAndAggregate error strategy.
 /// This enables the "fallback pattern" where if one handler fails, the next is tried.
 /// </summary>
-[NotificationOptions(
-    ExecutionStrategy = NotificationExecutionStrategy.StopOnFirst,
-    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate,
-    OverrideGlobal = true)]
+[NotificationExecution(NotificationExecutionStrategy.StopOnFirst)]
+[NotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
 public record StopOnFirstFallbackEvent(string Message) : INotification;
 
 /// <summary>
 /// Notification configured for StopOnFirst + StopOnFirstError (default error strategy).
 /// When the first handler fails, it should throw immediately without trying other handlers.
 /// </summary>
-[NotificationOptions(
-    ExecutionStrategy = NotificationExecutionStrategy.StopOnFirst,
-    ErrorStrategy = NotificationErrorStrategy.StopOnFirstError,
-    OverrideGlobal = true)]
+[NotificationExecution(NotificationExecutionStrategy.StopOnFirst)]
+[NotificationError(NotificationErrorStrategy.StopOnFirstError)]
 public record StopOnFirstWithStopOnFirstErrorEvent(string Message) : INotification;
 
 /// <summary>
 /// Notification configured for StopOnFirst + ContinueAndAggregate where ALL handlers fail.
 /// Should throw AggregateException with all handler failures.
 /// </summary>
-[NotificationOptions(
-    ExecutionStrategy = NotificationExecutionStrategy.StopOnFirst,
-    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate,
-    OverrideGlobal = true)]
+[NotificationExecution(NotificationExecutionStrategy.StopOnFirst)]
+[NotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
 public record AllFailStopOnFirstWithAggregateEvent(string Message) : INotification;
 
 #endregion

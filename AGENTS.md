@@ -17,7 +17,7 @@
 - `MediatorLiteRegistration` exposes `AddGeneratedHandlers()`, the granular `AddGeneratedRequestHandlers()` / `AddGeneratedNotificationHandlers()` / `AddGeneratedValidators()` / `AddGeneratedBehaviors()` methods, and diagnostic counts (`RequestHandlerCount`, `NotificationHandlerCount`, `BehaviorCount`, `ValidatorCount`).
 - Behaviors execute in `[BehaviorOrder]` order; lower values run first, and validation behaviors are emitted before other behaviors for validated request types.
 - Behaviors may short-circuit by not calling `next()`.
-- Notifications honor `NotificationHandlerOrderAttribute` and per-notification `NotificationOptionsAttribute`; `MediatorOptions.NotificationExecutionStrategy` and `NotificationErrorStrategy` are ignored by generated notification dispatch.
+- Notifications honor `NotificationHandlerOrderAttribute`. Execution and error strategies are **compile-time only** via the per-notification `NotificationExecutionAttribute` / `NotificationErrorAttribute` and the assembly-level `DefaultNotificationExecutionAttribute` / `DefaultNotificationErrorAttribute`. The generator resolves them (per-notification > assembly default > library default: `Sequential` / `StopOnFirstError`) and inlines the result into each `Publish_*` method as a single branch-free path. The old `NotificationOptionsAttribute` and the `MediatorOptions.NotificationExecutionStrategy` / `NotificationErrorStrategy` runtime properties have been removed.
 
 ## Validation and observability
 - Validation lives in `src/MediatorLite/Validation/Validation.cs`; source-gen registration auto-discovers custom `IValidator<T>` implementations, registers `ValidationBehavior<,>`, and adds `DataAnnotationsValidator<T>` for annotated request types.

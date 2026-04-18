@@ -17,7 +17,7 @@ Source generators for MediatorLite v2 that enable **O(1) dispatch** via compile-
 MediatorLite.SourceGeneration is a Roslyn source generator that:
 - Generates **O(1) switch expressions** for handler dispatch (no dictionary lookups or reflection)
 - Respects **`[BehaviorOrder]`** attributes for pipeline behavior ordering
-- Respects **`[NotificationOptions]`** attributes for notification execution strategies
+- Respects **`[NotificationExecution]`** / **`[NotificationError]`** attributes for per-notification strategies, merged with **`[assembly: DefaultNotificationExecution]`** / **`[assembly: DefaultNotificationError]`** defaults
 - Respects **`[NotificationHandlerOrder]`** attributes for handler execution order
 
 ## v2 Architecture
@@ -28,13 +28,13 @@ MediatorLite v2 is **source-generation-first**. This package is **required** for
 |--------|--------------------------------|----------------------|
 | Handler dispatch | Reflection with caching | O(1) generated switch |
 | Behavior ordering | DI registration order | `[BehaviorOrder]` attribute |
-| Notification strategies | Ignored runtime options | `[NotificationOptions]` attribute |
+| Notification strategies | Ignored runtime options | `[NotificationExecution]` / `[NotificationError]` + `[assembly: Default...]` defaults |
 | Performance | Slower (dictionary + reflection) | Faster (direct method calls) |
 
 ## Why use Source Generation?
 
 - **O(1) Dispatch**: Generated switch expressions provide constant-time handler resolution
-- **Compile-Time Configuration**: `[BehaviorOrder]` and `[NotificationOptions]` attributes control behavior
+- **Compile-Time Configuration**: `[BehaviorOrder]`, `[NotificationExecution]`, `[NotificationError]`, and `[NotificationHandlerOrder]` attributes control behavior (plus assembly-level defaults for notification strategies)
 - **Zero Runtime Reflection**: Handler discovery happens at compile-time, not runtime
 - **Faster Startup**: No need to scan assemblies for handlers during application initialization
 - **Better Performance**: Direct method calls instead of reflection-based invocation
@@ -81,7 +81,9 @@ services
     {
         options.EnableBuiltInLogging = true;
         options.EnableTracing = true;
-        // Note: NotificationExecutionStrategy is controlled via [NotificationOptions] attribute
+        // Note: notification execution/error strategies are controlled at compile time via
+        // [NotificationExecution] / [NotificationError] on the notification type, or assembly-level
+        // [assembly: DefaultNotificationExecution] / [assembly: DefaultNotificationError].
     });
 ```
 
@@ -171,16 +173,24 @@ public class LoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, 
 public class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse> { }
 ```
 
-**Notification strategies with `[NotificationOptions]`:**
+**Notification strategies with `[NotificationExecution]` / `[NotificationError]`:**
 
 ```csharp
-[NotificationOptions(
-    ExecutionStrategy = NotificationExecutionStrategy.Parallel,
-    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate)]
+[NotificationExecution(NotificationExecutionStrategy.Parallel)]
+[NotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
 public record UserCreatedNotification(int UserId) : INotification;
 ```
 
-> ⚠️ **v2 Change:** Runtime `MediatorOptions` for notification strategies are ignored. Use `[NotificationOptions]` attributes.
+**Assembly-wide defaults:**
+
+```csharp
+[assembly: DefaultNotificationExecution(NotificationExecutionStrategy.Parallel)]
+[assembly: DefaultNotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
+```
+
+Per-notification attributes win over assembly-level defaults. If neither is set, the library defaults (`Sequential` + `StopOnFirstError`) apply.
+
+> ⚠️ **v2 Hard Break:** `MediatorOptions.NotificationExecutionStrategy` / `NotificationErrorStrategy`, the old `[NotificationOptions]` attribute, and `ISourceGeneratedMediator.GetNotificationOptions` have been **removed**. Strategies are resolved at compile time and baked into each `Publish_*` method as a single branch-free code path.
 
 **Handler ordering with `[NotificationHandlerOrder]`:**
 
@@ -321,7 +331,7 @@ The source generator:
 3. Creates `AddGeneratedHandlers()`, `AddGeneratedRequestHandlers()`, etc.
 4. Generates **O(1 switch expressions** for handler dispatch
 5. Reads `[BehaviorOrder]` attributes and generates ordered behavior chains
-6. Reads `[NotificationOptions]` attributes and generates strategy lookups
+6. Reads `[NotificationExecution]` / `[NotificationError]` attributes (and `[assembly: Default...]` defaults) and bakes the resolved strategy for each notification directly into its `Publish_*` body
 7. Reads `[NotificationHandlerOrder]` attributes and generates ordered handler execution
 
 All of this happens during build — no runtime scanning or reflection required!
@@ -366,7 +376,7 @@ services.AddTransient<INotificationHandler<UserCreated>, SendEmailHandler>();
 services.AddMediatorLite();  // Falls back to reflection when ISourceGeneratedMediator is not registered
 ```
 
-> ⚠️ **Deprecated:** Manual registration uses reflection-based dispatch and does not support `[BehaviorOrder]` or `[NotificationOptions]` attributes.
+> ⚠️ **Deprecated:** Manual registration uses reflection-based dispatch and does not support `[BehaviorOrder]`, `[NotificationExecution]`, `[NotificationError]`, or the assembly-level default attributes.
 
 ## Source Code
 

@@ -114,14 +114,24 @@ services.AddMediatorLite(options =>
 
 v2 provides attributes for compile-time configuration:
 
-#### `[NotificationOptions]` - Per-Notification Strategies
+#### `[NotificationExecution]` / `[NotificationError]` - Per-Notification Strategies
 
 ```csharp
-[NotificationOptions(
-    ExecutionStrategy = NotificationExecutionStrategy.Parallel,
-    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate)]
+[NotificationExecution(NotificationExecutionStrategy.Parallel)]
+[NotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
 public record UserCreatedNotification(Guid UserId) : INotification;
 ```
+
+Each attribute is independent. Omit one to fall back to the assembly-level default (or the library default if none is declared).
+
+#### `[assembly: DefaultNotificationExecution]` / `[assembly: DefaultNotificationError]` - Assembly-Wide Defaults
+
+```csharp
+[assembly: DefaultNotificationExecution(NotificationExecutionStrategy.Parallel)]
+[assembly: DefaultNotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
+```
+
+Per-notification attributes always win over these assembly-level defaults.
 
 #### `[NotificationHandlerOrder]` - Handler Execution Order
 
@@ -183,30 +193,31 @@ var behaviorCount = MediatorLiteRegistration.BehaviorCount;
 
 ## Configuration Options
 
-`MediatorOptions` remains the same in v2:
+`MediatorOptions` is the runtime configuration surface. **Notification execution and error strategies were removed in v2** — they are now compile-time only (see above).
 
 ```csharp
 services.AddMediatorLite(options =>
 {
-    // Notification strategies
-    options.NotificationExecutionStrategy = NotificationExecutionStrategy.Sequential;
-    options.NotificationErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate;
-    
     // Logging
     options.EnableBuiltInLogging = true;
     options.DefaultLogLevel = LogLevel.Debug;
-    
+
     // Tracing
     options.EnableTracing = true;
-    
+
     // Lifetimes
     options.HandlerLifetime = ServiceLifetime.Transient;
     options.MediatorLifetime = ServiceLifetime.Transient;
-    
+
     // Open generic behaviors
     options.AddOpenBehavior(typeof(LoggingBehavior<,>));
     options.AddOpenBehavior(typeof(ValidationBehavior<,>));
 });
+
+// Notification strategies are set via attributes at compile time:
+//   [NotificationExecution(...)] / [NotificationError(...)]          — per notification type
+//   [assembly: DefaultNotificationExecution(...)]                    — assembly-wide defaults
+//   [assembly: DefaultNotificationError(...)]
 ```
 
 ---

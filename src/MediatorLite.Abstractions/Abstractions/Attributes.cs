@@ -91,32 +91,103 @@ public sealed class NotificationHandlerOrderAttribute(int order) : Attribute
 }
 
 /// <summary>
-/// Specifies notification-specific execution options that override global settings.
+/// Specifies the notification execution strategy for a specific notification type at compile time.
 /// </summary>
 /// <remarks>
-/// Apply this attribute to a notification class to override the global
-/// <see cref="NotificationExecutionStrategy"/> and <see cref="NotificationErrorStrategy"/>.
+/// <para>
+/// Apply this attribute to a notification class to set its execution strategy. Presence of the
+/// attribute means the strategy is explicitly set and will override any assembly-level default
+/// declared via <see cref="DefaultNotificationExecutionAttribute"/>. Absence of the attribute
+/// means the strategy falls back to the assembly default (if any) or the library default
+/// (<see cref="NotificationExecutionStrategy.Sequential"/>).
+/// </para>
+/// <para>
+/// This attribute is consumed at compile time by the MediatorLite source generator; it has no
+/// runtime effect.
+/// </para>
 /// </remarks>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-public sealed class NotificationOptionsAttribute : Attribute
+public sealed class NotificationExecutionAttribute(NotificationExecutionStrategy strategy) : Attribute
 {
     /// <summary>
-    /// Gets or sets the execution strategy for this notification type.
-    /// If not set, the global strategy from MediatorOptions is used.
+    /// Gets the execution strategy for this notification type.
     /// </summary>
-    public NotificationExecutionStrategy ExecutionStrategy { get; set; } = NotificationExecutionStrategy.Sequential;
+    public NotificationExecutionStrategy Strategy { get; } = strategy;
+}
 
+/// <summary>
+/// Specifies the notification error handling strategy for a specific notification type at compile time.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Apply this attribute to a notification class to set its error handling strategy. Presence of
+/// the attribute means the strategy is explicitly set and will override any assembly-level default
+/// declared via <see cref="DefaultNotificationErrorAttribute"/>. Absence of the attribute means
+/// the strategy falls back to the assembly default (if any) or the library default
+/// (<see cref="NotificationErrorStrategy.StopOnFirstError"/>).
+/// </para>
+/// <para>
+/// This attribute is consumed at compile time by the MediatorLite source generator; it has no
+/// runtime effect.
+/// </para>
+/// </remarks>
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+public sealed class NotificationErrorAttribute(NotificationErrorStrategy strategy) : Attribute
+{
     /// <summary>
-    /// Gets or sets the error handling strategy for this notification type.
-    /// If not set, the global strategy from MediatorOptions is used.
+    /// Gets the error handling strategy for this notification type.
     /// </summary>
-    public NotificationErrorStrategy ErrorStrategy { get; set; } = NotificationErrorStrategy.ContinueAndAggregate;
+    public NotificationErrorStrategy Strategy { get; } = strategy;
+}
 
+/// <summary>
+/// Specifies the assembly-wide default notification execution strategy at compile time.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Apply this attribute at the assembly level to set the default execution strategy for all
+/// notification types in the assembly. Per-notification <see cref="NotificationExecutionAttribute"/>
+/// takes precedence when present. Absence of this attribute means notifications without an explicit
+/// <see cref="NotificationExecutionAttribute"/> fall back to the library default
+/// (<see cref="NotificationExecutionStrategy.Sequential"/>).
+/// </para>
+/// <para>
+/// This attribute is consumed at compile time by the MediatorLite source generator; it has no
+/// runtime effect.
+/// </para>
+/// </remarks>
+[AttributeUsage(AttributeTargets.Assembly, AllowMultiple = false, Inherited = false)]
+public sealed class DefaultNotificationExecutionAttribute(NotificationExecutionStrategy strategy) : Attribute
+{
     /// <summary>
-    /// Gets or sets whether this attribute's values should override the global settings.
-    /// Default is true.
+    /// Gets the assembly-wide default execution strategy.
     /// </summary>
-    public bool OverrideGlobal { get; set; } = true;
+    public NotificationExecutionStrategy Strategy { get; } = strategy;
+}
+
+/// <summary>
+/// Specifies the assembly-wide default notification error handling strategy at compile time.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Apply this attribute at the assembly level to set the default error handling strategy for all
+/// notification types in the assembly. Per-notification <see cref="NotificationErrorAttribute"/>
+/// takes precedence when present. Absence of this attribute means notifications without an explicit
+/// <see cref="NotificationErrorAttribute"/> fall back to the library default
+/// (<see cref="NotificationErrorStrategy.StopOnFirstError"/>).
+/// </para>
+/// <para>
+/// This attribute is consumed at compile time by the MediatorLite source generator; it has no
+/// runtime effect.
+/// </para>
+/// </remarks>
+[AttributeUsage(AttributeTargets.Assembly, AllowMultiple = false, Inherited = false)]
+public sealed class DefaultNotificationErrorAttribute(NotificationErrorStrategy strategy) : Attribute
+{
+    /// <summary>
+    /// Gets the assembly-wide default error handling strategy.
+    /// </summary>
+    public NotificationErrorStrategy Strategy { get; } = strategy;
 }
 
 /// <summary>

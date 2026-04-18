@@ -71,7 +71,7 @@ public class MediatorBenchmarks
         }
     }
 
-    // Notification types
+    // Notification types - Sequential (library default, no attribute)
     public record MediatorLiteNotification(int Id) : MediatorLite.INotification;
 
     public class MediatorLiteNotificationHandler1 : MediatorLite.INotificationHandler<MediatorLiteNotification>
@@ -93,6 +93,34 @@ public class MediatorBenchmarks
     public class MediatorLiteNotificationHandler3 : MediatorLite.INotificationHandler<MediatorLiteNotification>
     {
         public ValueTask HandleAsync(MediatorLiteNotification notification, CancellationToken cancellationToken = default)
+        {
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    // Notification types - Parallel (compile-time attribute)
+    [MediatorLite.NotificationExecution(MediatorLite.NotificationExecutionStrategy.Parallel)]
+    public record MediatorLiteNotificationParallel(int Id) : MediatorLite.INotification;
+
+    public class MediatorLiteNotificationParallelHandler1 : MediatorLite.INotificationHandler<MediatorLiteNotificationParallel>
+    {
+        public ValueTask HandleAsync(MediatorLiteNotificationParallel notification, CancellationToken cancellationToken = default)
+        {
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    public class MediatorLiteNotificationParallelHandler2 : MediatorLite.INotificationHandler<MediatorLiteNotificationParallel>
+    {
+        public ValueTask HandleAsync(MediatorLiteNotificationParallel notification, CancellationToken cancellationToken = default)
+        {
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    public class MediatorLiteNotificationParallelHandler3 : MediatorLite.INotificationHandler<MediatorLiteNotificationParallel>
+    {
+        public ValueTask HandleAsync(MediatorLiteNotificationParallel notification, CancellationToken cancellationToken = default)
         {
             return ValueTask.CompletedTask;
         }
@@ -346,43 +374,28 @@ public class MultipleBehaviorsBenchmarks
 [SimpleJob(warmupCount: 3, iterationCount: 10)]
 public class NotificationBenchmarks
 {
-    private IServiceProvider _mediatorLiteSequentialProvider = null!;
-    private IServiceProvider _mediatorLiteParallelProvider = null!;
+    private IServiceProvider _mediatorLiteProvider = null!;
     private IServiceProvider _mediatrProvider = null!;
-    private MediatorLite.IMediator _mediatorLiteSequential = null!;
-    private MediatorLite.IMediator _mediatorLiteParallel = null!;
+    private MediatorLite.IMediator _mediatorLite = null!;
     private MediatR.IMediator _mediatr = null!;
 
     [GlobalSetup]
     public void Setup()
     {
-        // Setup MediatorLite with v2 source-gen dispatch + sequential notifications
-        var mediatorLiteSequentialServices = new ServiceCollection();
-        mediatorLiteSequentialServices.AddGeneratedHandlers();
-        mediatorLiteSequentialServices.AddMediatorLite(options =>
+        // Single MediatorLite provider — strategies are compile-time per notification type:
+        //   MediatorLiteNotification         → Sequential (library default, no attribute)
+        //   MediatorLiteNotificationParallel → Parallel ([NotificationExecution(Parallel)])
+        var mediatorLiteServices = new ServiceCollection();
+        mediatorLiteServices.AddGeneratedHandlers();
+        mediatorLiteServices.AddMediatorLite(options =>
         {
             options.EnableBuiltInLogging = false;
             options.EnableTracing = false;
-            options.NotificationExecutionStrategy = NotificationExecutionStrategy.Sequential;
         });
-        mediatorLiteSequentialServices.AddSingleton<ILoggerFactory, NullLoggerFactory>();
-        mediatorLiteSequentialServices.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
-        _mediatorLiteSequentialProvider = mediatorLiteSequentialServices.BuildServiceProvider();
-        _mediatorLiteSequential = _mediatorLiteSequentialProvider.GetRequiredService<MediatorLite.IMediator>();
-
-        // Setup MediatorLite with v2 source-gen dispatch + parallel notifications
-        var mediatorLiteParallelServices = new ServiceCollection();
-        mediatorLiteParallelServices.AddGeneratedHandlers();
-        mediatorLiteParallelServices.AddMediatorLite(options =>
-        {
-            options.EnableBuiltInLogging = false;
-            options.EnableTracing = false;
-            options.NotificationExecutionStrategy = NotificationExecutionStrategy.Parallel;
-        });
-        mediatorLiteParallelServices.AddSingleton<ILoggerFactory, NullLoggerFactory>();
-        mediatorLiteParallelServices.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
-        _mediatorLiteParallelProvider = mediatorLiteParallelServices.BuildServiceProvider();
-        _mediatorLiteParallel = _mediatorLiteParallelProvider.GetRequiredService<MediatorLite.IMediator>();
+        mediatorLiteServices.AddSingleton<ILoggerFactory, NullLoggerFactory>();
+        mediatorLiteServices.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
+        _mediatorLiteProvider = mediatorLiteServices.BuildServiceProvider();
+        _mediatorLite = _mediatorLiteProvider.GetRequiredService<MediatorLite.IMediator>();
 
         // Setup MediatR
         var mediatrServices = new ServiceCollection();
@@ -403,20 +416,19 @@ public class NotificationBenchmarks
     [Benchmark]
     public async Task MediatorLite_Sequential_Notification()
     {
-        await _mediatorLiteSequential.PublishAsync(new MediatorBenchmarks.MediatorLiteNotification(1));
+        await _mediatorLite.PublishAsync(new MediatorBenchmarks.MediatorLiteNotification(1));
     }
 
     [Benchmark]
     public async Task MediatorLite_Parallel_Notification()
     {
-        await _mediatorLiteParallel.PublishAsync(new MediatorBenchmarks.MediatorLiteNotification(1));
+        await _mediatorLite.PublishAsync(new MediatorBenchmarks.MediatorLiteNotificationParallel(1));
     }
 
     [GlobalCleanup]
     public void Cleanup()
     {
-        (_mediatorLiteSequentialProvider as IDisposable)?.Dispose();
-        (_mediatorLiteParallelProvider as IDisposable)?.Dispose();
+        (_mediatorLiteProvider as IDisposable)?.Dispose();
         (_mediatrProvider as IDisposable)?.Dispose();
     }
 }

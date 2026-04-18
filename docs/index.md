@@ -32,7 +32,7 @@ MediatorLite v2 is **source-generation-first**:
 |--------|----|----|
 | **Primary dispatch** | Reflection with caching | O(1) generated switch |
 | **Behavior ordering** | DI registration order | `[BehaviorOrder]` attribute |
-| **Notification strategies** | `MediatorOptions` runtime | `[NotificationOptions]` compile-time |
+| **Notification strategies** | `MediatorOptions` runtime | `[NotificationExecution]` / `[NotificationError]` compile-time (with assembly-level defaults) |
 | **Reflection fallback** | Supported | Deprecated |
 
 ---
@@ -55,7 +55,7 @@ MediatorLite implements the [Mediator pattern](https://en.wikipedia.org/wiki/Med
 ## Key Features
 
 - **O(1) Dispatch** — Source-generated switch expressions provide constant-time handler resolution.
-- **Compile-Time Configuration** — `[BehaviorOrder]`, `[NotificationOptions]`, and `[NotificationHandlerOrder]` attributes control behavior at compile time.
+- **Compile-Time Configuration** — `[BehaviorOrder]`, `[NotificationExecution]`, `[NotificationError]`, and `[NotificationHandlerOrder]` attributes control behavior at compile time (plus `[assembly: DefaultNotificationExecution]` / `[assembly: DefaultNotificationError]` for assembly-wide defaults).
 - **High Performance** — `ValueTask`-based handlers with minimal overhead and no boxing.
 - **Pipeline Behaviors** — Composable middleware for cross-cutting concerns (logging, validation, caching, etc.).
 - **Notifications** — Pub/sub pattern with configurable execution strategies: `Sequential`, `Parallel`, and `StopOnFirst`.

@@ -10,7 +10,7 @@ MediatorLite v2 introduces a **source-generation-first architecture**:
 |--------|---------|-----------------|
 | Handler dispatch | Reflection | O(1) source-generated switch |
 | Behavior ordering | Registration order | `[BehaviorOrder]` attribute |
-| Notification strategies | Runtime configuration | `[NotificationOptions]` attribute |
+| Notification strategies | Runtime configuration | `[NotificationExecution]` / `[NotificationError]` attributes (with assembly-level defaults) |
 | Handler ordering | N/A | `[NotificationHandlerOrder]` attribute |
 | Required registration | `AddMediatR()` | `AddGeneratedHandlers()` + `AddMediatorLite()` |
 
@@ -224,13 +224,19 @@ public class LoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, 
 public class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse> { }
 ```
 
-**Notification strategies** — add `[NotificationOptions]` to notification types:
+**Notification strategies** — add `[NotificationExecution]` and/or `[NotificationError]` to notification types:
 
 ```csharp
-[NotificationOptions(
-    ExecutionStrategy = NotificationExecutionStrategy.Parallel,
-    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate)]
+[NotificationExecution(NotificationExecutionStrategy.Parallel)]
+[NotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
 public record UserCreatedNotification(int UserId) : INotification;
+```
+
+Or declare assembly-wide defaults once and override per notification as needed:
+
+```csharp
+[assembly: DefaultNotificationExecution(NotificationExecutionStrategy.Parallel)]
+[assembly: DefaultNotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
 ```
 
 ## Source Generation (v2)
@@ -247,7 +253,7 @@ The source generator scans your project for types implementing:
 It generates:
 - O(1) switch expressions for handler dispatch (no dictionary lookups)
 - Behavior ordering based on `[BehaviorOrder]` attributes
-- Notification strategy lookup based on `[NotificationOptions]` attributes
+- Notification strategy lookup based on `[NotificationExecution]` / `[NotificationError]` attributes (with assembly-level defaults merged in at compile time)
 - Handler ordering based on `[NotificationHandlerOrder]` attributes
 
 ### Registration Methods
@@ -283,7 +289,7 @@ The source-generated mediator provides:
 - **O(1) request dispatch** — Generated switch expression instead of `MakeGenericType`/`MethodInfo.Invoke`
 - **Typed behavior resolution** — Resolve `IPipelineBehavior<TRequest, TResponse>` without reflection
 - **Handler ordering** — Compile-time lookup of `[NotificationHandlerOrder]` attributes
-- **Notification options** — Compile-time lookup of `[NotificationOptions]` attributes
+- **Notification strategies** — Compile-time resolution of `[NotificationExecution]` / `[NotificationError]` attributes, merged with `[assembly: DefaultNotificationExecution]` / `[assembly: DefaultNotificationError]`
 
 ### Excluding Types
 
@@ -332,9 +338,9 @@ MediatorLite v2 provides enhanced control over notification execution via compil
 
 | Strategy | MediatR | MediatorLite v2 |
 |----------|---------|-----------------|
-| Sequential execution | Default (no option) | `[NotificationOptions(ExecutionStrategy = Sequential)]` |
-| Parallel execution | Not built-in | `[NotificationOptions(ExecutionStrategy = Parallel)]` |
-| Stop on first success | Not available | `[NotificationOptions(ExecutionStrategy = StopOnFirst)]` |
+| Sequential execution | Default (no option) | `[NotificationExecution(NotificationExecutionStrategy.Sequential)]` (or library default) |
+| Parallel execution | Not built-in | `[NotificationExecution(NotificationExecutionStrategy.Parallel)]` |
+| Stop on first success | Not available | `[NotificationExecution(NotificationExecutionStrategy.StopOnFirst)]` |
 
 ### Error Handling Strategies
 
@@ -360,20 +366,16 @@ MediatorLite applies error strategies based on the execution mode:
 Configure via attributes on your notification types:
 
 ```csharp
-// MediatR-like behavior (sequential, stop on first error)
-[NotificationOptions(
-    ExecutionStrategy = NotificationExecutionStrategy.Sequential,
-    ErrorStrategy = NotificationErrorStrategy.StopOnFirstError)]
+// MediatR-like behavior (sequential, stop on first error) - matches library defaults, so no attributes needed
 public record OrderPlacedNotification(int OrderId) : INotification;
 
 // More resilient production setup
-[NotificationOptions(
-    ExecutionStrategy = NotificationExecutionStrategy.Parallel,
-    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate)]
+[NotificationExecution(NotificationExecutionStrategy.Parallel)]
+[NotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
 public record UserCreatedNotification(int UserId) : INotification;
 ```
 
-> ⚠️ **v2 Change:** `MediatorOptions` runtime configuration is ignored. Use `[NotificationOptions]` attributes.
+> ⚠️ **v2 Change:** `MediatorOptions.NotificationExecutionStrategy` / `NotificationErrorStrategy` and the old `[NotificationOptions]` attribute have been removed. Use `[NotificationExecution]` / `[NotificationError]` (or their `[assembly: Default...]` counterparts).
 
 ### Per-Notification Handler Ordering
 
@@ -395,4 +397,4 @@ See [Notifications documentation](notifications.md) for detailed strategy behavi
 | `CreateScope()` | Not needed (use DI scopes) |
 | `ServiceFactory` | Not in v2 (use DI directly) |
 | Runtime behavior ordering | Replaced by `[BehaviorOrder]` attribute |
-| Runtime notification strategy | Replaced by `[NotificationOptions]` attribute |
+| Runtime notification strategy | Replaced by `[NotificationExecution]` / `[NotificationError]` attributes (with `[assembly: Default...]` for defaults) |

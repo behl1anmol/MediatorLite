@@ -83,7 +83,6 @@ public static class ApiBenchmarkHostFactory
             {
                 options.EnableBuiltInLogging = false;
                 options.EnableTracing = false;
-                options.NotificationExecutionStrategy = ML.NotificationExecutionStrategy.Sequential;
             });
         }
         else

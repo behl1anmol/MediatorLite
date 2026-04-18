@@ -197,14 +197,17 @@ await _mediator.PublishAsync(new UserCreatedNotification(user.Id, user.Email));
 In v2, notification strategies are controlled via **compile-time attributes**, not runtime options:
 
 ```csharp
-// Apply strategy via attribute (v2 approach)
-[NotificationOptions(
-    ExecutionStrategy = NotificationExecutionStrategy.Parallel,
-    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate)]
+// Apply strategy via compile-time attributes (v2 approach)
+[NotificationExecution(NotificationExecutionStrategy.Parallel)]
+[NotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
 public record UserCreatedNotification(int UserId, string Email) : INotification;
+
+// Or set an assembly-wide default once:
+[assembly: DefaultNotificationExecution(NotificationExecutionStrategy.Parallel)]
+[assembly: DefaultNotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
 ```
 
-> ⚠️ **v2 Change:** Runtime `MediatorOptions.NotificationExecutionStrategy` and `NotificationErrorStrategy` are ignored in favor of the `[NotificationOptions]` attribute.
+> ⚠️ **v2 Change:** Runtime `MediatorOptions.NotificationExecutionStrategy` / `NotificationErrorStrategy` and the old `[NotificationOptions]` attribute have been **removed**. Use `[NotificationExecution]` / `[NotificationError]` (or their `[assembly: Default...]` counterparts) instead.
 
 | Strategy | Behavior | Error Strategy |
 |----------|----------|----------------|

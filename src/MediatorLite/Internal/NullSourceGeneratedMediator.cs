@@ -14,6 +14,4 @@ internal sealed class NullSourceGeneratedMediator : ISourceGeneratedMediator
     public RequestDispatcher? GetDispatcher(Type requestType) => null;
 
     public NotificationPublisher? GetPublisher(Type notificationType) => null;
-
-    public (NotificationExecutionStrategy ExecutionStrategy, NotificationErrorStrategy ErrorStrategy)? GetNotificationOptions(Type notificationType) => null;
 }
