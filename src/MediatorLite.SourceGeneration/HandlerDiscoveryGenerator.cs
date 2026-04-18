@@ -18,6 +18,13 @@ namespace MediatorLite.SourceGeneration;
 [Generator(LanguageNames.CSharp)]
 public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
 {
+    // Mirrors constants in src/MediatorLite/Diagnostics/MediatorDiagnostics.cs.
+    // Kept in sync manually because the generator project (netstandard2.0) cannot
+    // reference the runtime MediatorLite assembly. If the runtime constants change,
+    // update these literals to match.
+    private const string ActivityNameSendRequest = "MediatorLite.Send";
+    private const string ActivityNamePublishNotification = "MediatorLite.Publish";
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         // Find all class declarations that might be handlers
@@ -76,6 +83,8 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
     {
         int? execution = null;
         int? error = null;
+        bool loggingDisabled = false;
+        bool tracingDisabled = false;
 
         foreach (var attr in compilation.Assembly.GetAttributes())
         {
@@ -92,9 +101,17 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             {
                 error = ers;
             }
+            else if (name == "DisableMediatorLoggingAttribute")
+            {
+                loggingDisabled = true;
+            }
+            else if (name == "DisableMediatorTracingAttribute")
+            {
+                tracingDisabled = true;
+            }
         }
 
-        return new AssemblyDefaults(execution, error);
+        return new AssemblyDefaults(execution, error, loggingDisabled, tracingDisabled);
     }
 
     /// <summary>
@@ -831,6 +848,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("using System.Runtime.CompilerServices;");
         sb.AppendLine("using System.Buffers;");
         sb.AppendLine("using Microsoft.Extensions.DependencyInjection;");
+        sb.AppendLine("using Microsoft.Extensions.Logging;");
         sb.AppendLine();
         sb.AppendLine("namespace MediatorLite.Generated");
         sb.AppendLine("{");
@@ -896,7 +914,14 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 ? behaviorsByRequest[key] 
                 : new List<ExpandedBehaviorInfo>();
 
-            GenerateUnrolledPipeline(sb, safeName, requestType, responseType, behaviorsForRequest);
+            GenerateUnrolledPipeline(
+                sb,
+                safeName,
+                requestType,
+                responseType,
+                behaviorsForRequest,
+                loggingEnabled: !assemblyDefaults.LoggingDisabled,
+                tracingEnabled: !assemblyDefaults.TracingDisabled);
         }
 
         // === UNROLLED NOTIFICATION PUBLISHERS ===
@@ -919,7 +944,14 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             var (executionStrategy, errorStrategy) = ResolveStrategies(perTypeOptions, assemblyDefaults);
 
             GenerateUnrolledNotificationPublisher(
-                sb, safeName, notificationType, handlersForNotification, executionStrategy, errorStrategy);
+                sb,
+                safeName,
+                notificationType,
+                handlersForNotification,
+                executionStrategy,
+                errorStrategy,
+                loggingEnabled: !assemblyDefaults.LoggingDisabled,
+                tracingEnabled: !assemblyDefaults.TracingDisabled);
         }
 
         sb.AppendLine("    }");
@@ -930,59 +962,113 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
 
     /// <summary>
     /// Generates an unrolled pipeline method for a specific request type.
+    /// When <paramref name="loggingEnabled"/> or <paramref name="tracingEnabled"/> is true,
+    /// the body is wrapped in a try/catch with inline logging/tracing. When both are false,
+    /// the zero-diagnostics fast path is emitted with no try/catch and no diagnostic locals.
     /// </summary>
     private static void GenerateUnrolledPipeline(
         StringBuilder sb,
         string safeName,
         string requestType,
         string responseType,
-        List<ExpandedBehaviorInfo> behaviors)
+        List<ExpandedBehaviorInfo> behaviors,
+        bool loggingEnabled,
+        bool tracingEnabled)
     {
+        // Display names for log messages / tag values. `requestType` is already fully
+        // qualified (starts with "global::"); strip that prefix for the tag value so the
+        // emitted literal matches typeof(T).FullName-like output, and compute the simple
+        // name by taking the substring after the last '.'.
+        var fullRequest = StripGlobalPrefix(requestType);
+        var fullResponse = StripGlobalPrefix(responseType);
+        var simpleRequest = requestType.Substring(requestType.LastIndexOf('.') + 1);
+
+        void EmitPipelineBody(string indent)
+        {
+            if (behaviors.Count == 0)
+            {
+                // Zero-behavior fast path — direct handler call
+                sb.AppendLine($"{indent}var handler = sp.GetRequiredService<global::MediatorLite.IRequestHandler<{requestType}, {responseType}>>();");
+                sb.AppendLine($"{indent}var result = await handler.HandleAsync(request, ct).ConfigureAwait(false);");
+            }
+            else
+            {
+                // Resolve all behaviors by concrete type and handler
+                for (int i = 0; i < behaviors.Count; i++)
+                {
+                    var behavior = behaviors[i];
+                    sb.AppendLine($"{indent}var b{i + 1} = sp.GetRequiredService<{behavior.BehaviorTypeName}>();");
+                }
+                sb.AppendLine($"{indent}var handler = sp.GetRequiredService<global::MediatorLite.IRequestHandler<{requestType}, {responseType}>>();");
+                sb.AppendLine();
+
+                // Build the nested delegate chain from outside in
+                sb.Append($"{indent}var result = await ");
+                for (int i = 0; i < behaviors.Count; i++)
+                {
+                    sb.Append($"b{i + 1}.HandleAsync(request, () => ");
+                }
+                sb.Append("handler.HandleAsync(request, ct)");
+                for (int i = behaviors.Count - 1; i >= 0; i--)
+                {
+                    sb.Append(", ct)");
+                }
+                sb.AppendLine(".ConfigureAwait(false);");
+            }
+
+            if (loggingEnabled)
+            {
+                sb.AppendLine($"{indent}__logger.LogDebug(\"Request {{RequestType}} handled successfully\", \"{simpleRequest}\");");
+            }
+
+            sb.AppendLine($"{indent}return result!;");
+        }
+
         sb.AppendLine($"        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
         sb.AppendLine($"        private static async Task<object> Pipeline_{safeName}(");
         sb.AppendLine($"            IServiceProvider sp, {requestType} request, CancellationToken ct)");
         sb.AppendLine("        {");
 
-        if (behaviors.Count == 0)
+        bool needsDiagnostics = loggingEnabled || tracingEnabled;
+
+        if (needsDiagnostics)
         {
-            // Zero-behavior fast path — direct handler call
-            sb.AppendLine($"            var handler = sp.GetRequiredService<global::MediatorLite.IRequestHandler<{requestType}, {responseType}>>();");
-            sb.AppendLine("            var result = await handler.HandleAsync(request, ct).ConfigureAwait(false);");
-            sb.AppendLine("            return result!;");
+            if (loggingEnabled)
+            {
+                sb.AppendLine("            var __logger = sp.GetRequiredService<global::Microsoft.Extensions.Logging.ILogger<global::MediatorLite.IMediator>>();");
+                sb.AppendLine($"            __logger.LogDebug(\"Sending request {{RequestType}}\", \"{simpleRequest}\");");
+            }
+            if (tracingEnabled)
+            {
+                sb.AppendLine("            using var __activity = global::MediatorLite.Diagnostics.MediatorActivitySource.Source.StartActivity(");
+                sb.AppendLine($"                \"{ActivityNameSendRequest} {simpleRequest}\",");
+                sb.AppendLine("                global::System.Diagnostics.ActivityKind.Internal);");
+                sb.AppendLine($"            __activity?.SetTag(global::MediatorLite.Diagnostics.MediatorActivitySource.Tags.RequestType, \"{fullRequest}\");");
+                sb.AppendLine($"            __activity?.SetTag(global::MediatorLite.Diagnostics.MediatorActivitySource.Tags.ResponseType, \"{fullResponse}\");");
+            }
+            sb.AppendLine();
+            sb.AppendLine("            try");
+            sb.AppendLine("            {");
+            EmitPipelineBody("                ");
+            sb.AppendLine("            }");
+            sb.AppendLine("            catch (global::System.Exception __ex)");
+            sb.AppendLine("            {");
+            if (tracingEnabled)
+            {
+                sb.AppendLine("                __activity?.SetTag(global::MediatorLite.Diagnostics.MediatorActivitySource.Tags.Error, true);");
+                sb.AppendLine("                __activity?.SetTag(global::MediatorLite.Diagnostics.MediatorActivitySource.Tags.ErrorMessage, __ex.Message);");
+            }
+            if (loggingEnabled)
+            {
+                sb.AppendLine($"                __logger.LogError(__ex, \"Error handling request {{RequestType}}\", \"{simpleRequest}\");");
+            }
+            sb.AppendLine("                throw;");
+            sb.AppendLine("            }");
         }
         else
         {
-            // Resolve all behaviors by concrete type and handler
-            for (int i = 0; i < behaviors.Count; i++)
-            {
-                var behavior = behaviors[i];
-                // Resolve by concrete type since each behavior is registered individually
-                sb.AppendLine($"            var b{i + 1} = sp.GetRequiredService<{behavior.BehaviorTypeName}>();");
-            }
-            sb.AppendLine($"            var handler = sp.GetRequiredService<global::MediatorLite.IRequestHandler<{requestType}, {responseType}>>();");
-            sb.AppendLine();
-
-            // Generate unrolled pipeline call
-            // Build the nested delegate chain from inside out
-            sb.Append("            var result = await ");
-            
-            // Start with outermost behavior
-            for (int i = 0; i < behaviors.Count; i++)
-            {
-                sb.Append($"b{i + 1}.HandleAsync(request, () => ");
-            }
-            
-            // Innermost: handler call
-            sb.Append("handler.HandleAsync(request, ct)");
-            
-            // Close all the behavior lambdas
-            for (int i = behaviors.Count - 1; i >= 0; i--)
-            {
-                sb.Append(", ct)");
-            }
-            
-            sb.AppendLine(".ConfigureAwait(false);");
-            sb.AppendLine("            return result!;");
+            // Fully-disabled fast path — no try/catch, no locals
+            EmitPipelineBody("            ");
         }
 
         sb.AppendLine("        }");
@@ -993,35 +1079,98 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
     /// Generates an unrolled notification publisher method.
     /// Strategies are fully resolved at compile time by <see cref="ResolveStrategies"/>,
     /// so the emitted body has exactly one code path with no runtime branching on strategy.
+    /// When <paramref name="loggingEnabled"/> or <paramref name="tracingEnabled"/> is true,
+    /// the strategy body is wrapped in try/catch with inline diagnostics.
     /// </summary>
+    /// <remarks>
+    /// NOTE: <see cref="GenerateSequentialNotificationExecution"/>, <see cref="GenerateParallelNotificationExecution"/>
+    /// and <see cref="GenerateStopOnFirstNotificationExecution"/> hardcode 12-space indentation.
+    /// When wrapped in try/catch the emitted body is slightly under-indented (cosmetic only — C# is
+    /// whitespace-insensitive). This is accepted rather than plumbing an indent parameter through
+    /// all three helpers.
+    /// </remarks>
     private static void GenerateUnrolledNotificationPublisher(
         StringBuilder sb,
         string safeName,
         string notificationType,
         List<(HandlerInfo Handler, NotificationHandlerInterfaceInfo Interface)> handlers,
         int executionStrategy,
-        int errorStrategy)
+        int errorStrategy,
+        bool loggingEnabled,
+        bool tracingEnabled)
     {
+        var fullNotification = StripGlobalPrefix(notificationType);
+        var simpleNotification = notificationType.Substring(notificationType.LastIndexOf('.') + 1);
+
+        void EmitStrategyBody()
+        {
+            if (handlers.Count == 0)
+            {
+                sb.AppendLine("            // No handlers registered");
+                sb.AppendLine("            await Task.CompletedTask;");
+            }
+            else if (executionStrategy == 1) // Parallel
+            {
+                GenerateParallelNotificationExecution(sb, notificationType, handlers, errorStrategy);
+            }
+            else if (executionStrategy == 2) // StopOnFirst
+            {
+                GenerateStopOnFirstNotificationExecution(sb, notificationType, handlers, errorStrategy);
+            }
+            else // Sequential (default)
+            {
+                GenerateSequentialNotificationExecution(sb, notificationType, handlers, errorStrategy);
+            }
+        }
+
         sb.AppendLine($"        private static async Task Publish_{safeName}(");
         sb.AppendLine($"            IServiceProvider sp, {notificationType} notification, CancellationToken ct)");
         sb.AppendLine("        {");
 
-        if (handlers.Count == 0)
+        bool needsDiagnostics = loggingEnabled || tracingEnabled;
+
+        if (needsDiagnostics)
         {
-            sb.AppendLine("            // No handlers registered");
-            sb.AppendLine("            await Task.CompletedTask;");
+            if (loggingEnabled)
+            {
+                sb.AppendLine("            var __logger = sp.GetRequiredService<global::Microsoft.Extensions.Logging.ILogger<global::MediatorLite.IMediator>>();");
+                sb.AppendLine($"            __logger.LogDebug(\"Publishing notification {{NotificationType}}\", \"{simpleNotification}\");");
+            }
+            if (tracingEnabled)
+            {
+                sb.AppendLine("            using var __activity = global::MediatorLite.Diagnostics.MediatorActivitySource.Source.StartActivity(");
+                sb.AppendLine($"                \"{ActivityNamePublishNotification} {simpleNotification}\",");
+                sb.AppendLine("                global::System.Diagnostics.ActivityKind.Internal);");
+                sb.AppendLine($"            __activity?.SetTag(global::MediatorLite.Diagnostics.MediatorActivitySource.Tags.NotificationType, \"{fullNotification}\");");
+            }
+            sb.AppendLine();
+            sb.AppendLine("            try");
+            sb.AppendLine("            {");
+            // Strategy helpers hardcode 12-space indent — accepted cosmetic under-indentation here.
+            EmitStrategyBody();
+            if (loggingEnabled)
+            {
+                sb.AppendLine($"                __logger.LogDebug(\"Notification {{NotificationType}} published successfully\", \"{simpleNotification}\");");
+            }
+            sb.AppendLine("            }");
+            sb.AppendLine("            catch (global::System.Exception __ex)");
+            sb.AppendLine("            {");
+            if (tracingEnabled)
+            {
+                sb.AppendLine("                __activity?.SetTag(global::MediatorLite.Diagnostics.MediatorActivitySource.Tags.Error, true);");
+                sb.AppendLine("                __activity?.SetTag(global::MediatorLite.Diagnostics.MediatorActivitySource.Tags.ErrorMessage, __ex.Message);");
+            }
+            if (loggingEnabled)
+            {
+                sb.AppendLine($"                __logger.LogError(__ex, \"Error publishing notification {{NotificationType}}\", \"{simpleNotification}\");");
+            }
+            sb.AppendLine("                throw;");
+            sb.AppendLine("            }");
         }
-        else if (executionStrategy == 1) // Parallel
+        else
         {
-            GenerateParallelNotificationExecution(sb, notificationType, handlers, errorStrategy);
-        }
-        else if (executionStrategy == 2) // StopOnFirst
-        {
-            GenerateStopOnFirstNotificationExecution(sb, notificationType, handlers, errorStrategy);
-        }
-        else // Sequential (default)
-        {
-            GenerateSequentialNotificationExecution(sb, notificationType, handlers, errorStrategy);
+            // Fast path: emit strategy body directly
+            EmitStrategyBody();
         }
 
         sb.AppendLine("        }");
@@ -1197,6 +1346,16 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             .Replace(",", "_")
             .Replace(" ", "");
     }
+
+    /// <summary>
+    /// Strips a leading "global::" prefix for use in emitted string literals (tag values,
+    /// log message arguments). The returned value is suitable to embed inside a C# string literal.
+    /// </summary>
+    private static string StripGlobalPrefix(string typeName)
+    {
+        const string prefix = "global::";
+        return typeName.StartsWith(prefix) ? typeName.Substring(prefix.Length) : typeName;
+    }
 }
 
 internal sealed record HandlerInfo(
@@ -1221,7 +1380,11 @@ internal sealed record NotificationTypeInfo(
     int? ExecutionStrategy,
     int? ErrorStrategy);
 
-internal readonly record struct AssemblyDefaults(int? ExecutionStrategy, int? ErrorStrategy);
+internal readonly record struct AssemblyDefaults(
+    int? ExecutionStrategy,
+    int? ErrorStrategy,
+    bool LoggingDisabled,
+    bool TracingDisabled);
 
 internal sealed record BehaviorInfo(
     string ClassName,

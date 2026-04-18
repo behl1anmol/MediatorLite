@@ -76,12 +76,9 @@ services
 ```csharp
 using MediatorLite.Validation;
 
-services.AddMediatorLite(options =>
-{
-    options.AddOpenBehavior(typeof(ValidationBehavior<,>));
-});
-
+services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
 services.AddTransient<IValidator<CreateUserCommand>, DataAnnotationsValidator<CreateUserCommand>>();
+services.AddMediatorLite();
 ```
 
 ### 3. Handle ValidationException

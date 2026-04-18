@@ -213,11 +213,7 @@ public class MediatorBenchmarks
         // AddGeneratedHandlers() auto-registers all discovered handlers, behaviors, and SourceGeneratedMediator
         var mediatorLiteServices = new ServiceCollection();
         mediatorLiteServices.AddGeneratedHandlers();
-        mediatorLiteServices.AddMediatorLite(options =>
-        {
-            options.EnableBuiltInLogging = false;
-            options.EnableTracing = false;
-        });
+        mediatorLiteServices.AddMediatorLite();
         mediatorLiteServices.AddSingleton<ILoggerFactory, NullLoggerFactory>();
         mediatorLiteServices.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         _mediatorLiteProvider = mediatorLiteServices.BuildServiceProvider();
@@ -269,11 +265,7 @@ public class PipelineBenchmarks
         // Setup MediatorLite with v2 source-gen dispatch (behaviors auto-registered)
         var mediatorLiteServices = new ServiceCollection();
         mediatorLiteServices.AddGeneratedHandlers();
-        mediatorLiteServices.AddMediatorLite(options =>
-        {
-            options.EnableBuiltInLogging = false;
-            options.EnableTracing = false;
-        });
+        mediatorLiteServices.AddMediatorLite();
         mediatorLiteServices.AddSingleton<ILoggerFactory, NullLoggerFactory>();
         mediatorLiteServices.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         _mediatorLiteProvider = mediatorLiteServices.BuildServiceProvider();
@@ -326,11 +318,7 @@ public class MultipleBehaviorsBenchmarks
         // Setup MediatorLite with v2 source-gen dispatch (all behaviors auto-registered)
         var mediatorLiteServices = new ServiceCollection();
         mediatorLiteServices.AddGeneratedHandlers();
-        mediatorLiteServices.AddMediatorLite(options =>
-        {
-            options.EnableBuiltInLogging = false;
-            options.EnableTracing = false;
-        });
+        mediatorLiteServices.AddMediatorLite();
         mediatorLiteServices.AddSingleton<ILoggerFactory, NullLoggerFactory>();
         mediatorLiteServices.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         _mediatorLiteProvider = mediatorLiteServices.BuildServiceProvider();
@@ -387,11 +375,7 @@ public class NotificationBenchmarks
         //   MediatorLiteNotificationParallel → Parallel ([NotificationExecution(Parallel)])
         var mediatorLiteServices = new ServiceCollection();
         mediatorLiteServices.AddGeneratedHandlers();
-        mediatorLiteServices.AddMediatorLite(options =>
-        {
-            options.EnableBuiltInLogging = false;
-            options.EnableTracing = false;
-        });
+        mediatorLiteServices.AddMediatorLite();
         mediatorLiteServices.AddSingleton<ILoggerFactory, NullLoggerFactory>();
         mediatorLiteServices.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         _mediatorLiteProvider = mediatorLiteServices.BuildServiceProvider();

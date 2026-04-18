@@ -83,11 +83,7 @@ using MediatorLite.Generated;
 
 services
     .AddGeneratedHandlers()   // MUST be called first — registers handlers and O(1) dispatch
-    .AddMediatorLite(options =>
-    {
-        options.EnableBuiltInLogging = true;   // Observability options still work
-        options.EnableTracing = true;
-    });
+    .AddMediatorLite();       // Takes no arguments; mediator is always registered as Transient
 ```
 
 `AddGeneratedHandlers()` registers:
@@ -95,6 +91,21 @@ services
 - All `INotificationHandler<>` implementations
 - All `IPipelineBehavior<,>` implementations (ordered by `[BehaviorOrder]`)
 - The `ISourceGeneratedMediator` for O(1) dispatch
+
+### Observability (on by default, compile-time opt-out)
+
+Built-in logging and OpenTelemetry tracing are emitted inline by the source generator and are **on by default**. Opt out at compile time with assembly-level attributes:
+
+```csharp
+[assembly: DisableMediatorLogging]   // Generator emits no logging calls
+[assembly: DisableMediatorTracing]   // Generator emits no ActivitySource calls
+```
+
+The log **level** is controlled through standard `Microsoft.Extensions.Logging` configuration. Generated code logs at `Debug` under the `MediatorLite.IMediator` category:
+
+```csharp
+services.AddLogging(b => b.AddFilter("MediatorLite.IMediator", LogLevel.Information));
+```
 
 For granular control, use the individual registration methods:
 
@@ -207,7 +218,7 @@ public record UserCreatedNotification(int UserId, string Email) : INotification;
 [assembly: DefaultNotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
 ```
 
-> ⚠️ **v2 Change:** Runtime `MediatorOptions.NotificationExecutionStrategy` / `NotificationErrorStrategy` and the old `[NotificationOptions]` attribute have been **removed**. Use `[NotificationExecution]` / `[NotificationError]` (or their `[assembly: Default...]` counterparts) instead.
+> ⚠️ **v2 Change:** `MediatorOptions` is gone, `AddMediatorLite` no longer accepts a configure lambda, and the old `[NotificationOptions]` attribute has been **removed**. Use `[NotificationExecution]` / `[NotificationError]` (or their `[assembly: Default...]` counterparts) instead.
 
 | Strategy | Behavior | Error Strategy |
 |----------|----------|----------------|

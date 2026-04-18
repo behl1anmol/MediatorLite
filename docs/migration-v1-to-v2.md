@@ -51,6 +51,36 @@ services.AddMediatorLite();
 InvalidOperationException: No handler registered for request type 'MyRequest'
 ```
 
+### 4. Runtime Options Are Gone
+
+**v1:** `AddMediatorLite` accepted a configure lambda that exposed a `MediatorOptions` instance (logging toggles, tracing toggles, lifetimes, open-behavior list, notification strategies).
+
+**v2:** The entire options surface has moved to compile time:
+
+- `MediatorOptions` is **deleted**.
+- `AddMediatorLite` **no longer accepts a configure lambda** — it is now a zero-argument call.
+- `EnableBuiltInLogging` is replaced by the absence/presence of `[assembly: DisableMediatorLogging]`.
+- `EnableTracing` is replaced by the absence/presence of `[assembly: DisableMediatorTracing]`.
+- `DefaultLogLevel` is dropped; use `ILoggingBuilder.AddFilter("MediatorLite.IMediator", LogLevel.X)` or `appsettings.json`.
+- `HandlerLifetime` / `MediatorLifetime` are dropped; the mediator is always `Transient`, and handler lifetimes remain controlled by the consumer at DI registration.
+- `MediatorLoggingAttribute` (the per-class `Enabled` / `IncludePayload` / `LogLevel` attribute) has been **deleted** — it was never consumed.
+- Notification execution/error strategies moved from `MediatorOptions` to the compile-time `[NotificationExecution]` / `[NotificationError]` (and their `[assembly: Default...]` counterparts).
+
+```csharp
+// v1
+services.AddMediatorLite(options =>
+{
+    options.EnableBuiltInLogging = true;
+    options.EnableTracing = true;
+    options.DefaultLogLevel = LogLevel.Debug;
+});
+
+// v2
+services.AddMediatorLite();
+// Observability is on by default; opt out with [assembly: DisableMediatorLogging]
+// / [assembly: DisableMediatorTracing]. Log level is controlled via MEL filters.
+```
+
 ---
 
 ## Step-by-Step Migration
@@ -95,20 +125,19 @@ services.AddGeneratedBehaviors();           // Pipeline behaviors only
 
 **v1:** Open generic behaviors were registered manually.
 
-**v2:** Behaviors are auto-discovered, but you can still configure them via `MediatorOptions`:
+**v2:** Behaviors are auto-discovered by the source generator — no options wiring required:
 
 ```csharp
 // v1 - Manual open behavior registration
 services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
 services.AddMediatorLite();
 
-// v2 - Use MediatorOptions for open behaviors
+// v2 - Behaviors are discovered automatically by the generator
 services.AddGeneratedHandlers();
-services.AddMediatorLite(options =>
-{
-    options.AddOpenBehavior(typeof(LoggingBehavior<,>));
-});
+services.AddMediatorLite();
 ```
+
+Control ordering with `[BehaviorOrder]` on the behavior class (see below).
 
 ### Step 4: Use New Attributes
 
@@ -153,24 +182,9 @@ public class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TReques
 public class LoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse> { }
 ```
 
-#### `[MediatorGeneration(Skip = true)]` - Skip Auto-Discovery
+#### `[MediatorGeneration(Skip = true)]` - Obsolete
 
-Use this when you need custom registration logic:
-
-```csharp
-[MediatorGeneration(Skip = true)]
-public class SpecialHandler : IRequestHandler<SpecialRequest, SpecialResponse>
-{
-    // Register this handler manually
-}
-```
-
-#### `[MediatorLogging]` - Per-Request Logging
-
-```csharp
-[MediatorLogging(Enabled = true, IncludePayload = true, LogLevel = 2)]
-public record SensitiveRequest(string Data) : IRequest<Unit>;
-```
+This attribute is obsolete in v2 and is retained only for legacy compatibility. Avoid using it for new code.
 
 ### Step 5: Verify Generated Code
 
@@ -191,33 +205,41 @@ var behaviorCount = MediatorLiteRegistration.BehaviorCount;
 
 ---
 
-## Configuration Options
+## Configuration in v2
 
-`MediatorOptions` is the runtime configuration surface. **Notification execution and error strategies were removed in v2** — they are now compile-time only (see above).
+All runtime configuration options have been **removed**. `AddMediatorLite()` now takes no arguments:
 
 ```csharp
-services.AddMediatorLite(options =>
-{
-    // Logging
-    options.EnableBuiltInLogging = true;
-    options.DefaultLogLevel = LogLevel.Debug;
+services
+    .AddGeneratedHandlers()
+    .AddMediatorLite();
+```
 
-    // Tracing
-    options.EnableTracing = true;
+The entire configuration surface has moved to compile time:
 
-    // Lifetimes
-    options.HandlerLifetime = ServiceLifetime.Transient;
-    options.MediatorLifetime = ServiceLifetime.Transient;
+| v1 runtime option | v2 replacement |
+|-------------------|----------------|
+| `MediatorOptions` class | **Deleted** — `AddMediatorLite()` takes no lambda |
+| `EnableBuiltInLogging` | Presence/absence of `[assembly: DisableMediatorLogging]` |
+| `EnableTracing` | Presence/absence of `[assembly: DisableMediatorTracing]` |
+| `DefaultLogLevel` | `ILoggingBuilder.AddFilter("MediatorLite.IMediator", LogLevel.X)` (or `appsettings.json`) |
+| `HandlerLifetime` / `MediatorLifetime` | Mediator is always `Transient`; handler lifetimes remain controlled by you at DI registration |
+| `AddOpenBehavior(...)` | Behaviors are auto-discovered by the source generator |
+| `NotificationExecutionStrategy` / `NotificationErrorStrategy` | `[NotificationExecution]` / `[NotificationError]` per type, or `[assembly: DefaultNotificationExecution]` / `[assembly: DefaultNotificationError]` |
+| `MediatorLoggingAttribute` | **Deleted** — it was never consumed |
 
-    // Open generic behaviors
-    options.AddOpenBehavior(typeof(LoggingBehavior<,>));
-    options.AddOpenBehavior(typeof(ValidationBehavior<,>));
-});
+Example opt-out of observability:
 
-// Notification strategies are set via attributes at compile time:
-//   [NotificationExecution(...)] / [NotificationError(...)]          — per notification type
-//   [assembly: DefaultNotificationExecution(...)]                    — assembly-wide defaults
-//   [assembly: DefaultNotificationError(...)]
+```csharp
+// Any .cs file in the consuming assembly:
+[assembly: DisableMediatorLogging]
+[assembly: DisableMediatorTracing]
+```
+
+Example log-level configuration:
+
+```csharp
+services.AddLogging(b => b.AddFilter("MediatorLite.IMediator", LogLevel.Information));
 ```
 
 ---

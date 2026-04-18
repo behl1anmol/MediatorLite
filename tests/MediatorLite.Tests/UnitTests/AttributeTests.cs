@@ -48,17 +48,17 @@ namespace MediatorLite.Tests.UnitTests
         }
 
         [Fact]
-        public void MediatorLoggingAttribute_SetsProperties()
+        public void DisableMediatorLoggingAttribute_CanBeInstantiated()
         {
-            var attr = new MediatorLoggingAttribute
-            {
-                Enabled = true,
-                IncludePayload = true,
-                LogLevel = 2
-            };
-            Assert.True(attr.Enabled);
-            Assert.True(attr.IncludePayload);
-            Assert.Equal(2, attr.LogLevel);
+            var attr = new DisableMediatorLoggingAttribute();
+            Assert.NotNull(attr);
+        }
+
+        [Fact]
+        public void DisableMediatorTracingAttribute_CanBeInstantiated()
+        {
+            var attr = new DisableMediatorTracingAttribute();
+            Assert.NotNull(attr);
         }
     }
 }

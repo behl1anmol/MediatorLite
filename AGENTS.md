@@ -10,18 +10,19 @@
 - `Mediator.cs` depends on `ISourceGeneratedMediator`; do not rely on reflection fallback or manual handler registration for dispatch.
 
 ## Important patterns
-- DI registration lives in `src/MediatorLite/Configuration/ServiceCollectionExtensions.cs`.
-- Runtime knobs are in `src/MediatorLite/Configuration/MediatorOptions.cs`.
+- DI registration lives in `src/MediatorLite/Configuration/ServiceCollectionExtensions.cs`. `AddMediatorLite()` takes no arguments; the mediator is always registered as `Transient`.
 - Public attributes are in `src/MediatorLite.Abstractions/Abstractions/Attributes.cs`.
 - Source-generation entry point is `src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs`; generated diagnostics surface as `MediatorLite.Generated.MediatorLiteRegistration`.
 - `MediatorLiteRegistration` exposes `AddGeneratedHandlers()`, the granular `AddGeneratedRequestHandlers()` / `AddGeneratedNotificationHandlers()` / `AddGeneratedValidators()` / `AddGeneratedBehaviors()` methods, and diagnostic counts (`RequestHandlerCount`, `NotificationHandlerCount`, `BehaviorCount`, `ValidatorCount`).
 - Behaviors execute in `[BehaviorOrder]` order; lower values run first, and validation behaviors are emitted before other behaviors for validated request types.
 - Behaviors may short-circuit by not calling `next()`.
-- Notifications honor `NotificationHandlerOrderAttribute`. Execution and error strategies are **compile-time only** via the per-notification `NotificationExecutionAttribute` / `NotificationErrorAttribute` and the assembly-level `DefaultNotificationExecutionAttribute` / `DefaultNotificationErrorAttribute`. The generator resolves them (per-notification > assembly default > library default: `Sequential` / `StopOnFirstError`) and inlines the result into each `Publish_*` method as a single branch-free path. The old `NotificationOptionsAttribute` and the `MediatorOptions.NotificationExecutionStrategy` / `NotificationErrorStrategy` runtime properties have been removed.
+- Notifications honor `NotificationHandlerOrderAttribute`. Execution and error strategies are **compile-time only** via the per-notification `NotificationExecutionAttribute` / `NotificationErrorAttribute` and the assembly-level `DefaultNotificationExecutionAttribute` / `DefaultNotificationErrorAttribute`. The generator resolves them (per-notification > assembly default > library default: `Sequential` / `StopOnFirstError`) and inlines the result into each `Publish_*` method as a single branch-free path. The old `NotificationOptionsAttribute` and its runtime counterparts have been removed.
 
 ## Validation and observability
 - Validation lives in `src/MediatorLite/Validation/Validation.cs`; source-gen registration auto-discovers custom `IValidator<T>` implementations, registers `ValidationBehavior<,>`, and adds `DataAnnotationsValidator<T>` for annotated request types.
-- Built-in logging and tracing are controlled by `MediatorOptions.EnableBuiltInLogging` and `EnableTracing`.
+- Built-in logging and tracing are **on by default** and emitted inline by the generator into each `Pipeline_*` / `Publish_*` method. Opt out at compile time via `[assembly: DisableMediatorLogging]` / `[assembly: DisableMediatorTracing]` (both no-arg attributes in the `MediatorLite` namespace). The generator simply omits the corresponding calls when the attributes are present.
+- Log level is controlled through standard `Microsoft.Extensions.Logging` configuration (e.g. `AddFilter("MediatorLite.IMediator", LogLevel.X)` or `appsettings.json`). Generated code always calls `LogDebug`.
+- The deleted `MediatorLoggingAttribute` (per-class `Enabled` / `IncludePayload` / `LogLevel`) was never consumed and is no longer part of the public surface.
 - Observability tags and OpenTelemetry setup are documented in `docs/observability.md`.
 
 ## Project conventions

@@ -4,41 +4,51 @@ MediatorLite provides built-in observability through logging and OpenTelemetry t
 
 ## v2 Note
 
-Observability options (`EnableBuiltInLogging`, `EnableTracing`) remain runtime-configurable via `MediatorOptions`. Only notification strategies and behavior ordering have moved to compile-time attributes.
+In v2, observability has moved to **compile time**. The source generator emits `ILogger` calls and `ActivitySource` events inline into every generated `Pipeline_*` and `Publish_*` method. Both are on by default; you opt out at compile time with assembly-level attributes.
 
 ## Logging Configuration
 
-### Enable/Disable Built-in Logging
+### Enable / Disable Built-in Logging
+
+Logging is on by default. To disable it entirely, add this to any `.cs` file in the consuming assembly:
 
 ```csharp
-services.AddMediatorLite(options =>
+[assembly: DisableMediatorLogging]
+```
+
+When the attribute is present the generator simply omits the logging calls — there is no runtime branch or dead code.
+
+### Controlling the Log Level
+
+Generated code always calls `LogDebug` under the `MediatorLite.IMediator` category. Control verbosity through standard `Microsoft.Extensions.Logging` filters:
+
+```csharp
+services.AddLogging(builder =>
 {
-    options.EnableBuiltInLogging = true;  // Default: true
-    options.DefaultLogLevel = LogLevel.Debug;
+    builder.AddFilter("MediatorLite.IMediator", LogLevel.Information);
 });
 ```
 
-### Per-Request Logging Control
+Or via `appsettings.json`:
 
-```csharp
-// Disable logging for high-frequency queries
-[MediatorLogging(Enabled = false)]
-public record HighFrequencyQuery : IRequest<Result>;
-
-// Enable payload logging for audit
-[MediatorLogging(IncludePayload = true, LogLevel = 2)] // LogLevel.Information
-public record AuditableCommand : IRequest<Unit>;
+```json
+{
+  "Logging": {
+    "LogLevel": {
+      "MediatorLite.IMediator": "Information"
+    }
+  }
+}
 ```
 
 ## OpenTelemetry Integration
 
-### Enable Tracing
+### Enable / Disable Tracing
+
+Tracing is on by default. To disable it entirely, add to any `.cs` file in the consuming assembly:
 
 ```csharp
-services.AddMediatorLite(options =>
-{
-    options.EnableTracing = true;  // Default: true
-});
+[assembly: DisableMediatorTracing]
 ```
 
 ### Configure OpenTelemetry

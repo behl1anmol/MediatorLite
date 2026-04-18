@@ -28,7 +28,7 @@ MediatorLite v2 is **source-generation-first**. This package is **required** for
 |--------|--------------------------------|----------------------|
 | Handler dispatch | Reflection with caching | O(1) generated switch |
 | Behavior ordering | DI registration order | `[BehaviorOrder]` attribute |
-| Notification strategies | Ignored runtime options | `[NotificationExecution]` / `[NotificationError]` + `[assembly: Default...]` defaults |
+| Notification strategies | Not supported | `[NotificationExecution]` / `[NotificationError]` + `[assembly: Default...]` defaults |
 | Performance | Slower (dictionary + reflection) | Faster (direct method calls) |
 
 ## Why use Source Generation?
@@ -72,20 +72,24 @@ That's it! The source generator:
 - Auto-registers `DataAnnotationsValidator<T>` for types with validation attributes
 - Registers everything with the DI container
 
-To configure observability options:
+### Observability (on by default, compile-time opt-out)
+
+The generator emits `ILogger` calls and `ActivitySource` events inline into every generated `Pipeline_*` and `Publish_*` method. Both are **on by default**. Opt out at compile time with assembly-level attributes (both no-arg, in the `MediatorLite` namespace):
 
 ```csharp
-services
-    .AddGeneratedHandlers()
-    .AddMediatorLite(options =>
-    {
-        options.EnableBuiltInLogging = true;
-        options.EnableTracing = true;
-        // Note: notification execution/error strategies are controlled at compile time via
-        // [NotificationExecution] / [NotificationError] on the notification type, or assembly-level
-        // [assembly: DefaultNotificationExecution] / [assembly: DefaultNotificationError].
-    });
+[assembly: DisableMediatorLogging]   // Generator emits no logging calls
+[assembly: DisableMediatorTracing]   // Generator emits no ActivitySource calls
 ```
+
+When a `Disable*` attribute is absent the generator emits the corresponding calls inline; when it is present those calls are skipped entirely (no branch-free runtime check, no dead code).
+
+The log **level** is controlled through standard `Microsoft.Extensions.Logging` configuration. Generated code always calls `LogDebug` under the `MediatorLite.IMediator` category:
+
+```csharp
+services.AddLogging(b => b.AddFilter("MediatorLite.IMediator", LogLevel.Information));
+```
+
+> Notification execution/error strategies are controlled at compile time via `[NotificationExecution]` / `[NotificationError]` on the notification type, or assembly-level `[assembly: DefaultNotificationExecution]` / `[assembly: DefaultNotificationError]`.
 
 ### 2. Define Handlers
 
@@ -190,7 +194,7 @@ public record UserCreatedNotification(int UserId) : INotification;
 
 Per-notification attributes win over assembly-level defaults. If neither is set, the library defaults (`Sequential` + `StopOnFirstError`) apply.
 
-> ⚠️ **v2 Hard Break:** `MediatorOptions.NotificationExecutionStrategy` / `NotificationErrorStrategy`, the old `[NotificationOptions]` attribute, and `ISourceGeneratedMediator.GetNotificationOptions` have been **removed**. Strategies are resolved at compile time and baked into each `Publish_*` method as a single branch-free code path.
+> ⚠️ **v2 Hard Break:** `MediatorOptions` is gone, `AddMediatorLite` no longer accepts a configure lambda, and the old runtime notification-strategy properties, the `[NotificationOptions]` attribute, and `ISourceGeneratedMediator.GetNotificationOptions` have been **removed**. Strategies are resolved at compile time and baked into each `Publish_*` method as a single branch-free code path.
 
 **Handler ordering with `[NotificationHandlerOrder]`:**
 

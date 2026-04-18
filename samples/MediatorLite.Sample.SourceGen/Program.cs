@@ -51,14 +51,10 @@ services.AddLogging(builder =>
 // NO NEED to call options.AddOpenBehavior() or manually register behaviors/validators!
 services.AddGeneratedHandlers();
 
-// Add MediatorLite core services
-services.AddMediatorLite(options =>
-{
-    options.EnableBuiltInLogging = true;
-    options.EnableTracing = true;
-    // NOTE: Do NOT call options.AddOpenBehavior() when using source generation
-    // The source generator already registered all behaviors automatically
-});
+// Add MediatorLite core services.
+// Built-in logging + tracing are on by default; opt out via
+// [assembly: DisableMediatorLogging] / [assembly: DisableMediatorTracing].
+services.AddMediatorLite();
 
 // Build the service provider
 var serviceProvider = services.BuildServiceProvider();

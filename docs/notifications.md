@@ -25,7 +25,7 @@ Precedence (resolved per strategy, per notification, at compile time):
 2. Assembly-level default (`[assembly: DefaultNotificationExecution]` / `[assembly: DefaultNotificationError]`).
 3. Library defaults — `Sequential` for execution, `StopOnFirstError` for error.
 
-> ⚠️ **Hard break in v2:** `MediatorOptions.NotificationExecutionStrategy`, `MediatorOptions.NotificationErrorStrategy`, `NotificationOptionsAttribute`, and `ISourceGeneratedMediator.GetNotificationOptions` have been **removed**. Use the attributes above.
+> ⚠️ **Hard break in v2:** The old runtime notification-strategy properties, `NotificationOptionsAttribute`, and `ISourceGeneratedMediator.GetNotificationOptions` have been **removed**. Use the attributes above.
 
 ## Defining Notifications
 
@@ -164,10 +164,9 @@ Both attributes are optional and independent. Per-type `[NotificationExecution]`
 
 The following runtime APIs have been **removed** — they are replaced by the compile-time attributes above:
 
-- `MediatorOptions.NotificationExecutionStrategy`
-- `MediatorOptions.NotificationErrorStrategy`
-- `NotificationOptionsAttribute` (replaced by split `[NotificationExecution]` + `[NotificationError]`)
-- `ISourceGeneratedMediator.GetNotificationOptions(Type)` (strategies are now inlined into `Publish_*`)
+- The runtime `NotificationExecutionStrategy` / `NotificationErrorStrategy` options (plus their containing options class).
+- `NotificationOptionsAttribute` (replaced by split `[NotificationExecution]` + `[NotificationError]`).
+- `ISourceGeneratedMediator.GetNotificationOptions(Type)` — strategies are now inlined into `Publish_*`.
 
 ## Handler Ordering
 

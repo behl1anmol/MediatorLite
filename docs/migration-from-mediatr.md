@@ -13,6 +13,10 @@ MediatorLite v2 introduces a **source-generation-first architecture**:
 | Notification strategies | Runtime configuration | `[NotificationExecution]` / `[NotificationError]` attributes (with assembly-level defaults) |
 | Handler ordering | N/A | `[NotificationHandlerOrder]` attribute |
 | Required registration | `AddMediatR()` | `AddGeneratedHandlers()` + `AddMediatorLite()` |
+| Logging on/off | `cfg.AddOpenBehavior(typeof(LoggingBehavior<,>))` | Compile-time: `[assembly: DisableMediatorLogging]` (opt-out) |
+| Tracing on/off | Manual | Compile-time: `[assembly: DisableMediatorTracing]` (opt-out) |
+| Log level | MEL filters | MEL filters (`AddFilter("MediatorLite.IMediator", ...)`) |
+| Mediator lifetime | Configurable | Always `Transient` |
 
 ## Interface Mapping
 
@@ -91,14 +95,20 @@ services.AddMediatR(cfg =>
 using MediatorLite.Generated;
 
 services
-    .AddGeneratedHandlers()   // MUST be called first — O(1 dispatch + [BehaviorOrder] support
-    .AddMediatorLite(options =>
-    {
-        options.EnableBuiltInLogging = true;  // Observability options still work
-    });
+    .AddGeneratedHandlers()   // MUST be called first — O(1) dispatch + [BehaviorOrder] support
+    .AddMediatorLite();       // Takes no arguments; mediator is always registered as Transient
 ```
 
-> ⚠️ **v2 Change:** `options.AddOpenBehavior()` is no longer needed. Behaviors are auto-discovered and ordered by `[BehaviorOrder]`.
+Built-in logging and tracing are on by default. Opt out at compile time with assembly-level attributes (both no-arg, in the `MediatorLite` namespace):
+
+```csharp
+[assembly: DisableMediatorLogging]
+[assembly: DisableMediatorTracing]
+```
+
+The log level is controlled through standard `Microsoft.Extensions.Logging` configuration (generated code logs at `Debug` under the `MediatorLite.IMediator` category).
+
+> ⚠️ **v2 Change:** `options.AddOpenBehavior()` is no longer needed — behaviors are auto-discovered and ordered by `[BehaviorOrder]`. The entire `MediatorOptions` configure lambda has been **removed**.
 
 Or register handlers manually with standard DI (deprecated):
 ```csharp
@@ -375,7 +385,7 @@ public record OrderPlacedNotification(int OrderId) : INotification;
 public record UserCreatedNotification(int UserId) : INotification;
 ```
 
-> ⚠️ **v2 Change:** `MediatorOptions.NotificationExecutionStrategy` / `NotificationErrorStrategy` and the old `[NotificationOptions]` attribute have been removed. Use `[NotificationExecution]` / `[NotificationError]` (or their `[assembly: Default...]` counterparts).
+> ⚠️ **v2 Change:** `MediatorOptions` is gone, `AddMediatorLite` no longer accepts a configure lambda, and the old runtime notification strategy properties plus the `[NotificationOptions]` attribute have been removed. Use `[NotificationExecution]` / `[NotificationError]` (or their `[assembly: Default...]` counterparts).
 
 ### Per-Notification Handler Ordering
 

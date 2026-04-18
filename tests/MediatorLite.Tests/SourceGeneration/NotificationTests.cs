@@ -241,10 +241,7 @@ public class NotificationTests
 
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddMediatorLite(options =>
-        {
-            options.EnableTracing = true;
-        });
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -265,10 +262,7 @@ public class NotificationTests
 
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddMediatorLite(options =>
-        {
-            options.EnableBuiltInLogging = true;
-        });
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();

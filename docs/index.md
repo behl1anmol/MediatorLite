@@ -32,7 +32,7 @@ MediatorLite v2 is **source-generation-first**:
 |--------|----|----|
 | **Primary dispatch** | Reflection with caching | O(1) generated switch |
 | **Behavior ordering** | DI registration order | `[BehaviorOrder]` attribute |
-| **Notification strategies** | `MediatorOptions` runtime | `[NotificationExecution]` / `[NotificationError]` compile-time (with assembly-level defaults) |
+| **Notification strategies** | Runtime options | `[NotificationExecution]` / `[NotificationError]` compile-time (with assembly-level defaults) |
 | **Reflection fallback** | Supported | Deprecated |
 
 ---

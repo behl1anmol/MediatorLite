@@ -82,7 +82,7 @@ public sealed class CreateOrderLoggingBehavior
 
 ### Source-Generated Registration (Required for v2)
 
-**When using source-generated registration, behaviors are automatically discovered and registered. Do NOT use `MediatorOptions.AddOpenBehavior()` — it's not needed.**
+**When using source-generated registration, behaviors are automatically discovered and registered — no manual `AddOpenBehavior(...)` call is required or supported.**
 
 If your behaviors are in the same project as the source generator, `AddGeneratedHandlers()` will discover and register them automatically with ordering from `[BehaviorOrder]`:
 
@@ -91,7 +91,7 @@ using MediatorLite.Generated;
 
 services
     .AddGeneratedHandlers()   // Discovers and registers ALL behaviors with [BehaviorOrder] ordering
-    .AddMediatorLite();       // No need to call options.AddOpenBehavior()
+    .AddMediatorLite();       // Takes no arguments; mediator is always registered as Transient
 ```
 
 To register only behaviors from the source generator:
@@ -108,36 +108,12 @@ services
 
 > ⚠️ **Deprecated in v2:** Manual registration uses reflection fallback and does not respect `[BehaviorOrder]`.
 
-When NOT using source-generated registration, you have two options:
-
-#### Option 1: Via MediatorOptions
-
-Register open generic behaviors through `MediatorOptions`. This automatically adds them to DI:
-
-```csharp
-services.AddMediatorLite(options =>
-{
-    options.AddOpenBehavior(typeof(LoggingBehavior<,>));
-    options.AddOpenBehavior(typeof(ValidationBehavior<,>));
-});
-```
-
-Register closed behaviors:
-
-```csharp
-services.AddMediatorLite(options =>
-{
-    options.AddBehavior<CreateOrderAuthorizationBehavior>();
-});
-```
-
-#### Option 2: Direct DI Registration
-
-You can also register behaviors directly with the DI container:
+When NOT using source-generated registration, register behaviors directly with the DI container. `AddMediatorLite()` takes no arguments.
 
 ```csharp
 // Open generic - applies to all requests
 services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
+services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
 
 // Closed type - applies to specific request only
 services.AddTransient<IPipelineBehavior<CreateOrder, OrderResult>, CreateOrderLoggingBehavior>();
@@ -145,13 +121,14 @@ services.AddTransient<IPipelineBehavior<CreateOrder, OrderResult>, CreateOrderLo
 services.AddMediatorLite();
 ```
 
+Execution order follows DI registration order in this mode; switch to source-generated registration for `[BehaviorOrder]` support.
+
 ### Summary: Source-Gen vs Manual Registration
 
 | Method | When to Use | Behavior Ordering |
 |--------|-------------|-------------------|
 | **Source-Generated (v2)** | Required for v2 | `[BehaviorOrder]` attribute |
-| **Manual via Options** | Deprecated | Registration order |
-| **Manual via DI** | Deprecated | Registration order |
+| **Manual via DI** | Deprecated reflection fallback only | Registration order |
 
 **Key Rule:** Always use `AddGeneratedHandlers()` in v2 to get O(1) dispatch and `[BehaviorOrder]` support.
 

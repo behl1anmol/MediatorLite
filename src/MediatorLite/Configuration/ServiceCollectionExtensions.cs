@@ -1,7 +1,5 @@
-using MediatorLite.Configuration;
 using MediatorLite.Internal;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace MediatorLite;
 
@@ -11,46 +9,34 @@ namespace MediatorLite;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Adds MediatorLite runtime services (mediator instance and options) to the service collection.
-    /// Use this together with the source-generated AddGeneratedHandlers() method.
+    /// Adds MediatorLite runtime services (the mediator instance) to the service collection.
+    /// Use this together with the source-generated <c>AddGeneratedHandlers()</c> method.
     /// </summary>
     /// <param name="services">The <see cref="IServiceCollection"/> to add services to.</param>
-    /// <param name="configure">An optional action to configure <see cref="MediatorOptions"/>.</param>
     /// <returns>The <see cref="IServiceCollection"/> for chaining.</returns>
+    /// <remarks>
+    /// <para>
+    /// Built-in logging and tracing are on by default. To opt out at compile time, apply
+    /// <c>[assembly: DisableMediatorLogging]</c> or <c>[assembly: DisableMediatorTracing]</c>
+    /// in the consuming assembly.
+    /// </para>
+    /// <para>
+    /// Log level is controlled via <c>Microsoft.Extensions.Logging</c> filter configuration.
+    /// Notification execution and error strategies are compile-time only — use
+    /// <c>[NotificationExecution]</c>/<c>[NotificationError]</c> per type or
+    /// <c>[assembly: DefaultNotificationExecution]</c>/<c>[assembly: DefaultNotificationError]</c>.
+    /// </para>
+    /// </remarks>
     /// <example>
     /// <code>
     /// services
-    ///     .AddGeneratedHandlers()     // Source-generated: registers handlers, notifications, behaviors
-    ///     .AddMediatorLite(options =>
-    ///     {
-    ///         options.EnableBuiltInLogging = false;
-    ///         options.EnableTracing = true;
-    ///     });
-    ///
-    /// // Notification execution/error strategies are compile-time only. Use attributes:
-    /// //   [NotificationExecution(NotificationExecutionStrategy.Parallel)]
-    /// //   [NotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
-    /// // on notification types, or assembly-level defaults:
-    /// //   [assembly: DefaultNotificationExecution(NotificationExecutionStrategy.Parallel)]
-    /// //   [assembly: DefaultNotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
+    ///     .AddGeneratedHandlers()
+    ///     .AddMediatorLite();
     /// </code>
     /// </example>
-    public static IServiceCollection AddMediatorLite(
-        this IServiceCollection services,
-        Action<MediatorOptions>? configure = null)
+    public static IServiceCollection AddMediatorLite(this IServiceCollection services)
     {
-        var options = new MediatorOptions();
-        configure?.Invoke(options);
-
-        // Register options as singleton
-        services.AddSingleton(options);
-
-        // Register mediator
-        services.Add(new ServiceDescriptor(
-            typeof(IMediator),
-            typeof(Mediator),
-            options.MediatorLifetime));
-
+        services.AddTransient<IMediator, Mediator>();
         return services;
     }
 }

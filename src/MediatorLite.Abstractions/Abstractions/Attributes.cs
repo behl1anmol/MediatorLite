@@ -207,35 +207,6 @@ public sealed class BehaviorOrderAttribute(int order) : Attribute
 }
 
 /// <summary>
-/// Controls logging behavior for a specific request type.
-/// </summary>
-/// <remarks>
-/// Use this attribute to override global logging settings for specific requests.
-/// </remarks>
-[AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
-public sealed class MediatorLoggingAttribute : Attribute
-{
-    /// <summary>
-    /// Gets or sets whether logging is enabled for this request type.
-    /// Default is true.
-    /// </summary>
-    public bool Enabled { get; set; } = true;
-
-    /// <summary>
-    /// Gets or sets whether to include the request payload in logs.
-    /// Default is false for security reasons.
-    /// </summary>
-    public bool IncludePayload { get; set; }
-
-    /// <summary>
-    /// Gets or sets the log level for this request type.
-    /// Uses Microsoft.Extensions.Logging.LogLevel values as integers.
-    /// Default is Information (2).
-    /// </summary>
-    public int LogLevel { get; set; } = 2; // LogLevel.Information
-}
-
-/// <summary>
 /// Controls source generation behavior for a specific type.
 /// </summary>
 /// <remarks>
@@ -252,3 +223,46 @@ public sealed class MediatorGenerationAttribute : Attribute
     /// </summary>
     public bool Skip { get; set; }
 }
+
+/// <summary>
+/// Disables MediatorLite's built-in logging for the entire assembly at compile time.
+/// </summary>
+/// <remarks>
+/// <para>
+/// When this attribute is present, the MediatorLite source generator emits no logging calls
+/// in the generated request dispatchers or notification publishers. The default (attribute absent)
+/// is that built-in logging is enabled and emits <c>LogDebug</c> entries at the boundaries of
+/// <see cref="IMediator.SendAsync{TResponse}"/> and <see cref="IMediator.PublishAsync{TNotification}"/>.
+/// </para>
+/// <para>
+/// Log level is controlled via <c>Microsoft.Extensions.Logging</c> filter configuration (e.g.
+/// <c>appsettings.json</c> or <c>AddFilter</c>), not by this attribute.
+/// </para>
+/// <para>
+/// This attribute is consumed at compile time by the MediatorLite source generator; it has no
+/// runtime effect.
+/// </para>
+/// </remarks>
+[AttributeUsage(AttributeTargets.Assembly, AllowMultiple = false, Inherited = false)]
+public sealed class DisableMediatorLoggingAttribute : Attribute { }
+
+/// <summary>
+/// Disables MediatorLite's built-in OpenTelemetry tracing for the entire assembly at compile time.
+/// </summary>
+/// <remarks>
+/// <para>
+/// When this attribute is present, the MediatorLite source generator emits no <see cref="System.Diagnostics.ActivitySource"/>
+/// calls in the generated request dispatchers or notification publishers. The default (attribute absent)
+/// is that tracing is enabled.
+/// </para>
+/// <para>
+/// To toggle tracing at runtime, use an <see cref="System.Diagnostics.ActivityListener"/> or the
+/// OpenTelemetry SDK instead — no listener means activity creation is near-zero cost anyway.
+/// </para>
+/// <para>
+/// This attribute is consumed at compile time by the MediatorLite source generator; it has no
+/// runtime effect.
+/// </para>
+/// </remarks>
+[AttributeUsage(AttributeTargets.Assembly, AllowMultiple = false, Inherited = false)]
+public sealed class DisableMediatorTracingAttribute : Attribute { }
