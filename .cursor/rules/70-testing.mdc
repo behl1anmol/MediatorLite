@@ -1,0 +1,97 @@
+---
+description: Test layout and conventions (xUnit + FluentAssertions, source-gen coverage, obsolete attributes)
+globs: tests/**/*.cs
+alwaysApply: false
+---
+
+# Testing Rules
+
+The test suite is the source of truth for expected behavior. Every new public
+handler / behavior / notification path needs a test in the right directory.
+
+## Rule 1 — Layout
+
+```
+tests/
+  MediatorLite.Tests/
+    SourceGeneration/     # tests that exercise AddGeneratedHandlers() + Mediator
+      MediatorTests.cs
+      NotificationTests.cs
+      PipelineBehaviorTests.cs
+      ValidationTests.cs
+      TestTypes.cs        # shared request/notification/handler/behavior fixtures
+    UnitTests/            # narrow unit tests that do not spin up the mediator
+  MediatorLite.Benchmarks/
+  MediatorLite.RestApiBenchmarks/
+```
+
+New source-gen-dependent fixtures go next to `TestTypes.cs`; do not create
+sibling fixture files if a type can live alongside existing ones.
+
+## Rule 2 — xUnit + FluentAssertions
+
+Use `[Fact]` / `[Theory]` and fluent assertions for readability. Do not
+introduce NUnit or MSTest.
+
+## Rule 3 — `[MediatorGeneration(Skip = true)]` is obsolete
+
+The attribute is marked `[Obsolete]` and must not appear in new tests. The
+v2 generator discovers every handler unconditionally; if you need to exclude
+a type from registration, put it in a separate non-production assembly
+instead.
+
+```216:225:src/MediatorLite.Abstractions/Abstractions/Attributes.cs
+[Obsolete("This attribute is no longer valid with the complete source generator implementation.")]
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+public sealed class MediatorGenerationAttribute : Attribute
+{
+    /// <summary>
+    /// Gets or sets whether to skip source generation for this type.
+    /// Default is false.
+    /// </summary>
+    public bool Skip { get; set; }
+}
+```
+
+Warnings are errors (`<TreatWarningsAsErrors>true</TreatWarningsAsErrors>`),
+so any use of `[MediatorGeneration]` will fail the build in a test project.
+
+## Rule 4 — Use `MediatorLiteRegistration.*Count` as sanity checks
+
+When you add a handler/behavior/validator to `TestTypes.cs`, add a test that
+asserts the generated count reflects it. This catches generator regressions
+immediately.
+
+```20:31:samples/MediatorLite.Sample.SourceGen/Program.cs
+// Show source generator stats
+Console.WriteLine($"📊 Source Generator Stats:");
+Console.WriteLine($"   Request Handlers discovered: {MediatorLiteRegistration.RequestHandlerCount}");
+Console.WriteLine($"   Notification Handlers discovered: {MediatorLiteRegistration.NotificationHandlerCount}");
+Console.WriteLine($"   Pipeline Behaviors discovered: {MediatorLiteRegistration.BehaviorCount}");
+...
+Console.WriteLine($"   Validators discovered: {MediatorLiteRegistration.ValidatorCount}");
+```
+
+Tests should read the same four constants directly:
+`MediatorLiteRegistration.RequestHandlerCount`, `NotificationHandlerCount`,
+`BehaviorCount`, `ValidatorCount`.
+
+## Rule 5 — Coverage expectations
+
+Every new public-ish path gets a test:
+
+- **New behavior** → at least one test covering ordering (place it at a known
+  `[BehaviorOrder]` relative to existing behaviors) and at least one covering
+  short-circuit if it supports that.
+- **New notification strategy combination** → add the notification + its
+  handlers to `TestTypes.cs` following the existing fallback-event pattern
+  (see `StopOnFirstFallbackEvent`).
+- **New validator** → add a positive and a negative case; `ValidationException`
+  must contain the expected `ValidationError` property name.
+
+## Rule 6 — Reset static tracking between tests
+
+Fixtures in `TestTypes.cs` use `static` counters/flags for simplicity. Every
+test that touches them must call the fixture's `Reset()` before
+`Act`/`Assert` or wrap the test in a class fixture that does so. Leaking
+state between tests is a concrete flake source in this codebase.
