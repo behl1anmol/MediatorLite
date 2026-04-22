@@ -1323,13 +1323,36 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         }
         else // StopOnFirstError
         {
-            // With StopOnFirst + StopOnFirstError, only the first handler executes:
-            // - If it succeeds → return immediately
-            // - If it fails → throw immediately (no fallback)
-            // So we only need to call the first handler to avoid unreachable code warnings
-            sb.AppendLine("            ct.ThrowIfCancellationRequested();");
-            sb.AppendLine($"            await h1.HandleAsync(notification, ct).ConfigureAwait(false);");
-            sb.AppendLine("            // StopOnFirstError: if h1 throws, exception propagates; if completes, we're done");
+            sb.AppendLine("            var handled = false;");
+            sb.AppendLine($"            for (int i = 0; i < {handlers.Count}; i++)");
+            sb.AppendLine("            {");
+            sb.AppendLine("                ct.ThrowIfCancellationRequested();");
+            sb.AppendLine();
+            for (int i = 0; i < handlers.Count; i++)
+            {
+                if (i == 0)
+                {
+                    sb.AppendLine("                if (i == 0)");
+                    sb.AppendLine("                {");
+                    sb.AppendLine("                    await h1.HandleAsync(notification, ct).ConfigureAwait(false);");
+                    sb.AppendLine("                    handled = true;");
+                    sb.AppendLine("                }");
+                }
+                else
+                {
+                    sb.AppendLine($"                else if (i == {i})");
+                    sb.AppendLine("                {");
+                    sb.AppendLine($"                    await h{i + 1}.HandleAsync(notification, ct).ConfigureAwait(false);");
+                    sb.AppendLine("                    handled = true;");
+                    sb.AppendLine("                }");
+                }
+            }
+            sb.AppendLine();
+            sb.AppendLine("                if (handled)");
+            sb.AppendLine("                {");
+            sb.AppendLine("                    break; // Success — stop here");
+            sb.AppendLine("                }");
+            sb.AppendLine("            }");
         }
     }
 

@@ -323,7 +323,8 @@ public class NotificationTests
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("StopOnFirst handler failed");
 
-        // Success handler should NOT have been called (StopOnFirstError stops on first failure)
+        // Failing handler should run first and throw, success handler should not run.
+        StopOnFirstWithStopOnFirstErrorEventFailingHandler.WasCalled.Should().BeTrue();
         StopOnFirstWithStopOnFirstErrorEventSuccessHandler.WasCalled.Should().BeFalse();
     }
 
