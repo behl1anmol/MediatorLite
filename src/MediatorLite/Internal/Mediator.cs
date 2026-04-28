@@ -304,7 +304,7 @@ internal sealed class Mediator : IMediator
         }
         catch (TargetInvocationException ex) when (ex.InnerException != null)
         {
-            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(ex.InnerException);
         }
     }
 
@@ -350,7 +350,7 @@ internal sealed class Mediator : IMediator
         }
         catch (TargetInvocationException ex) when (ex.InnerException != null)
         {
-            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(ex.InnerException);
         }
     }
 
