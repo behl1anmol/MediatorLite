@@ -22,18 +22,23 @@ public sealed class CreateOrderCommandValidator : IAppValidator<CreateOrderComma
             errors.Add("A single order cannot contain more than 50 lines.");
         }
 
-        var duplicatedProductIds = request.Lines
-            .GroupBy(line => line.ProductId)
-            .Where(group => group.Count() > 1)
-            .Select(group => group.Key)
-            .ToArray();
+        var seenProductIds = new HashSet<int>(request.Lines.Count);
+        var duplicatedProductIds = new HashSet<int>();
 
-        if (duplicatedProductIds.Length > 0)
+        foreach (var line in request.Lines)
+        {
+            if (!seenProductIds.Add(line.ProductId))
+            {
+                duplicatedProductIds.Add(line.ProductId);
+            }
+        }
+
+        if (duplicatedProductIds.Count > 0)
         {
             errors.Add("Order lines cannot contain duplicated product IDs.");
         }
 
-        var productIds = request.Lines.Select(line => line.ProductId).Distinct().ToArray();
+        var productIds = seenProductIds.ToArray();
         var products = await _dbContext.Products
             .Where(product => productIds.Contains(product.Id))
             .Select(product => new { product.Id, product.AvailableStock })
