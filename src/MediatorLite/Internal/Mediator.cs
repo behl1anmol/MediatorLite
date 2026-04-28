@@ -305,7 +305,6 @@ internal sealed class Mediator : IMediator
         catch (TargetInvocationException ex) when (ex.InnerException != null)
         {
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
-            throw; // Unreachable
         }
     }
 
@@ -352,7 +351,6 @@ internal sealed class Mediator : IMediator
         catch (TargetInvocationException ex) when (ex.InnerException != null)
         {
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
-            throw; // Unreachable
         }
     }
 
