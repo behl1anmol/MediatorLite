@@ -861,12 +861,12 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
 
         // === DISPATCH DICTIONARY ===
         sb.AppendLine("        // O(1) request dispatch table");
-        sb.AppendLine("        private static readonly Dictionary<Type, global::MediatorLite.RequestDispatcher> _dispatchers = new()");
+        sb.AppendLine("        private static readonly Dictionary<Type, Delegate> _dispatchers = new()");
         sb.AppendLine("        {");
         foreach (var (handler, iface) in requestHandlers)
         {
             var safeName = GetSafeTypeName(iface.RequestType);
-            sb.AppendLine($"            [typeof({iface.RequestType})] = static (sp, req, ct) => Pipeline_{safeName}(sp, ({iface.RequestType})req, ct),");
+            sb.AppendLine($"            [typeof({iface.RequestType})] = new Func<IServiceProvider, global::MediatorLite.IRequest<{iface.ResponseType}>, CancellationToken, ValueTask<{iface.ResponseType}>>(Pipeline_{safeName}),");
         }
         sb.AppendLine("        };");
         sb.AppendLine();
@@ -886,7 +886,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         // === INTERFACE METHODS ===
         sb.AppendLine("        /// <inheritdoc />");
         sb.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-        sb.AppendLine("        public global::MediatorLite.RequestDispatcher? GetDispatcher(Type requestType)");
+        sb.AppendLine("        public Delegate? GetDispatcher(Type requestType)");
         sb.AppendLine("            => _dispatchers.GetValueOrDefault(requestType);");
         sb.AppendLine();
 
@@ -1021,13 +1021,14 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 sb.AppendLine($"{indent}__logger.LogDebug(\"Request {{RequestType}} handled successfully\", \"{simpleRequest}\");");
             }
 
-            sb.AppendLine($"{indent}return result!;");
+        sb.AppendLine($"{indent}return result;");
         }
 
         sb.AppendLine($"        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-        sb.AppendLine($"        private static async Task<object> Pipeline_{safeName}(");
-        sb.AppendLine($"            IServiceProvider sp, {requestType} request, CancellationToken ct)");
+        sb.AppendLine($"        private static async ValueTask<{responseType}> Pipeline_{safeName}(");
+        sb.AppendLine($"            IServiceProvider sp, global::MediatorLite.IRequest<{responseType}> req, CancellationToken ct)");
         sb.AppendLine("        {");
+        sb.AppendLine($"            var request = ({requestType})req;");
 
         bool needsDiagnostics = loggingEnabled || tracingEnabled;
 
@@ -1240,14 +1241,13 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         }
         sb.AppendLine();
 
-        // Use ArrayPool for task array
-        sb.AppendLine($"            var tasks = ArrayPool<Task>.Shared.Rent({handlers.Count});");
-        sb.AppendLine("            try");
-        sb.AppendLine("            {");
+        // Task.WhenAll allocates when passing an array, so renting and copying via ToArray defeats the purpose of ArrayPool.
+        // It's faster and uses exactly one array allocation to just create an exact-sized array.
+        sb.AppendLine($"            var tasks = new Task[{handlers.Count}];");
         
         for (int i = 0; i < handlers.Count; i++)
         {
-            sb.AppendLine($"                tasks[{i}] = h{i + 1}.HandleAsync(notification, ct).AsTask();");
+            sb.AppendLine($"            tasks[{i}] = h{i + 1}.HandleAsync(notification, ct).AsTask();");
         }
         
         // For parallel execution with ContinueAndAggregate, we need to properly aggregate exceptions
@@ -1255,30 +1255,23 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         {
             // await WhenAll will throw the first exception, unwrapping the AggregateException.
             // We catch it and re-throw the full AggregateException to preserve all exceptions.
-            sb.AppendLine($"                var allTasks = Task.WhenAll(tasks.AsSpan(0, {handlers.Count}).ToArray());");
-            sb.AppendLine("                try");
-            sb.AppendLine("                {");
-            sb.AppendLine("                    await allTasks.ConfigureAwait(false);");
-            sb.AppendLine("                }");
-            sb.AppendLine("                catch");
-            sb.AppendLine("                {");
-            sb.AppendLine("                    // Prioritize cancellation - rethrow OperationCanceledException directly");
-            sb.AppendLine("                    ct.ThrowIfCancellationRequested();");
-            sb.AppendLine("                    // For handler failures, throw the full AggregateException with all exceptions");
-            sb.AppendLine("                    throw allTasks.Exception!;");
-            sb.AppendLine("                }");
+            sb.AppendLine($"            var allTasks = Task.WhenAll(tasks);");
+            sb.AppendLine("            try");
+            sb.AppendLine("            {");
+            sb.AppendLine("                await allTasks.ConfigureAwait(false);");
+            sb.AppendLine("            }");
+            sb.AppendLine("            catch");
+            sb.AppendLine("            {");
+            sb.AppendLine("                // Prioritize cancellation - rethrow OperationCanceledException directly");
+            sb.AppendLine("                ct.ThrowIfCancellationRequested();");
+            sb.AppendLine("                // For handler failures, throw the full AggregateException with all exceptions");
+            sb.AppendLine("                throw allTasks.Exception!;");
+            sb.AppendLine("            }");
         }
         else // StopOnFirstError - Task.WhenAll throws first exception (other exceptions in flight are discarded)
         {
-            sb.AppendLine($"                await Task.WhenAll(tasks.AsSpan(0, {handlers.Count}).ToArray()).ConfigureAwait(false);");
+            sb.AppendLine($"            await Task.WhenAll(tasks).ConfigureAwait(false);");
         }
-        
-        sb.AppendLine("            }");
-        sb.AppendLine("            finally");
-        sb.AppendLine("            {");
-        sb.AppendLine($"                Array.Clear(tasks, 0, {handlers.Count});");
-        sb.AppendLine("                ArrayPool<Task>.Shared.Return(tasks);");
-        sb.AppendLine("            }");
     }
 
     private static void GenerateStopOnFirstNotificationExecution(

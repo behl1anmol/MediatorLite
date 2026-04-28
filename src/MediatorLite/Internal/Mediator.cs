@@ -45,8 +45,8 @@ internal sealed class Mediator : IMediator
                 $"Ensure a handler implementing IRequestHandler<{requestType.Name}, {typeof(TResponse).Name}> " +
                 "is registered and AddGeneratedHandlers() is called.");
 
-        var result = await dispatcher(_serviceProvider, request, cancellationToken).ConfigureAwait(false);
-        return (TResponse)result;
+        var typedDispatcher = (Func<IServiceProvider, IRequest<TResponse>, CancellationToken, ValueTask<TResponse>>)dispatcher;
+        return await typedDispatcher(_serviceProvider, request, cancellationToken).ConfigureAwait(false);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

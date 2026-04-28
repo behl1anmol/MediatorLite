@@ -3,32 +3,6 @@ using System.Runtime.CompilerServices;
 namespace MediatorLite;
 
 /// <summary>
-/// Delegate for dispatching a request through its pipeline (behaviors + handler).
-/// </summary>
-/// <param name="serviceProvider">The service provider for resolving dependencies.</param>
-/// <param name="request">The request object (will be cast to concrete type).</param>
-/// <param name="cancellationToken">Cancellation token.</param>
-/// <returns>A task containing the boxed response.</returns>
-/// <remarks>
-/// <para>
-/// <b>Boxing tradeoff:</b> This delegate returns <c>Task&lt;object&gt;</c> which causes boxing
-/// for value type responses (e.g., <c>int</c>, <c>bool</c>, <c>Guid</c>, custom structs).
-/// Each value type response incurs a heap allocation when boxed to <c>object</c>.
-/// </para>
-/// <para>
-/// This is a deliberate design tradeoff for compile-time simplicity: a single delegate signature
-/// allows the source generator to produce a unified dispatch table (<c>Dictionary&lt;Type, RequestDispatcher&gt;</c>)
-/// without requiring generic delegate instantiation per request type. The boxing cost is typically
-/// negligible compared to I/O-bound handler work, but may be measurable in high-throughput,
-/// CPU-bound scenarios with value type responses.
-/// </para>
-/// </remarks>
-public delegate Task<object> RequestDispatcher(
-    IServiceProvider serviceProvider,
-    object request,
-    CancellationToken cancellationToken);
-
-/// <summary>
 /// Delegate for publishing a notification to all handlers.
 /// </summary>
 /// <param name="serviceProvider">The service provider for resolving handlers.</param>
@@ -36,7 +10,7 @@ public delegate Task<object> RequestDispatcher(
 /// <param name="cancellationToken">Cancellation token.</param>
 /// <returns>A task representing the publish operation.</returns>
 /// <remarks>
-/// Unlike <see cref="RequestDispatcher"/>, this delegate returns <c>Task</c> (non-generic),
+/// This delegate returns <c>Task</c> (non-generic),
 /// so notifications do not incur boxing overhead for responses. The notification object itself
 /// is passed as <c>object</c> and cast to the concrete type in the generated dispatch method.
 /// </remarks>
@@ -55,10 +29,6 @@ public delegate Task NotificationPublisher(
 /// Each request type has a fully-typed, unrolled pipeline method generated at compile-time,
 /// eliminating pattern matching, delegate chain construction, and behavior resolution overhead.
 /// </para>
-/// <para>
-/// The generated implementation uses <c>Dictionary&lt;Type, RequestDispatcher&gt;</c> for O(1) lookup
-/// instead of switch expressions with pattern matching.
-/// </para>
 /// </remarks>
 public interface ISourceGeneratedMediator
 {
@@ -68,15 +38,15 @@ public interface ISourceGeneratedMediator
     /// </summary>
     /// <param name="requestType">The concrete request type.</param>
     /// <returns>
-    /// A <see cref="RequestDispatcher"/> delegate if the request type was discovered at compile-time;
-    /// otherwise, null.
+    /// A <see cref="Delegate"/> of type <c>Func&lt;IServiceProvider, IRequest&lt;TResponse&gt;, CancellationToken, ValueTask&lt;TResponse&gt;&gt;</c>
+    /// if the request type was discovered at compile-time; otherwise, null.
     /// </returns>
     /// <remarks>
     /// The returned delegate is a static method reference with no per-call allocation.
     /// The pipeline is fully unrolled at compile-time based on discovered behaviors.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    RequestDispatcher? GetDispatcher(Type requestType);
+    Delegate? GetDispatcher(Type requestType);
 
     /// <summary>
     /// Gets the publish delegate for a notification type.
