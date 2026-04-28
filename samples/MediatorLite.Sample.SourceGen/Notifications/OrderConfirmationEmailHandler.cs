@@ -22,8 +22,22 @@ public sealed class OrderConfirmationEmailHandler : INotificationHandler<OrderPl
 
         _logger.LogInformation(
             "📧 Sent order confirmation email to {Email} for order {OrderId}. Total: {TotalAmount:C}",
-            notification.CustomerEmail,
+            MaskEmail(notification.CustomerEmail),
             notification.OrderId,
             notification.TotalAmount);
+    }
+
+    private static string MaskEmail(string email)
+    {
+        if (string.IsNullOrEmpty(email)) return email;
+        var parts = email.Split('@');
+        if (parts.Length != 2) return "***";
+
+        var username = parts[0];
+        var domain = parts[1];
+
+        if (username.Length <= 1) return $"*@{domain}";
+
+        return $"{username[0]}***@{domain}";
     }
 }

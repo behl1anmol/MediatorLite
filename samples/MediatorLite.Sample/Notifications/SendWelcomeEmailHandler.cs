@@ -16,7 +16,21 @@ public class SendWelcomeEmailHandler : INotificationHandler<UserCreatedNotificat
 
     public ValueTask HandleAsync(UserCreatedNotification notification, CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("   Sending welcome email to {Email}", notification.Email);
+        _logger.LogInformation("   Sending welcome email to {Email}", MaskEmail(notification.Email));
         return ValueTask.CompletedTask;
+    }
+
+    private static string MaskEmail(string email)
+    {
+        if (string.IsNullOrEmpty(email)) return email;
+        var parts = email.Split('@');
+        if (parts.Length != 2) return "***";
+
+        var username = parts[0];
+        var domain = parts[1];
+
+        if (username.Length <= 1) return $"*@{domain}";
+
+        return $"{username[0]}***@{domain}";
     }
 }
