@@ -1,0 +1,38 @@
+{
+  "$schema": "https://claude.ai/schemas/settings.json",
+  "description": "MediatorLite Claude Code hook configuration. Mirrors the agentic lifecycle from .cursor/hooks.json, adapting Cursor hook events to Claude Code's PreToolUse / PostToolUse / Stop model.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/pre-tool-use.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/post-tool-use.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/stop.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

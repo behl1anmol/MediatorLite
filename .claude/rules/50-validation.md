@@ -1,0 +1,113 @@
+# Validation Rules
+
+Validation is opt-in per request type but fully automated once you opt in.
+The source generator owns every wiring decision; hand-registering validators
+is a smell.
+
+## Rule 1 — Define an `IValidator<T>` or add DataAnnotations
+
+Two entry points exist and they compose:
+
+- **Custom business rules** — implement `IValidator<TRequest>` returning
+  `ValueTask<ValidationResult>`. Discovered by the generator automatically.
+- **Property-level constraints** — put `[Required]`, `[StringLength]`,
+  `[Range]`, etc. on the request type. The generator auto-registers
+  `DataAnnotationsValidator<TRequest>` for that type.
+
+Both are shown together in the test fixtures:
+
+```422:467:tests/MediatorLite.Tests/SourceGeneration/TestTypes.cs
+public sealed record ValidatedCommand : IRequest<string>
+{
+    [Required(ErrorMessage = "Name is required")]
+    [StringLength(50, MinimumLength = 2, ErrorMessage = "Name must be between 2 and 50 characters")]
+    public required string Name { get; init; }
+
+    [Range(1, 100, ErrorMessage = "Value must be between 1 and 100")]
+    public int Value { get; init; }
+}
+
+/// ...
+public class ValidatedCommandCustomValidator : IValidator<ValidatedCommand>
+{
+    ...
+    public ValueTask<MediatorValidationResult> ValidateAsync(ValidatedCommand request, CancellationToken cancellationToken = default)
+    {
+        ...
+        if (request.Name.Contains("blocked"))
+        {
+            return ValueTask.FromResult(MediatorValidationResult.Failure(
+                new ValidationError("Name", "Name cannot contain 'blocked'")));
+        }
+
+        return ValueTask.FromResult(MediatorValidationResult.Success);
+    }
+}
+```
+
+## Rule 2 — `ValidationBehavior<,>` is emitted first
+
+For any request type that has at least one validator, the generator emits
+`ValidationBehavior<TRequest, TResponse>` as the **outermost** behavior,
+before any ordinary `[BehaviorOrder]` behavior. The behavior collects all
+errors across all validators and throws a single `ValidationException`:
+
+```26:53:src/MediatorLite/Validation/ValidationBehavior.cs
+    public async ValueTask<TResponse> HandleAsync(
+        TRequest request,
+        RequestHandlerDelegate<TResponse> next,
+        CancellationToken cancellationToken = default)
+    {
+        if (Validators.Count == 0)
+        {
+            return await next();
+        }
+
+        var allErrors = new List<ValidationError>();
+
+        foreach (var validator in Validators)
+        {
+            var result = await validator.ValidateAsync(request, cancellationToken);
+            if (!result.IsValid)
+            {
+                allErrors.AddRange(result.Errors);
+            }
+        }
+
+        if (allErrors.Count > 0)
+        {
+            throw new ValidationException(allErrors);
+        }
+
+        return await next();
+    }
+```
+
+Do not alter the "emitted first" invariant — it is what guarantees invalid
+requests short-circuit before any other behavior runs.
+
+## Rule 3 — Do not hand-register validators
+
+Writing `services.AddTransient<IValidator<FooCommand>, FooValidator>()` is a
+code smell in source-gen consumers: the generator already did it via
+`AddGeneratedValidators()` (called from `AddGeneratedHandlers()`). Hand
+registration leads to duplicates counted in `ValidatorCount`.
+
+The only correct pattern:
+
+```52:57:samples/MediatorLite.Sample.SourceGen/Program.cs
+services.AddGeneratedHandlers();
+
+// Add MediatorLite core services.
+// Built-in logging + tracing are on by default; opt out via
+// [assembly: DisableMediatorLogging] / [assembly: DisableMediatorTracing].
+services.AddMediatorLite();
+```
+
+## Rule 4 — `DataAnnotationsValidator<T>` is stateless
+
+`DataAnnotationsValidator<T>` wraps
+`System.ComponentModel.DataAnnotations.Validator.TryValidateObject` with
+`validateAllProperties: true` and returns `ValueTask<ValidationResult>`. Do
+not subclass it; if you need cross-field logic, write a dedicated
+`IValidator<T>` instead.
