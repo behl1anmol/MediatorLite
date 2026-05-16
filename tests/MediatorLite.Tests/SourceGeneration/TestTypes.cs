@@ -488,3 +488,27 @@ public class ExecutionOrderTrackingBehavior<TRequest, TResponse> : IPipelineBeha
 }
 
 #endregion
+
+#region Parallel sync-throw fixtures
+
+[NotificationExecution(NotificationExecutionStrategy.Parallel)]
+[NotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
+public record ParallelSyncThrowEvent(string Message) : INotification;
+
+public class ParallelSyncThrowHandler1 : INotificationHandler<ParallelSyncThrowEvent>
+{
+    public ValueTask HandleAsync(ParallelSyncThrowEvent notification, CancellationToken cancellationToken = default)
+    {
+        throw new InvalidOperationException("sync-throw-handler-1");
+    }
+}
+
+public class ParallelSyncThrowHandler2 : INotificationHandler<ParallelSyncThrowEvent>
+{
+    public ValueTask HandleAsync(ParallelSyncThrowEvent notification, CancellationToken cancellationToken = default)
+    {
+        throw new InvalidOperationException("sync-throw-handler-2");
+    }
+}
+
+#endregion

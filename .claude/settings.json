@@ -1,5 +1,5 @@
 {
-  "$schema": "https://claude.ai/schemas/settings.json",
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "description": "MediatorLite Claude Code hook configuration. Mirrors the agentic lifecycle from .cursor/hooks.json, adapting Cursor hook events to Claude Code's PreToolUse / PostToolUse / Stop model.",
   "hooks": {
     "PreToolUse": [

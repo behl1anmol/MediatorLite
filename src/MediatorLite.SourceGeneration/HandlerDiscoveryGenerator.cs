@@ -907,11 +907,11 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             var safeName = GetSafeTypeName(iface.RequestType);
             var requestType = iface.RequestType;
             var responseType = iface.ResponseType!;
-            
+
             // Get behaviors for this request type, sorted by order
             var key = (requestType, responseType);
-            var behaviorsForRequest = behaviorsByRequest.ContainsKey(key) 
-                ? behaviorsByRequest[key] 
+            var behaviorsForRequest = behaviorsByRequest.ContainsKey(key)
+                ? behaviorsByRequest[key]
                 : new List<ExpandedBehaviorInfo>();
 
             GenerateUnrolledPipeline(
@@ -1195,7 +1195,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         {
             sb.AppendLine("            List<Exception>? exceptions = null;");
             sb.AppendLine();
-            
+
             for (int i = 0; i < handlers.Count; i++)
             {
                 sb.AppendLine("            try");
@@ -1210,7 +1210,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 sb.AppendLine("            }");
                 sb.AppendLine();
             }
-            
+
             sb.AppendLine("            if (exceptions is { Count: > 0 })");
             sb.AppendLine("            {");
             sb.AppendLine($"                throw new AggregateException(\"One or more notification handlers threw exceptions.\", exceptions);");
@@ -1244,12 +1244,13 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine($"            var tasks = ArrayPool<Task>.Shared.Rent({handlers.Count});");
         sb.AppendLine("            try");
         sb.AppendLine("            {");
-        
+
         for (int i = 0; i < handlers.Count; i++)
         {
-            sb.AppendLine($"                tasks[{i}] = h{i + 1}.HandleAsync(notification, ct).AsTask();");
+            sb.AppendLine($"                try {{ tasks[{i}] = h{i + 1}.HandleAsync(notification, ct).AsTask(); }}");
+            sb.AppendLine($"                catch (global::System.Exception __ex{i}) {{ tasks[{i}] = global::System.Threading.Tasks.Task.FromException(__ex{i}); }}");
         }
-        
+
         // For parallel execution with ContinueAndAggregate, we need to properly aggregate exceptions
         if (errorStrategy == 1) // ContinueAndAggregate
         {
@@ -1272,7 +1273,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         {
             sb.AppendLine($"                await Task.WhenAll(tasks.AsSpan(0, {handlers.Count}).ToArray()).ConfigureAwait(false);");
         }
-        
+
         sb.AppendLine("            }");
         sb.AppendLine("            finally");
         sb.AppendLine("            {");
@@ -1299,7 +1300,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         {
             sb.AppendLine("            List<Exception>? exceptions = null;");
             sb.AppendLine();
-            
+
             for (int i = 0; i < handlers.Count; i++)
             {
                 sb.AppendLine("            try");
@@ -1315,7 +1316,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 sb.AppendLine("            }");
                 sb.AppendLine();
             }
-            
+
             sb.AppendLine("            if (exceptions is { Count: > 0 })");
             sb.AppendLine("            {");
             sb.AppendLine($"                throw new AggregateException(\"All notification handlers threw exceptions.\", exceptions);");

@@ -80,15 +80,15 @@ public class NotificationTests
 
         // Assert - Publisher should exist
         publisher.Should().NotBeNull("GetPublisher should recognize UserCreatedEvent");
-        
+
         // Execute and verify handlers ran in order
         UserCreatedEventHandler1.Reset();
         UserCreatedEventHandler2.Reset();
         UserCreatedEventHandler3.Reset();
-        
+
         var mediator = provider.GetRequiredService<IMediator>();
         await mediator.PublishAsync(new UserCreatedEvent(1, "test@test.com"));
-        
+
         // Order should be: Handler1 (default 0), Handler2 (order 1), Handler3 (order 2)
         UserCreatedEventHandler1.CallOrder.Should().ContainInOrder(1, 2, 3);
     }
@@ -349,5 +349,28 @@ public class NotificationTests
         Func<Task> act = async () => await mediator.PublishAsync(new AllFailStopOnFirstWithAggregateEvent("test"));
         var exception = await act.Should().ThrowAsync<AggregateException>();
         exception.Which.InnerExceptions.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task PublishAsync_ParallelContinueAndAggregate_SyncThrowHandlers_AggregatesAllExceptions()
+    {
+        // Arrange - ParallelSyncThrowEvent has Parallel+ContinueAndAggregate.
+        // Both handlers throw synchronously (bare throw, not ValueTask.FromException).
+        // The fix ensures each invocation is wrapped in try/catch so Task.WhenAll sees all faults.
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddGeneratedHandlers();
+        services.AddMediatorLite();
+        var mediator = services.BuildServiceProvider().GetRequiredService<IMediator>();
+
+        // Act
+        Func<Task> act = async () => await mediator.PublishAsync(new ParallelSyncThrowEvent("test"));
+
+        // Assert - both handlers must have run and their exceptions aggregated
+        var ex = await act.Should().ThrowAsync<AggregateException>();
+        ex.Which.InnerExceptions.Should().HaveCount(2);
+        ex.Which.InnerExceptions.Should()
+            .ContainSingle(e => e.Message.Contains("sync-throw-handler-1"))
+            .And.ContainSingle(e => e.Message.Contains("sync-throw-handler-2"));
     }
 }

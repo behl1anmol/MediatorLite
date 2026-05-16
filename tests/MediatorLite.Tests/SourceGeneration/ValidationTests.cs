@@ -62,7 +62,7 @@ public class ValidationTests
 
         ExecutionOrderTrackingBehavior<ValidatedCommand, string>.ExecutionLog
             .Should().Contain("TrackingBehavior:Before:ValidatedCommand");
-            
+
     }
 
     [Fact]

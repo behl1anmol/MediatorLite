@@ -1,0 +1,98 @@
+
+# Benchmark Rules
+
+Benchmarks exist to measure MediatorLite vs. MediatR and vs. itself across
+refactors. They are not illustrative samples; keep them scientific.
+
+## Rule 1 — Every benchmark class carries `[MemoryDiagnoser]` + `[SimpleJob]`
+
+Memory diagnosis is not optional — allocation regressions matter as much as
+throughput. Use the existing job shape so historical results stay
+comparable:
+
+```14:16:tests/MediatorLite.Benchmarks/MediatorBenchmarks.cs
+[MemoryDiagnoser]
+[SimpleJob(warmupCount: 3, iterationCount: 10)]
+public class MediatorBenchmarks
+```
+
+Do not change `warmupCount` / `iterationCount` per class without also
+updating every other class in the same suite — it breaks apples-to-apples
+comparisons.
+
+## Rule 2 — MediatR is the baseline
+
+One benchmark per class is tagged `[Benchmark(Baseline = true)]` and it is
+the MediatR variant. MediatorLite is measured *against* MediatR, not the
+other way around.
+
+```232:242:tests/MediatorLite.Benchmarks/MediatorBenchmarks.cs
+    [Benchmark(Baseline = true)]
+    public async Task<MediatRResult> MediatR_SimpleRequest()
+    {
+        return await _mediatr.Send(new MediatRQuery(1));
+    }
+
+    [Benchmark]
+    public async Task<MediatorLiteResult> MediatorLite_SimpleRequest()
+    {
+        return await _mediatorLite.SendAsync(new MediatorLiteQuery(1));
+    }
+```
+
+When adding a new scenario, always add **both** the MediatR and the
+MediatorLite variant; never the MediatorLite benchmark alone.
+
+## Rule 3 — No `Console.WriteLine` in hot loops
+
+BenchmarkDotNet measures wall-clock time inside `[Benchmark]` methods. Any
+`Console.WriteLine` or non-null logging inside them pollutes the
+measurement. Use `NullLoggerFactory` / `NullLogger<T>` in setup (already the
+pattern):
+
+```217:219:tests/MediatorLite.Benchmarks/MediatorBenchmarks.cs
+        mediatorLiteServices.AddSingleton<ILoggerFactory, NullLoggerFactory>();
+        mediatorLiteServices.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
+        _mediatorLiteProvider = mediatorLiteServices.BuildServiceProvider();
+```
+
+Do not sprinkle `.LogInformation` through handlers used by benchmarks — the
+`MediatorLite.IMediator` category already emits `LogDebug` for every
+request, so keep the benchmark's default filter at `Warning` or above.
+
+## Rule 4 — Parity harness lives in `BenchmarkParityGuard.cs`
+
+The REST API benchmark suite runs a parity check before any benchmark
+executes. Both mediator implementations must be configured with the same
+number of behaviors, notification handlers, and validators. Update the
+guard whenever you add or remove a registration:
+
+```51:77:tests/MediatorLite.RestApiBenchmarks/Hosting/BenchmarkParityGuard.cs
+    private static void ValidatePipelineParity(IServiceProvider serviceProvider, MediatorImplementation mediatorImplementation)
+    {
+        const int expectedBehaviorCount = 3;
+
+        if (mediatorImplementation == MediatorImplementation.MediatorLite)
+        {
+            var behaviorCount = serviceProvider
+                .GetServices<ML.IPipelineBehavior<CreateOrderCommand, CreateOrderResult>>()
+                .Count();
+
+            if (behaviorCount != expectedBehaviorCount)
+            {
+                throw new BenchmarkParityViolationException($"MediatorLite behavior count mismatch. Expected {expectedBehaviorCount}, got {behaviorCount}.");
+            }
+            ...
+        }
+```
+
+If a parity violation fires during `dotnet run -c Release` in
+`tests/MediatorLite.RestApiBenchmarks/`, fix the registration — do not bump
+the `expected*Count` constants without a matching change in the other
+mediator's pipeline.
+
+## Rule 5 — No shared state across benchmark classes
+
+Each benchmark class builds its own `IServiceProvider` in `[GlobalSetup]` and
+disposes it in `[GlobalCleanup]`. Do not reuse providers across classes; DI
+container fragmentation between runs is deliberate.
