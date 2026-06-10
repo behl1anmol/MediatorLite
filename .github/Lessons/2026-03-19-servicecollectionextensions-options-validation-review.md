@@ -1,5 +1,22 @@
 # Lesson: ServiceCollection Behavior Registration and Validation Boundaries
 
+## Metadata
+- PatternId: servicecollectionextensions-behavior-registration
+- PatternVersion: 1
+- Status: deprecated
+- Supersedes:
+- DeprecatedAt: 2026-06-10
+- DeprecationReason: This lesson targets the v1 reflection/options architecture that
+  the v2 typed-switch rewrite removed. The referenced surface no longer exists:
+  `MediatorOptions.cs`, `MediatorOptions.AddBehavior<TBehavior>()`,
+  `AddMediatorBehavior`, the reflection-fallback behavior invocation in
+  `Internal/Mediator.cs`, and the entire `tests/MediatorLite.Tests/Reflection/`
+  suite are deleted. Behavior discovery/expansion and registration are now owned by
+  the source generator (closed + open-generic behaviors expanded at compile time;
+  `ValidationBehavior` emitted first). `PipelineBehaviorTypeResolver.cs` still exists
+  but is orphaned off the dispatch path. Kept for history; do not reuse as guidance.
+  See `.github/Memories/v2-typed-switch-dispatch-architecture.md`.
+
 ## Task Context
 - Triggering task: Review findings for ServiceCollectionExtensions and related options validation.
 - Date/time: 2026-03-19

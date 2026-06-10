@@ -1,5 +1,19 @@
 # Memory: Behavior Registration Policy and Validation Timing in MediatorLite DI
 
+## Metadata
+- PatternId: servicecollectionextensions-options-validation-risks
+- PatternVersion: 1
+- Status: deprecated
+- SupersededBy: dispatch-architecture (PatternVersion 2 — `.github/Memories/v2-typed-switch-dispatch-architecture.md`)
+- DeprecatedAt: 2026-06-10
+- DeprecationReason: The v2 typed-switch dispatch rewrite deleted the entire surface
+  this memory describes — `MediatorOptions.cs`, `AddMediatorBehavior`, the
+  `IMediator` runtime `Mediator.cs` and its reflection-fallback invocation matching,
+  and the `tests/MediatorLite.Tests/Reflection/` suite are all gone.
+  `PipelineBehaviorTypeResolver.cs` still physically exists but is orphaned (no source
+  references it on the dispatch path). Behavior expansion/registration is now owned by
+  the source generator. Do not reuse this guidance; see the superseding memory.
+
 ## Source Context
 - Triggering task: Capture latest review findings for ServiceCollectionExtensions and options validation.
 - Scope/system: Core DI registration and options builder paths.
