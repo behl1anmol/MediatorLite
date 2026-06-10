@@ -9,7 +9,7 @@ dotnet add package MediatorLite
 dotnet add package MediatorLite.SourceGeneration   # Required for O(1 dispatch
 ```
 
-> ⚠️ **v2 Requirement:** Source generation is now the primary dispatch mechanism. Without `MediatorLite.SourceGeneration`, the library falls back to deprecated reflection-based dispatch.
+> ⚠️ **v2 Requirement:** Source generation is the **only** dispatch mechanism. Without `MediatorLite.SourceGeneration`, dispatch throws an `InvalidOperationException` with setup guidance on first use.
 
 Optional (when a project only needs request/notification/validation contracts):
 
@@ -23,8 +23,7 @@ Use this as a quick rule set for new users.
 
 | Project Type | Install |
 |--------------|---------|
-| Application/API (v2 recommended) | `MediatorLite` + `MediatorLite.SourceGeneration` |
-| Application/API (deprecated) | `MediatorLite` only (reflection fallback) |
+| Application/API (v2) | `MediatorLite` + `MediatorLite.SourceGeneration` (both required) |
 | Shared contracts library | `MediatorLite.Abstractions` |
 
 How transitive install works:
@@ -37,7 +36,7 @@ Compatibility matrix (safe combinations):
 |--------------|--------------|------------------|-----------|
 | 2.x | 2.x | 2.x | Yes (recommended) |
 | transitive | 2.x | 2.x | Yes |
-| 2.x | 2.x | not installed | Yes (deprecated reflection fallback) |
+| 2.x | 2.x | not installed | No (dispatch throws — no fallback) |
 | 2.x | not installed | 2.x | No |
 | 1.x | 2.x | 2.x | No |
 | 2.x | 2.x | 1.x | No |

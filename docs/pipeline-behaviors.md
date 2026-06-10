@@ -104,33 +104,11 @@ services
 
 **Important:** The source generator discovers both open generic behaviors (e.g., `LoggingBehavior<,>`) and closed behaviors (e.g., `CreateOrderValidationBehavior`). They are registered directly in DI and ordered by `[BehaviorOrder]`.
 
-### Manual Registration (Deprecated)
+### Manual Registration (Not Supported)
 
-> ⚠️ **Deprecated in v2:** Manual registration uses reflection fallback and does not respect `[BehaviorOrder]`.
+> ⚠️ **Not supported in v2:** There is no reflection fallback, so manually registered behaviors are never dispatched without `AddGeneratedHandlers()`. Worse, hand-registering behaviors **alongside** source generation double-registers them — the generator already discovered and registered every open-generic and closed behavior. Never call `services.AddTransient(typeof(IPipelineBehavior<,>), ...)` in a source-generated consumer.
 
-When NOT using source-generated registration, register behaviors directly with the DI container. `AddMediatorLite()` takes no arguments.
-
-```csharp
-// Open generic - applies to all requests
-services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
-services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
-
-// Closed type - applies to specific request only
-services.AddTransient<IPipelineBehavior<CreateOrder, OrderResult>, CreateOrderLoggingBehavior>();
-
-services.AddMediatorLite();
-```
-
-Execution order follows DI registration order in this mode; switch to source-generated registration for `[BehaviorOrder]` support.
-
-### Summary: Source-Gen vs Manual Registration
-
-| Method | When to Use | Behavior Ordering |
-|--------|-------------|-------------------|
-| **Source-Generated (v2)** | Required for v2 | `[BehaviorOrder]` attribute |
-| **Manual via DI** | Deprecated reflection fallback only | Registration order |
-
-**Key Rule:** Always use `AddGeneratedHandlers()` in v2 to get O(1) dispatch and `[BehaviorOrder]` support.
+**Key Rule:** `AddGeneratedHandlers()` is the only registration path in v2; behavior ordering is controlled exclusively by `[BehaviorOrder]`.
 
 ## Execution Order (v2)
 

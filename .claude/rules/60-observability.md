@@ -1,7 +1,7 @@
 # Observability Rules
 
 MediatorLite has two observability hooks and both are **on by default**,
-inlined by the source generator into every `Pipeline_*` / `Publish_*` method.
+inlined by the source generator into every `Send_*` / `Publish_*` method.
 The opt-outs are compile-time no-arg assembly attributes.
 
 ## Rule 1 — Logger category is `MediatorLite.IMediator`

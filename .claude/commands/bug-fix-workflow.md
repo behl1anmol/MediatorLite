@@ -42,25 +42,25 @@ Fix a reported bug using a strict test-driven loop: **reproduce → failing test
 
 3. **`backend-developer`: fix.** Keep the fix minimal and local:
    - Edit the narrowest file that contains the defect.
-   - Preserve the invariants in [.claude/rules/10-dispatch-invariants.mdc](.claude/rules/10-dispatch-invariants.mdc). Specifically, do not reintroduce reflection in [Mediator.cs](src/MediatorLite/Internal/Mediator.cs):
+   - Preserve the invariants in [.claude/rules/10-dispatch-invariants.mdc](.claude/rules/10-dispatch-invariants.mdc). Specifically, do not reintroduce reflection or a runtime dispatch layer — the generated `SourceGeneratedMediator` implements `IMediator` directly via a fully-typed type-pattern switch (shape emitted by `HandlerDiscoveryGenerator`):
 
-     ```34:50:src/MediatorLite/Internal/Mediator.cs
-       [MethodImpl(MethodImplOptions.AggressiveInlining)]
-       public async Task<TResponse> SendAsync<TResponse>(
+     ```csharp
+       public ValueTask<TResponse> SendAsync<TResponse>(
            IRequest<TResponse> request,
            CancellationToken cancellationToken = default)
        {
-           ArgumentNullException.ThrowIfNull(request);
-
-           var requestType = request.GetType();
-           var dispatcher = _sourceGeneratedMediator.GetDispatcher(requestType)
-               ?? throw new InvalidOperationException(
-                   $"No handler registered for request type {requestType.FullName}. " +
-                   $"Ensure a handler implementing IRequestHandler<{requestType.Name}, {typeof(TResponse).Name}> " +
-                   "is registered and AddGeneratedHandlers() is called.");
-
-           var result = await dispatcher(_serviceProvider, request, cancellationToken).ConfigureAwait(false);
-           return (TResponse)result;
+           switch (request)
+           {
+               case GetUserQuery r:
+               {
+                   var vt = Send_GetUserQuery(r, cancellationToken);
+                   if (typeof(TResponse) == typeof(UserDto))
+                       return Unsafe.As<ValueTask<UserDto>, ValueTask<TResponse>>(ref vt);
+                   return SlowCast<UserDto, TResponse>(vt);
+               }
+               case null: throw new ArgumentNullException(nameof(request));
+               default: throw new InvalidOperationException("No handler registered ...");
+           }
        }
      ```
 
@@ -150,7 +150,7 @@ Fix a reported bug using a strict test-driven loop: **reproduce → failing test
 
 - Rules: [.claude/rules/00-project-conventions.mdc](.claude/rules/00-project-conventions.mdc), [.claude/rules/10-dispatch-invariants.mdc](.claude/rules/10-dispatch-invariants.mdc).
 - Self-learning contract: [.github/agents/dotnet-self-learning-architect.agent.md](.github/agents/dotnet-self-learning-architect.agent.md).
-- Core files the fix often touches: [src/MediatorLite/Internal/Mediator.cs](src/MediatorLite/Internal/Mediator.cs), [src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs](src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs).
+- Core files the fix often touches: [src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs](src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs), [src/MediatorLite/Configuration/ServiceCollectionExtensions.cs](src/MediatorLite/Configuration/ServiceCollectionExtensions.cs).
 - Tests: [tests/MediatorLite.Tests/SourceGeneration/](tests/MediatorLite.Tests/SourceGeneration/).
 - Agents: [.claude/agents/orchestrator.md](.claude/agents/orchestrator.md), [.github/agents/code-reviewer.agent.md](.github/agents/code-reviewer.agent.md).
 - Related instructions: [adr-template.md](adr-template.md), [orchestration-playbook.md](orchestration-playbook.md).

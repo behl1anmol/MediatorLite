@@ -165,7 +165,7 @@ subjective interpretation.
 
 ```markdown
 - GIVEN an assembly with `[assembly: DisableMediatorLogging]` OR `[assembly: DisableMediatorTracing]`
-- WHEN the generator emits `Pipeline_*` / `Publish_*` methods
+- WHEN the generator emits `Send_*` / `Publish_*` methods
 - THEN the generated source contains zero calls to the opted-out API
 - AND a compile-time check asserts the absence.
 ```

@@ -67,7 +67,7 @@ dotnet add package MediatorLite.Abstractions
 | Application/API (legacy) | `MediatorLite` | Reflection fallback only (deprecated) |
 | Shared contracts library (requests/notifications only) | `MediatorLite.Abstractions` | Keep shared package lightweight |
 
-> ⚠️ **v2 Breaking Change:** Source generation is now the primary dispatch mechanism. Applications without `MediatorLite.SourceGeneration` will use the deprecated reflection fallback.
+> ⚠️ **v2 Breaking Change:** Source generation is the **only** dispatch mechanism. Applications without `MediatorLite.SourceGeneration` cannot dispatch — `IMediator` throws an `InvalidOperationException` with setup guidance on first use.
 
 ### Will Abstractions be installed automatically?
 

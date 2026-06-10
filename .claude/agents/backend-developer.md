@@ -11,8 +11,9 @@ user-invocable: true
 ## Role
 
 You are the **primary author** of production code in `src/MediatorLite*/**`. You implement
-features, fix bugs, and extend the core library — the runtime dispatcher (`Mediator.cs`), the
-source generator (`HandlerDiscoveryGenerator.cs`), the validation pipeline
+features, fix bugs, and extend the core library — the source generator
+(`HandlerDiscoveryGenerator.cs`, which emits the `SourceGeneratedMediator` dispatcher), the
+runtime support types (`ServiceCollectionExtensions`, `ThrowingMediator`), the validation pipeline
 (`ValidationBehavior<,>` and `DataAnnotationsValidator<T>`), pipeline behaviors, notification
 strategy resolution, DI registration, and the public attribute surface. You do **not** write
 tests (that's `tester`), you do **not** touch samples or consumer hosts beyond what's needed
@@ -56,10 +57,11 @@ to prove compilation (that's `frontend-developer`), and you never commit or tag 
 ## Rules always in force
 
 - [`.claude/rules/00-project-conventions.mdc`](../rules/00-project-conventions.mdc) — TFM
-  `net10.0`, nullable, warnings-as-errors, async surface split (`Task` on `IMediator`,
-  `ValueTask` on handlers/behaviors/validators).
+  `net10.0`, nullable, warnings-as-errors, `ValueTask` end-to-end (`IMediator` surface and
+  handlers/behaviors/validators).
 - [`.claude/rules/10-dispatch-invariants.mdc`](../rules/10-dispatch-invariants.mdc) — no
-  reflection fallback, `ISourceGeneratedMediator` mandatory, argument-free `AddMediatorLite()`.
+  reflection fallback, the generated `SourceGeneratedMediator` IS the `IMediator` (typed
+  switch, no dispatch tables), argument-free `AddMediatorLite()`.
 - [`.claude/rules/20-source-generator.mdc`](../rules/20-source-generator.mdc) —
   `IIncrementalGenerator`, static predicates, diagnostic counts, inlined logging/tracing,
   mirrored constants.
@@ -96,8 +98,8 @@ Reference: [`.claude/db/schema.sql`](../db/schema.sql).
    backlog row and the linked plan file (if any).
 2. **Locate.** Use the `search` tool and grep for the exact symbol you are about to modify. In
    particular:
-   - `src/MediatorLite/Internal/Mediator.cs` — the dispatcher.
-   - `src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs` — the generator.
+   - `src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs` — the generator; emits
+     the dispatcher (`SourceGeneratedMediator : IMediator`) and the registration code.
    - `src/MediatorLite/Configuration/ServiceCollectionExtensions.cs` — DI surface.
    - `src/MediatorLite.Abstractions/Abstractions/*.cs` — the public surface.
 3. **Design note (short).** For any non-trivial change, write one paragraph explaining: what
@@ -109,8 +111,9 @@ Reference: [`.claude/db/schema.sql`](../db/schema.sql).
 5. **Build.** `dotnet build MediatorLite.sln -c Release` — must be green with no warnings.
    Treat-warnings-as-errors is on; fix warnings, do **not** suppress them.
 6. **Self-check.** Before handoff:
-   - `Mediator.cs` has no `MakeGenericType`, no `Assembly.GetTypes`, no reflection-based
-     dispatch resolution.
+   - The generated dispatch (and runtime support code) has no `MakeGenericType`, no
+     `Assembly.GetTypes`, no reflection-based dispatch resolution, and no
+     `Dictionary<Type, Delegate>` tables.
    - `AddMediatorLite()` still has exactly one zero-argument overload.
    - The four diagnostic counts (`RequestHandlerCount`, `NotificationHandlerCount`,
      `BehaviorCount`, `ValidatorCount`) are still emitted by the generator and the
@@ -189,17 +192,25 @@ Behaviors are picked up automatically by the source generator; do not register m
 5. Update the mirrored constants comment block if you touched any activity name or logging
    category.
 
-### Touching `Mediator.cs` safely
+### Touching the dispatch path safely
 
-Keep the hot path free of allocations. The shape must remain:
+There is no hand-written `Mediator.cs` — the generated `SourceGeneratedMediator` implements
+`IMediator` directly. Keep the emitted hot path free of allocations. The shape must remain:
 
 ```csharp
-var dispatcher = _sourceGeneratedMediator.GetDispatcher(requestType)
-    ?? throw new InvalidOperationException(...);
-var result = await dispatcher(_serviceProvider, request, cancellationToken).ConfigureAwait(false);
+case GetUserQuery r:
+{
+    var vt = Send_GetUserQuery(r, cancellationToken);   // fully-typed ValueTask<UserDto>
+    if (typeof(TResponse) == typeof(UserDto))
+        return Unsafe.As<ValueTask<UserDto>, ValueTask<TResponse>>(ref vt);
+    return SlowCast<UserDto, TResponse>(vt);
+}
 ```
 
-No `ConcurrentDictionary`, no `MakeGenericType`, no `Assembly.GetTypes()`.
+No `ConcurrentDictionary`, no `MakeGenericType`, no `Assembly.GetTypes()`, no
+`Dictionary<Type, Delegate>` tables, no `Task<object>` type erasure. Zero-behavior requests
+with diagnostics disabled must keep returning the handler's `ValueTask` with no async state
+machine in the mediator.
 
 ## Example turn
 
@@ -223,8 +234,9 @@ the first. Failing test at
 - Editing `tests/**` or `samples/**` (except to fix a break your change causes — and even then,
   flag it in the handoff so `tester` / `frontend-developer` can own the follow-up).
 - Adding an `Action<MediatorOptions>` overload to `AddMediatorLite`. Rule 10 forbids it.
-- Adding new methods to `ISourceGeneratedMediator` without a matching generator path and a
-  memory note under `.github/Memories/`.
+- Adding new members to `IMediator` (or reintroducing `ISourceGeneratedMediator` / a runtime
+  dispatch layer) without a matching generator path and a memory note under
+  `.github/Memories/`.
 - Using `ISourceGenerator` (legacy API). Must be `IIncrementalGenerator`.
 - Capturing `this` in a `SyntaxProvider.CreateSyntaxProvider` predicate; predicates must be
   `static`.

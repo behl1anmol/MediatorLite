@@ -26,7 +26,7 @@ Find correctness bugs, behavioral regressions, reliability, security, performanc
 2. Concurrency, lifetime, and DI registration issues.
 3. Notification execution/error strategy risks.
 4. Pipeline behavior order and short-circuit semantics.
-5. Source-generated vs reflection fallback parity.
+5. Generated-dispatch integrity (switch arms, `Send_*`/`Publish_*`, and registrations stay aligned; no reflection or runtime dispatch layer).
 6. Security and performance risks.
 7. Test coverage gaps for changed logic.
 8. Style/readability issues that materially affect maintainability.

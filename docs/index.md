@@ -24,16 +24,16 @@ A lightweight, high-performance mediator for .NET with **O(1) source-generated d
 
 MediatorLite v2 is **source-generation-first**:
 
-- **O(1) dispatch** via compile-time generated switch expressions — no dictionary lookups or reflection
+- **Typed switch dispatch** generated at compile time — no dictionary lookups, no reflection, no boxing, `ValueTask` end-to-end
 - **Compile-time attributes** control behavior ordering and notification strategies
-- **Reflection fallback is deprecated** — manual DI registration still works but uses slower reflection-based dispatch
+- **No reflection fallback** — without the source generator, dispatch throws a clear `InvalidOperationException` with setup guidance
 
 | Aspect | v1 | v2 |
 |--------|----|----|
-| **Primary dispatch** | Reflection with caching | O(1) generated switch |
+| **Primary dispatch** | Reflection with caching | Generated typed switch (`ValueTask`, zero boxing) |
 | **Behavior ordering** | DI registration order | `[BehaviorOrder]` attribute |
 | **Notification strategies** | Runtime options | `[NotificationExecution]` / `[NotificationError]` compile-time (with assembly-level defaults) |
-| **Reflection fallback** | Supported | Deprecated |
+| **Reflection fallback** | Supported | Removed (dispatch throws without the generator) |
 
 ---
 
@@ -75,7 +75,7 @@ dotnet add package MediatorLite
 dotnet add package MediatorLite.SourceGeneration   # Required for O(1) dispatch
 ```
 
-> ⚠️ **v2 Note:** Without `MediatorLite.SourceGeneration`, the library falls back to deprecated reflection-based dispatch.
+> ⚠️ **v2 Note:** `MediatorLite.SourceGeneration` is required — without it, dispatch throws an `InvalidOperationException` with setup guidance on first use.
 
 For shared contracts libraries (requests, notifications, and validation contracts only):
 

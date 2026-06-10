@@ -4,7 +4,7 @@ MediatorLite provides built-in observability through logging and OpenTelemetry t
 
 ## v2 Note
 
-In v2, observability has moved to **compile time**. The source generator emits `ILogger` calls and `ActivitySource` events inline into every generated `Pipeline_*` and `Publish_*` method. Both are on by default; you opt out at compile time with assembly-level attributes.
+In v2, observability has moved to **compile time**. The source generator emits `ILogger` calls and `ActivitySource` events inline into every generated `Send_*` and `Publish_*` method. Both are on by default; you opt out at compile time with assembly-level attributes.
 
 ## Logging Configuration
 

@@ -51,10 +51,10 @@ Also read (context, not loaded every turn):
 ## Rules always in force
 
 - [`.claude/rules/00-project-conventions.mdc`](../rules/00-project-conventions.mdc) — TFM,
-  nullability, warnings-as-errors, async surface split.
+  nullability, warnings-as-errors, `ValueTask`-based async surface.
 - [`.claude/rules/10-dispatch-invariants.mdc`](../rules/10-dispatch-invariants.mdc) — no
-  reflection fallback, `ISourceGeneratedMediator` is mandatory, `AddMediatorLite()` is
-  parameterless.
+  reflection fallback, the generated `SourceGeneratedMediator` IS the `IMediator`,
+  `AddMediatorLite()` is parameterless.
 - [`.claude/rules/20-source-generator.mdc`](../rules/20-source-generator.mdc) — `IIncrementalGenerator`
   contract, diagnostic counts, inlined logging/tracing.
 - [`.claude/rules/60-agentic-workflow.mdc`](../rules/60-agentic-workflow.mdc) — handoff contract,

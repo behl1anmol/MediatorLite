@@ -69,17 +69,9 @@ services
     .AddMediatorLite();
 ```
 
-#### Without Source Generation (Deprecated)
+#### Without Source Generation (Not Supported)
 
-> ⚠️ **Deprecated in v2:** Manual registration uses reflection fallback which is deprecated.
-
-```csharp
-using MediatorLite.Validation;
-
-services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
-services.AddTransient<IValidator<CreateUserCommand>, DataAnnotationsValidator<CreateUserCommand>>();
-services.AddMediatorLite();
-```
+> ⚠️ **Not supported in v2:** There is no reflection fallback. Manual registrations of `ValidationBehavior<,>` or validators are never dispatched without `AddGeneratedHandlers()` — the `IMediator` registered by `AddMediatorLite()` alone throws on first use. Hand-registering validators alongside source generation is also a smell: the generator already registered them via `AddGeneratedValidators()`, and duplicates inflate `ValidatorCount`.
 
 ### 3. Handle ValidationException
 
