@@ -143,7 +143,7 @@ Publish an `INotification` to N handlers with compile-time choice of execution s
 
 - Rules: [.cursor/rules/10-dispatch-invariants.mdc](.cursor/rules/10-dispatch-invariants.mdc), [.cursor/rules/20-source-generator.mdc](.cursor/rules/20-source-generator.mdc).
 - Abstractions: [INotification.cs](src/MediatorLite.Abstractions/Abstractions/INotification.cs), [INotificationHandler.cs](src/MediatorLite.Abstractions/Abstractions/INotificationHandler.cs), [Attributes.cs](src/MediatorLite.Abstractions/Abstractions/Attributes.cs).
-- Dispatcher: [Mediator.cs](src/MediatorLite/Internal/Mediator.cs).
+- Dispatcher: the generated `SourceGeneratedMediator` (emitted by [HandlerDiscoveryGenerator.cs](src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs)).
 - Tests: [tests/MediatorLite.Tests/SourceGeneration/NotificationTests.cs](tests/MediatorLite.Tests/SourceGeneration/NotificationTests.cs), [tests/MediatorLite.Tests/SourceGeneration/TestTypes.cs](tests/MediatorLite.Tests/SourceGeneration/TestTypes.cs).
 - Agent: [.cursor/agents/orchestrator.md](.cursor/agents/orchestrator.md).
 - Related instructions: [add-new-request-handler.md](add-new-request-handler.md), [extend-source-generator.md](extend-source-generator.md).

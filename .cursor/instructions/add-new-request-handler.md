@@ -67,12 +67,12 @@ Add a new `IRequest<T>` + `IRequestHandler<,>` pair to a consumer assembly using
 
    For void commands, implement `IRequestHandler<TRequest>` (no second generic argument). The generator lifts the `ValueTask` return into `ValueTask<Unit>`.
 
-3. **Verify DI wiring**. `AddMediatorLite()` takes no arguments and is parameterless by contract; the generator produces `AddGeneratedHandlers()`. The call order in your composition root must be:
+3. **Verify DI wiring**. `AddMediatorLite()` takes no arguments and is parameterless by contract; the generator produces `AddGeneratedHandlers()`, which registers the generated `IMediator` itself. `AddMediatorLite()` only adds an optional diagnostic fallback (the generated registration always wins, regardless of call order):
 
-   ```37:41:src/MediatorLite/Configuration/ServiceCollectionExtensions.cs
+   ```csharp
        public static IServiceCollection AddMediatorLite(this IServiceCollection services)
        {
-           services.AddTransient<IMediator, Mediator>();
+           services.TryAddScoped<IMediator, ThrowingMediator>();
            return services;
        }
    ```
@@ -140,7 +140,7 @@ Add a new `IRequest<T>` + `IRequestHandler<,>` pair to a consumer assembly using
 
 - Rules: [.cursor/rules/00-project-conventions.mdc](.cursor/rules/00-project-conventions.mdc), [.cursor/rules/10-dispatch-invariants.mdc](.cursor/rules/10-dispatch-invariants.mdc).
 - Abstractions: [IRequest.cs](src/MediatorLite.Abstractions/Abstractions/IRequest.cs), [IRequestHandler.cs](src/MediatorLite.Abstractions/Abstractions/IRequestHandler.cs), [IMediator.cs](src/MediatorLite.Abstractions/Abstractions/IMediator.cs).
-- Dispatcher: [Mediator.cs](src/MediatorLite/Internal/Mediator.cs).
+- Dispatcher: the generated `SourceGeneratedMediator` (emitted by [HandlerDiscoveryGenerator.cs](src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs)).
 - Sample: [samples/MediatorLite.Sample.SourceGen/Program.cs](samples/MediatorLite.Sample.SourceGen/Program.cs).
 - Tests: [tests/MediatorLite.Tests/SourceGeneration/MediatorTests.cs](tests/MediatorLite.Tests/SourceGeneration/MediatorTests.cs), [tests/MediatorLite.Tests/SourceGeneration/TestTypes.cs](tests/MediatorLite.Tests/SourceGeneration/TestTypes.cs).
 - Agent: [.cursor/agents/orchestrator.md](.cursor/agents/orchestrator.md).

@@ -23,7 +23,7 @@ triggers: AddMediatorLite, dispatch, SourceGeneratedMediator, ThrowingMediator, 
 - The `IMediator` implementation is **generated** (`SourceGeneratedMediator` in the `MediatorLite.Generated` namespace) — it is not a file in this project. See the mediatorlite-source-generation skill.
 - [ServiceCollectionExtensions.cs](src/MediatorLite/Configuration/ServiceCollectionExtensions.cs) — `AddMediatorLite()` entry point.
 - [ThrowingMediator.cs](src/MediatorLite/Internal/ThrowingMediator.cs) — diagnostic fallback `IMediator` that throws if no generator ran.
-- [PipelineBehaviorTypeResolver.cs](src/MediatorLite/Configuration/PipelineBehaviorTypeResolver.cs) — legacy helper; **not on the v2 dispatch/registration path** (the generated mediator does its own typed dispatch). Retained but orphaned.
+- ~~`PipelineBehaviorTypeResolver.cs`~~ — **deleted** (v1 runtime behavior-type resolution; the generated mediator unrolls behaviors at compile time, so nothing needs it).
 - [MediatorDiagnostics.cs](src/MediatorLite/Diagnostics/MediatorDiagnostics.cs) — `MediatorActivitySource` (OpenTelemetry) + `DiagnosticListener`.
 - [ValidationBehavior.cs](src/MediatorLite/Validation/ValidationBehavior.cs) — generic pipeline behavior that runs registered `IValidator<T>`s.
 - [DataAnnotationsValidator.cs](src/MediatorLite/Validation/DataAnnotationsValidator.cs) — built-in validator using `System.ComponentModel.DataAnnotations`.
@@ -112,57 +112,9 @@ internal sealed class ThrowingMediator : IMediator
 
 This type is registered only by `AddMediatorLite()` via `TryAddScoped`. When `AddGeneratedHandlers()` runs (the normal case), the generated `SourceGeneratedMediator` is registered after it and wins resolution, so `ThrowingMediator` never dispatches. If the generator never ran, every dispatch throws the guidance message above.
 
-### `PipelineBehaviorTypeResolver` — legacy helper (off the v2 dispatch path)
+### `PipelineBehaviorTypeResolver` — removed
 
-This helper distinguishes open vs closed behavior types. It is a **legacy helper, not on the v2 dispatch path** — the generated mediator unrolls behaviors itself and does not call this resolver. It physically remains in the project but is orphaned.
-
-```3:18:src/MediatorLite/Configuration/PipelineBehaviorTypeResolver.cs
-internal static class PipelineBehaviorTypeResolver
-{
-    private static readonly Type OpenPipelineBehaviorType = typeof(IPipelineBehavior<,>);
-
-    internal static IReadOnlyList<Type> GetServiceTypesForRegistration(Type behaviorType)
-    {
-        ArgumentNullException.ThrowIfNull(behaviorType);
-
-        if (behaviorType.IsGenericTypeDefinition)
-        {
-            ValidateOpenBehaviorType(behaviorType);
-            return [OpenPipelineBehaviorType];
-        }
-
-        return GetClosedBehaviorInterfacesOrThrow(behaviorType);
-    }
-```
-
-Closed behaviors (e.g. `PlaceOrderAuthorizationBehavior : IPipelineBehavior<PlaceOrderCommand, Unit>`) yield the exact closed interface; open behaviors (`LoggingBehavior<TRequest, TResponse>`) yield the unbound `IPipelineBehavior<,>`.
-
-```67:93:src/MediatorLite/Configuration/PipelineBehaviorTypeResolver.cs
-    internal static void ValidateOpenBehaviorType(Type behaviorType)
-    {
-        ArgumentNullException.ThrowIfNull(behaviorType);
-
-        if (!behaviorType.IsGenericTypeDefinition)
-        {
-            throw new ArgumentException(
-                $"Type {behaviorType.Name} must be an open generic type definition.",
-                "behaviorType");
-        }
-
-        var hasCorrectArity = behaviorType.GetGenericArguments().Length == 2;
-        if (!hasCorrectArity)
-        {
-            throw new ArgumentException(
-                $"Type {behaviorType.Name} must have exactly 2 generic type parameters.",
-                "behaviorType");
-        }
-
-        var implementsPipelineBehavior = behaviorType.GetInterfaces()
-            .Any(IsPipelineBehaviorInterface)
-            .(continued)
-```
-
-`GetClosedBehaviorInterfaceForInvocation` is used if you need to build a runtime pipeline manually (e.g. in a fallback scenario): it resolves the specific `IPipelineBehavior<TRequest, TResponse>` implementation of a closed type.
+This v1 helper (open- vs closed-behavior interface resolution for runtime registration) was deleted: the generated mediator unrolls behaviors itself at compile time, so nothing on the v2 dispatch or registration path needs runtime behavior-type resolution. Do not reintroduce it — behavior discovery/expansion belongs to the source generator (`ExpandBehaviors` in `HandlerDiscoveryGenerator.cs`).
 
 ### `MediatorActivitySource` + `MediatorDiagnostics`
 
@@ -369,7 +321,7 @@ public class DataAnnotationsValidator<TRequest> : IValidator<TRequest>
 
 - **Runtime-type dispatch**: the generated switch matches the request/notification's **runtime type**, which matters if callers declare the parameter as `IRequest<T>` / `INotification`. Notification dispatch by runtime type is why base/interface-typed publishes now dispatch (they silently no-oped in v1).
 - **Null requests on `PublishAsync`** throw `ArgumentNullException` from the switch's `case null:` arm. Tests in [MediatorTests.cs](tests/MediatorLite.Tests/SourceGeneration/MediatorTests.cs) assert this precisely.
-- **`PipelineBehaviorTypeResolver` is orphaned** — it is not on the v2 dispatch/registration path. Do not treat it as part of live registration; the generated mediator unrolls behaviors itself.
+- **`PipelineBehaviorTypeResolver` was deleted** — do not reintroduce runtime behavior-type resolution; the generated mediator unrolls behaviors itself at compile time.
 - **`MediatorOptions.cs` is deleted** (see git status `D src/MediatorLite/Configuration/MediatorOptions.cs`). Do not re-introduce it.
 - **`ValidationBehavior.Validators` is stored once** in the constructor (`validators.ToList()`). Scoped handler/validator lifetimes still work because the generated mediator is Scoped and resolves them from the resolving scope's `IServiceProvider`.
 - **`ValidationException` is thrown inside `await validator.ValidateAsync(...)`**; it does **not** wrap individual validator errors — all errors flatten into one exception.

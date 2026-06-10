@@ -394,7 +394,7 @@ Three ordered handlers (`1`, `2`, `3`) write audit rows — real I/O work on the
 
 - **SQLite file-on-disk vs in-memory**: the harness uses disk SQLite (`Data Source=<temp>.db`), not `:memory:`. File I/O is part of the measurement — this is intentional for realism but increases variance on slow disks. Use a fast SSD / tmpfs for reproducible results.
 - **`TestServer` vs `Kestrel`** results diverge significantly: `TestServer` skips the socket layer entirely. Both are reported because you usually want to measure both.
-- **Boxing on value-type responses** applies here too — see the note in [ISourceGeneratedMediator.cs](src/MediatorLite.Abstractions/Abstractions/ISourceGeneratedMediator.cs). This benchmark mostly returns reference-type DTOs (records), so boxing is minimized.
+- **No response boxing**: v2 dispatch keeps responses typed (`ValueTask<TResponse>`) end-to-end through the generated typed switch — there is no `Task<object>` and no value-type box per call. (v1 boxed; v2 eliminated it.) This benchmark mostly returns reference-type DTOs (records) anyway.
 - **`DbContext` is `Scoped`**: each HTTP request gets its own scope; concurrency benchmarks rely on this — do not make `AppDbContext` a singleton.
 - **`Write_CreateOrder_ValidationFailure`** deliberately fails validation (duplicate `ProductId`) and returns 400 — its cost measures the **validation short-circuit** path (exception thrown in behavior, not reaching the handler).
 - **`Concurrent_*` counts successful requests** — if your new write touches shared stock and causes contention, the success count may drop. `_applicationService.CreateOrderAsync` uses `BeginTransactionAsync` which serializes SQLite writes; concurrent **write** benchmarks would therefore largely measure lock contention.

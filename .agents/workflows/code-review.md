@@ -9,7 +9,7 @@ Runs the code-reviewer agent against the current uncommitted diff.
    If empty, report that there are no changes to review.
 
 2. Act as the code-reviewer agent. Analyze the diff for:
-   - Proper use of ISourceGeneratedMediator and MediatorLite DI rules.
+   - Proper use of the generated `SourceGeneratedMediator` dispatch and MediatorLite DI rules.
    - Any public API surface additions without architecture decisions.
    - Missing tests or edge cases not covered.
 

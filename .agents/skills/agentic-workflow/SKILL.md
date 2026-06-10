@@ -1,6 +1,6 @@
 ---
 name: agentic-workflow
-description: How every role agent participates in the MediatorLite scrum team. Covers the 7 roles (orchestrator, scrum-master, backend-developer, frontend-developer, tester, devops, code-reviewer), the parallel-vs-orchestration decision matrix, the required handoff output contract (`LessonsSuggested` / `MemoriesSuggested` / `ReasoningSummary`), the lesson and memory file templates, the Learning Governance rules (PatternId / PatternVersion / Status / Supersedes / pre-write dedupe / conflict resolution / safety gate / reuse priority), and how each agent calls `.cursor/lib/ContextDb.csx` to log decisions, handoffs, mistakes, reviews, and backlog items. Use whenever a role agent is spawned or asked to cooperate with another role.
+description: How every role agent participates in the MediatorLite scrum team. Covers the 7 roles (orchestrator, scrum-master, backend-developer, frontend-developer, tester, devops, code-reviewer), the parallel-vs-orchestration decision matrix, the required handoff output contract (`LessonsSuggested` / `MemoriesSuggested` / `ReasoningSummary`), the lesson and memory file templates, the Learning Governance rules (PatternId / PatternVersion / Status / Supersedes / pre-write dedupe / conflict resolution / safety gate / reuse priority), and how each agent calls `.claude/lib/ContextDb.csx` to log decisions, handoffs, mistakes, reviews, and backlog items. Use whenever a role agent is spawned or asked to cooperate with another role.
 triggers: scrum team, agentic workflow, orchestrator, scrum-master, backend-developer, frontend-developer, tester, devops, code-reviewer, handoff, LessonsSuggested, MemoriesSuggested, ReasoningSummary, lesson template, memory template, pattern governance, PatternId, PatternVersion, Supersedes, multi-agent, parallel mode, orchestration mode, dotnet-self-learning-architect
 ---
 
@@ -33,7 +33,7 @@ Each role has (or will have) a dedicated agent file under `.github/agents/*.agen
 |------|------------------------|--------------------------|
 | **orchestrator** | Own the session, break the request into work, choose delegation mode, consolidate outputs, maintain lessons/memories. Plays the "architect" seat. | [.github/agents/dotnet-self-learning-architect.agent.md](.github/agents/dotnet-self-learning-architect.agent.md) |
 | **scrum-master** | Maintain the `sprint_backlog`, prioritise, unblock, confirm Definition of Done before closing items. | (dedicated file pending) |
-| **backend-developer** | Implement changes in `src/MediatorLite/**`, `src/MediatorLite.Abstractions/**`, `src/MediatorLite.SourceGeneration/**`. Must keep generated code and `ISourceGeneratedMediator` aligned. | (dedicated file pending) |
+| **backend-developer** | Implement changes in `src/MediatorLite/**`, `src/MediatorLite.Abstractions/**`, `src/MediatorLite.SourceGeneration/**`. Must keep the generated `SourceGeneratedMediator` (implements `IMediator`) aligned with the abstractions. | (dedicated file pending) |
 | **frontend-developer** | Sample apps and any non-library UI/console surface (e.g. `samples/MediatorLite.Sample.SourceGen`). | (dedicated file pending) |
 | **tester** | xUnit + FluentAssertions coverage under `tests/MediatorLite.Tests`, benchmarks under `tests/MediatorLite.Benchmarks` and `tests/MediatorLite.RestApiBenchmarks`. Owns `dotnet test MediatorLite.sln`. | (dedicated file pending) |
 | **devops** | Build, CI, NuGet packaging, `Directory.Build.props`, `AGENTS.md` / `.github/copilot-instructions.md` sync. | (dedicated file pending) |
@@ -88,7 +88,7 @@ Rules (mirroring `.github/agents/dotnet-self-learning-architect.agent.md`):
 - Keep each bullet evidence-based and tied to the completed task. No filler.
 - The parent agent consolidates, deduplicates, and *then* materialises files under `.github/Lessons/` / `.github/Memories/`. Subagents suggest; they do not create.
 
-Complementary, every agent should also log its handoff into `agent_messages` via `ContextDb.WriteMessage(...)` so the next turn can rehydrate it. See [.cursor/skills/context-db-schema/SKILL.md](.cursor/skills/context-db-schema/SKILL.md).
+Complementary, every agent should also log its handoff into `agent_messages` via `ContextDb.WriteMessage(...)` so the next turn can rehydrate it. See [.claude/skills/context-db-schema/SKILL.md](.claude/skills/context-db-schema/SKILL.md).
 
 ## Lesson template
 
@@ -140,14 +140,14 @@ Reference example: [.github/Lessons/2026-03-19-servicecollectionextensions-optio
 When creating a lesson, also log the mistake row:
 
 ```csx
-#load ".cursor/lib/ContextDb.csx"
+#load ".claude/lib/ContextDb.csx"
 ContextDb.LogMistake(
     agent:      "backend-developer",
     category:   "review",
-    summary:    "FirstOrDefault silently drops multi-interface behavior registrations",
-    rootCause:  "Selection projected to a single interface",
-    fix:        "Introduced PipelineBehaviorTypeResolver",
-    lessonFile: ".github/Lessons/2026-03-19-servicecollectionextensions-options-validation-review.md");
+    summary:    "Simple-request benchmark secretly ran 3 open-generic behaviors",
+    rootCause:  "Open-generic behaviors expand to every request type at compile time",
+    fix:        "Per-scenario request types with closed behaviors (0/1/3)",
+    lessonFile: ".github/Lessons/2026-06-10-benchmark-parity-open-generic-behaviors.md");
 ```
 
 ## Memory template
@@ -222,9 +222,9 @@ Never apply or recommend any pattern whose `Status: blocked`. Reactivation requi
 
 Prefer the newest validated `active` pattern. If confidence is low or an unresolved conflict remains, ask the user before applying the guidance.
 
-## Using `.cursor/lib/ContextDb.csx` in agent flow
+## Using `.claude/lib/ContextDb.csx` in agent flow
 
-Every role writes to the session DB at well-defined moments. Full helper reference lives in [.cursor/skills/context-db-schema/SKILL.md](.cursor/skills/context-db-schema/SKILL.md).
+Every role writes to the session DB at well-defined moments. Full helper reference lives in [.claude/skills/context-db-schema/SKILL.md](.claude/skills/context-db-schema/SKILL.md).
 
 Minimum contract per role event:
 
@@ -245,7 +245,7 @@ Minimum contract per role event:
 ### Example: backend-developer handoff to tester
 
 ```csx
-#load ".cursor/lib/ContextDb.csx"
+#load ".claude/lib/ContextDb.csx"
 var story = """
 Refactored ValidationBehavior to short-circuit when Validators.Count == 0 (no change).
 Added a fast-path log when the behavior is skipped.
@@ -265,13 +265,13 @@ ContextDb.LogDecision(
 ### Example: code-reviewer gating a commit
 
 ```csx
-#load ".cursor/lib/ContextDb.csx"
+#load ".claude/lib/ContextDb.csx"
 var diffHash = /* sha256 of `git diff --staged` */ "sha256-...";
 if (!ContextDb.HasFreshReview(diffHash, TimeSpan.FromHours(2)))
 {
     // spawn code-reviewer subagent, then log its findings:
     ContextDb.LogReview(
-        target:       "src/MediatorLite/Internal/Mediator.cs",
+        target:       "src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs",
         severity:     "High",
         finding:      "SendAsync drops cancellation on sync-completed handlers",
         suggestedFix: "Observe token before fast-path return",
@@ -305,7 +305,7 @@ if (!ContextDb.HasFreshReview(diffHash, TimeSpan.FromHours(2)))
 
 - [.github/agents/dotnet-self-learning-architect.agent.md](.github/agents/dotnet-self-learning-architect.agent.md) — authoritative orchestrator playbook, full Learning Governance text.
 - [.github/agents/code-reviewer.agent.md](.github/agents/code-reviewer.agent.md) — code-reviewer contract and output shape.
-- [.cursor/skills/context-db-schema/SKILL.md](.cursor/skills/context-db-schema/SKILL.md) — full `ContextDb.csx` helper reference.
+- [.claude/skills/context-db-schema/SKILL.md](.claude/skills/context-db-schema/SKILL.md) — full `ContextDb.csx` helper reference.
 - [.github/Lessons/2026-03-19-servicecollectionextensions-options-validation-review.md](.github/Lessons/2026-03-19-servicecollectionextensions-options-validation-review.md) — canonical lesson example.
 - [.github/Memories/servicecollectionextensions-options-validation-risks.md](.github/Memories/servicecollectionextensions-options-validation-risks.md) — canonical memory example.
 - [AGENTS.md](AGENTS.md) — repo-level agent guide.

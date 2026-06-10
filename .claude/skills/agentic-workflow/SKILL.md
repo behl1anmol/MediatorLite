@@ -144,10 +144,10 @@ When creating a lesson, also log the mistake row:
 ContextDb.LogMistake(
     agent:      "backend-developer",
     category:   "review",
-    summary:    "FirstOrDefault silently drops multi-interface behavior registrations",
-    rootCause:  "Selection projected to a single interface",
-    fix:        "Introduced PipelineBehaviorTypeResolver",
-    lessonFile: ".github/Lessons/2026-03-19-servicecollectionextensions-options-validation-review.md");
+    summary:    "Simple-request benchmark secretly ran 3 open-generic behaviors",
+    rootCause:  "Open-generic behaviors expand to every request type at compile time",
+    fix:        "Per-scenario request types with closed behaviors (0/1/3)",
+    lessonFile: ".github/Lessons/2026-06-10-benchmark-parity-open-generic-behaviors.md");
 ```
 
 ## Memory template

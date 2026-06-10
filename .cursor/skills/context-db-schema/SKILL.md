@@ -1,14 +1,14 @@
 ---
 name: context-db-schema
-description: Read and write `.cursor/db/session.sqlite` correctly via `.cursor/lib/ContextDb.csx`. Walks every table in the schema (sessions, agent_messages, plans, decisions, mistakes, reviews, sprint_backlog, hook_events), documents every helper method with a runnable dotnet-script example, explains the `MEDIATORLITE_SESSION_ID` env var contract, the WAL journal mode + `foreign_keys = ON` pragmas, and shows how a Task-tool-spawned subagent can issue a one-shot `.csx` query. Use when a hook, subagent, or tool needs to persist cross-chat context or audit prior sessions.
-triggers: SQLite context, session database, ContextDb, agent memory, cross-chat persistence, agent_messages, log decision, log mistake, log review, snapshot plan, sprint backlog, hook_events, MEDIATORLITE_SESSION_ID, .cursor/db/session.sqlite, ContextDb.csx, dotnet-script, schema.sql
+description: Read and write `.claude/db/session.sqlite` correctly via `.claude/lib/ContextDb.csx`. Walks every table in the schema (sessions, agent_messages, plans, decisions, mistakes, reviews, sprint_backlog, hook_events), documents every helper method with a runnable dotnet-script example, explains the `MEDIATORLITE_SESSION_ID` env var contract, the WAL journal mode + `foreign_keys = ON` pragmas, and shows how a Task-tool-spawned subagent can issue a one-shot `.csx` query. Use when a hook, subagent, or tool needs to persist cross-chat context or audit prior sessions.
+triggers: SQLite context, session database, ContextDb, agent memory, cross-chat persistence, agent_messages, log decision, log mistake, log review, snapshot plan, sprint backlog, hook_events, MEDIATORLITE_SESSION_ID, .claude/db/session.sqlite, ContextDb.csx, dotnet-script, schema.sql
 ---
 
 # Context DB Schema & `ContextDb.csx`
 
 ## Purpose
 
-Every MediatorLite agent, hook, and subagent that needs durable cross-chat memory reads and writes a single SQLite database at `.cursor/db/session.sqlite`. The schema lives in [.cursor/db/schema.sql](.cursor/db/schema.sql) and is applied idempotently by [.cursor/lib/ContextDb.csx](.cursor/lib/ContextDb.csx) on first use. This skill is the canonical reference for both.
+Every MediatorLite agent, hook, and subagent that needs durable cross-chat memory reads and writes a single SQLite database at `.claude/db/session.sqlite`. The schema lives in [.claude/db/schema.sql](.claude/db/schema.sql) and is applied idempotently by [.claude/lib/ContextDb.csx](.claude/lib/ContextDb.csx) on first use. This skill is the canonical reference for both.
 
 **Do not hand-roll Microsoft.Data.Sqlite connection strings, CREATE TABLE statements, or ad-hoc ISO-8601 formatting in hook scripts.** Always use the helpers in `ContextDb.csx`.
 
@@ -22,9 +22,9 @@ Every MediatorLite agent, hook, and subagent that needs durable cross-chat memor
 
 ## Entry points
 
-- Schema: [.cursor/db/schema.sql](.cursor/db/schema.sql)
-- Helpers: [.cursor/lib/ContextDb.csx](.cursor/lib/ContextDb.csx)
-- Database file (created on first run): `.cursor/db/session.sqlite` (+ WAL/SHM siblings).
+- Schema: [.claude/db/schema.sql](.claude/db/schema.sql)
+- Helpers: [.claude/lib/ContextDb.csx](.claude/lib/ContextDb.csx)
+- Database file (created on first run): `.claude/db/session.sqlite` (+ WAL/SHM siblings).
 - Every `.csx` hook starts with:
   ```csharp
   #load "../lib/ContextDb.csx"
@@ -43,11 +43,11 @@ Every MediatorLite agent, hook, and subagent that needs durable cross-chat memor
 
 ## Schema walkthrough
 
-Full source: [.cursor/db/schema.sql](.cursor/db/schema.sql).
+Full source: [.claude/db/schema.sql](.claude/db/schema.sql).
 
 ### `sessions`
 
-```18:29:.cursor/db/schema.sql
+```18:29:.claude/db/schema.sql
 CREATE TABLE IF NOT EXISTS sessions (
     id            TEXT    PRIMARY KEY,           -- UUID v4, also exported as MEDIATORLITE_SESSION_ID
     started_at    TEXT    NOT NULL,              -- ISO-8601 UTC
@@ -66,7 +66,7 @@ One row per chat. Owned by the orchestrator; hooks call `EnsureSession()` to laz
 
 ### `agent_messages`
 
-```36:47:.cursor/db/schema.sql
+```36:47:.claude/db/schema.sql
 CREATE TABLE IF NOT EXISTS agent_messages (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id  TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -85,7 +85,7 @@ Significant inter-agent exchanges. The `beforeTurn` hook rehydrates these into t
 
 ### `plans`
 
-```53:65:.cursor/db/schema.sql
+```53:65:.claude/db/schema.sql
 CREATE TABLE IF NOT EXISTS plans (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id  TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -102,7 +102,7 @@ Snapshots of plan-mode artefacts. Mirrored by `afterPlanCreation`.
 
 ### `decisions`
 
-```70:78:.cursor/db/schema.sql
+```70:78:.claude/db/schema.sql
 CREATE TABLE IF NOT EXISTS decisions (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id  TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -118,7 +118,7 @@ Lightweight ADRs — any agent may append.
 
 ### `mistakes`
 
-```86:96:.cursor/db/schema.sql
+```86:96:.claude/db/schema.sql
 CREATE TABLE IF NOT EXISTS mistakes (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id   TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -136,7 +136,7 @@ Populated by `onAgentError`. Each row should eventually reference a `.github/Les
 
 ### `reviews`
 
-```105:115:.cursor/db/schema.sql
+```105:115:.claude/db/schema.sql
 CREATE TABLE IF NOT EXISTS reviews (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id      TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -154,7 +154,7 @@ Code-reviewer findings. The `autoreview` hook uses `diff_hash` to cache reviews.
 
 ### `sprint_backlog`
 
-```123:132:.cursor/db/schema.sql
+```123:132:.claude/db/schema.sql
 CREATE TABLE IF NOT EXISTS sprint_backlog (
     id                   INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id           TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -171,7 +171,7 @@ Scrum-master's work queue.
 
 ### `hook_events`
 
-```140:149:.cursor/db/schema.sql
+```140:149:.claude/db/schema.sql
 CREATE TABLE IF NOT EXISTS hook_events (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id   TEXT    NULL REFERENCES sessions(id) ON DELETE SET NULL,
@@ -188,11 +188,11 @@ Audit trail. `session_id` is nullable (`ON DELETE SET NULL`) so hook events surv
 
 ## Helper method reference
 
-All helpers live on `public static class ContextDb` in [.cursor/lib/ContextDb.csx](.cursor/lib/ContextDb.csx). Every example below is a complete `.csx` file you can run with `dotnet script` from the repo root.
+All helpers live on `public static class ContextDb` in [.claude/lib/ContextDb.csx](.claude/lib/ContextDb.csx). Every example below is a complete `.csx` file you can run with `dotnet script` from the repo root.
 
 ### `EnsureSession()`
 
-```110:130:.cursor/lib/ContextDb.csx
+```110:130:.claude/lib/ContextDb.csx
     public static string EnsureSession(string? userRequest = null, string? branch = null)
     {
         var sid = Environment.GetEnvironmentVariable("MEDIATORLITE_SESSION_ID");
@@ -202,15 +202,15 @@ All helpers live on `public static class ContextDb` in [.cursor/lib/ContextDb.cs
 ```
 
 ```csx
-#load ".cursor/lib/ContextDb.csx"
-var sid = ContextDb.EnsureSession(userRequest: "Refactor NotificationPublisher");
+#load ".claude/lib/ContextDb.csx"
+var sid = ContextDb.EnsureSession(userRequest: "Refactor SourceGeneratedMediator");
 Console.WriteLine($"session = {sid}");
 ```
 
 ### `WriteMessage(agent, role, content, target?)`
 
 ```csx
-#load ".cursor/lib/ContextDb.csx"
+#load ".claude/lib/ContextDb.csx"
 ContextDb.WriteMessage(
     agent:  "backend-developer",
     role:   "handoff",
@@ -223,7 +223,7 @@ Roles used in practice: `request`, `response`, `handoff`, `finding`.
 ### `ReadRecent(limit = 20, sessionId?)`
 
 ```csx
-#load ".cursor/lib/ContextDb.csx"
+#load ".claude/lib/ContextDb.csx"
 foreach (var m in ContextDb.ReadRecent(10))
     Console.WriteLine($"{m.Ts} [{m.Agent}/{m.Role}] {m.Content}");
 ```
@@ -233,9 +233,9 @@ Returns the last N rows for the current session (ordered ascending after an inte
 ### `SnapshotPlan(title, path, body, createdBy?, status?)`
 
 ```csx
-#load ".cursor/lib/ContextDb.csx"
+#load ".claude/lib/ContextDb.csx"
 using System.IO;
-var path = ".cursor/plans/compile-time_logging_tracing_migration_c8fb2d62.plan.md";
+var path = ".claude/plans/compile-time_logging_tracing_migration_c8fb2d62.plan.md";
 ContextDb.SnapshotPlan(
     title:     "Compile-time logging/tracing migration",
     path:      path,
@@ -247,7 +247,7 @@ ContextDb.SnapshotPlan(
 ### `LogDecision(topic, choice, rationale, agent?)`
 
 ```csx
-#load ".cursor/lib/ContextDb.csx"
+#load ".claude/lib/ContextDb.csx"
 ContextDb.LogDecision(
     topic:     "notification-strategy",
     choice:    "Sequential",
@@ -258,13 +258,13 @@ ContextDb.LogDecision(
 ### `LogMistake(agent, category, summary, rootCause?, fix?, lessonFile?)`
 
 ```csx
-#load ".cursor/lib/ContextDb.csx"
+#load ".claude/lib/ContextDb.csx"
 var id = ContextDb.LogMistake(
     agent:      "backend-developer",
     category:   "build",
-    summary:    "Warnings-as-errors tripped on nullable ref return in Mediator.cs",
-    rootCause:  "Missed non-null assertion on the resolved dispatcher.",
-    fix:        "Added `!` after GetRequiredService<ISourceGeneratedMediator>().",
+    summary:    "Warnings-as-errors tripped on nullable ref return in SourceGeneratedMediator",
+    rootCause:  "Missed non-null assertion on the resolved handler.",
+    fix:        "Added `!` after GetRequiredService<IRequestHandler<,>>().",
     lessonFile: ".github/Lessons/2026-04-18-nullable-dispatcher.md");
 Console.WriteLine($"mistake row id = {id}");
 ```
@@ -272,9 +272,9 @@ Console.WriteLine($"mistake row id = {id}");
 ### `LogReview(target, severity, finding, suggestedFix?, diffHash?, reviewer?)`
 
 ```csx
-#load ".cursor/lib/ContextDb.csx"
+#load ".claude/lib/ContextDb.csx"
 ContextDb.LogReview(
-    target:       "src/MediatorLite/Internal/Mediator.cs",
+    target:       "src/MediatorLite/Internal/ThrowingMediator.cs",
     severity:     "Medium",
     finding:      "PublishAsync swallows OperationCanceledException on sequential path.",
     suggestedFix: "Rethrow when cancellationToken.IsCancellationRequested",
@@ -284,7 +284,7 @@ ContextDb.LogReview(
 ### `HasFreshReview(diffHash, window)`
 
 ```csx
-#load ".cursor/lib/ContextDb.csx"
+#load ".claude/lib/ContextDb.csx"
 var fresh = ContextDb.HasFreshReview("sha256-abc123…", TimeSpan.FromHours(6));
 Console.WriteLine(fresh ? "cached review still valid" : "need a fresh review");
 ```
@@ -294,7 +294,7 @@ Used by the autoreview hook to avoid re-reviewing an unchanged diff within a tim
 ### `LogHookEvent(hookName, eventType, outcome, durationMs?, payload?)`
 
 ```csx
-#load ".cursor/lib/ContextDb.csx"
+#load ".claude/lib/ContextDb.csx"
 var sw = System.Diagnostics.Stopwatch.StartNew();
 try
 {
@@ -314,7 +314,7 @@ catch (Exception ex)
 ### `AddBacklogItem(story, acceptance, assignedAgent?, priority?)`
 
 ```csx
-#load ".cursor/lib/ContextDb.csx"
+#load ".claude/lib/ContextDb.csx"
 var id = ContextDb.AddBacklogItem(
     story:         "Add cancellation-token propagation tests for PublishAsync",
     acceptance:    "Given a cancelled token, PublishAsync must throw OperationCanceledException before the second handler runs.",
@@ -326,7 +326,7 @@ Console.WriteLine($"backlog item {id}");
 ### `Vacuum()` / `CloseSession(id, status?)`
 
 ```csx
-#load ".cursor/lib/ContextDb.csx"
+#load ".claude/lib/ContextDb.csx"
 ContextDb.CloseSession(Environment.GetEnvironmentVariable("MEDIATORLITE_SESSION_ID")!, status: "closed");
 ContextDb.Vacuum();
 ```
@@ -338,7 +338,7 @@ Run only at the end of long sessions — `VACUUM` rewrites the file.
 A subagent spawned via the Task tool receives a minimal prompt. If you need it to pull the last N messages to ground its work, include this snippet in its brief:
 
 ```csx
-#load ".cursor/lib/ContextDb.csx"
+#load ".claude/lib/ContextDb.csx"
 foreach (var m in ContextDb.ReadRecent(10))
     Console.WriteLine($"{m.Ts} {m.Agent} {m.Role}: {m.Content}");
 ```
@@ -348,7 +348,7 @@ Because `EnsureSession()` reads `MEDIATORLITE_SESSION_ID` from the environment, 
 ## Common tasks
 
 1. **Bootstrap the DB from a clean workspace.**
-   Any helper call (`EnsureSession()` is the simplest) will create `.cursor/db/session.sqlite` and apply the schema.
+   Any helper call (`EnsureSession()` is the simplest) will create `.claude/db/session.sqlite` and apply the schema.
 
 2. **Append a handoff between agents.**
    `ContextDb.WriteMessage("backend-developer", "handoff", "...", target: "tester")`.
@@ -389,7 +389,7 @@ Because `EnsureSession()` reads `MEDIATORLITE_SESSION_ID` from the environment, 
 
 ## Related
 
-- [.cursor/db/schema.sql](.cursor/db/schema.sql) — source of truth for the table shape.
-- [.cursor/lib/ContextDb.csx](.cursor/lib/ContextDb.csx) — the only helper you should use.
+- [.claude/db/schema.sql](.claude/db/schema.sql) — source of truth for the table shape.
+- [.claude/lib/ContextDb.csx](.claude/lib/ContextDb.csx) — the only helper you should use.
 - [.github/agents/dotnet-self-learning-architect.agent.md](.github/agents/dotnet-self-learning-architect.agent.md) — role that owns the session lifecycle.
-- [.cursor/skills/agentic-workflow/SKILL.md](.cursor/skills/agentic-workflow/SKILL.md) — shows how these helpers plug into the multi-agent flow.
+- [.claude/skills/agentic-workflow/SKILL.md](.claude/skills/agentic-workflow/SKILL.md) — shows how these helpers plug into the multi-agent flow.

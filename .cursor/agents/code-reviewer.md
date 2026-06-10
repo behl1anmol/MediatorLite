@@ -103,8 +103,8 @@ Reference: [`.cursor/db/schema.sql`](../db/schema.sql).
    2. Concurrency, lifetime, and DI registration issues.
    3. Notification execution/error strategy risks.
    4. Pipeline behavior order and short-circuit semantics.
-   5. Source-generated vs reflection fallback parity (and: source-gen-only dispatch per
-      rule 10).
+   5. Generated-dispatch integrity: switch arms / `Send_*` / `Publish_*` aligned with
+      registrations and the `*Count` constants (source-gen-only dispatch per rule 10).
    6. Security and performance risks.
    7. Test coverage gaps for changed logic.
    8. Style/readability issues that materially affect maintainability.
@@ -177,14 +177,15 @@ diagnostic counts in the empty-assembly fallback").
 ### Critical — invariant regression
 
 > Severity: Critical
-> Location: `src/MediatorLite/Internal/Mediator.cs:52`
-> Issue: `SendAsync<TResponse>` reintroduces `requestType.MakeGenericType(...)`, reviving a
-> reflection-based dispatch path.
-> Why it matters: Rule 10 is the load-bearing invariant of the v2 architecture; this change
-> breaks source-generated parity and the O(1) dispatch property.
-> Suggested fix: revert to
-> `_sourceGeneratedMediator.GetDispatcher(requestType)` and move any additional logic into
-> the generator.
+> Location: `src/MediatorLite/Configuration/ServiceCollectionExtensions.cs:42`
+> Issue: a new runtime `Mediator` wrapper class is registered between `IMediator` and the
+> generated `SourceGeneratedMediator`, using `requestType.MakeGenericType(...)` — reviving a
+> reflection-based dispatch layer.
+> Why it matters: Rule 10 is the load-bearing invariant of the v2 architecture; the generated
+> `SourceGeneratedMediator` must implement `IMediator` directly via the typed switch, with no
+> wrapper, no dictionary table, and no boxing.
+> Suggested fix: delete the wrapper and move any additional logic into the generator's
+> emitted `Send_*` / `Publish_*` methods.
 
 ### High — generator parity
 

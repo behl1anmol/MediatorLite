@@ -82,5 +82,6 @@
 - Keep the codified invariants in `.claude/rules/10-dispatch-invariants.md` (Rules
   1–4) and `.claude/rules/00-project-conventions.md` (async surface) in sync with
   any change here.
-- `PipelineBehaviorTypeResolver.cs` is now orphaned (no source references it on the
-  v2 dispatch path) — do not wire new code to it; treat it as legacy pending removal.
+- `PipelineBehaviorTypeResolver.cs` (v1 runtime behavior-type resolution) was deleted —
+  behavior discovery/expansion belongs exclusively to the source generator
+  (`ExpandBehaviors`); do not reintroduce runtime resolution.

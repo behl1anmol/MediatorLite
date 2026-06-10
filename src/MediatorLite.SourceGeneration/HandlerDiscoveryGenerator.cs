@@ -849,8 +849,9 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// Generates the v2 ISourceGeneratedMediator implementation with O(1) dispatch tables
-    /// and unrolled pipelines for maximum performance.
+    /// Generates the SourceGeneratedMediator class, which implements IMediator directly:
+    /// a type-pattern switch over the discovered message types dispatching to fully-typed
+    /// unrolled ValueTask pipelines (no dictionaries, no boxing, no runtime wrapper).
     /// </summary>
     private static void GenerateSourceGeneratedMediator(
         SourceProductionContext context,

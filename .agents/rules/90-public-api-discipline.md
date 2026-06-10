@@ -1,7 +1,3 @@
----
-activation: always
----
-
 # Public API Discipline
 
 `MediatorLite.Abstractions` is the consumer-facing surface. Everything in
@@ -18,22 +14,25 @@ Public interfaces, records, attributes, delegates, and enums belong in
 
 Current abstraction surface (do not reorganize without a memory note):
 
-- `Abstractions/IMediator.cs`
+- `Abstractions/IMediator.cs` (ValueTask-based; implemented by the generated
+  `SourceGeneratedMediator`)
 - `Abstractions/IRequest.cs`, `IRequestHandler.cs`
 - `Abstractions/INotification.cs`, `INotificationHandler.cs`
 - `Abstractions/IPipelineBehavior.cs`
-- `Abstractions/ISourceGeneratedMediator.cs`
 - `Abstractions/Attributes.cs`
 - `Abstractions/Unit.cs`
 - `Validation/IValidator.cs`, `Validation/ValidationException.cs`,
   `Validation/Models/*.cs`
 
+(`ISourceGeneratedMediator`, `RequestDispatcher`, and `NotificationPublisher`
+were deleted in the v2 typed-dispatch rewrite — do not reintroduce them.)
+
 ## Rule 2 — `AddMediatorLite()` signature is frozen
 
-```37:41:src/MediatorLite/Configuration/ServiceCollectionExtensions.cs
+```csharp
     public static IServiceCollection AddMediatorLite(this IServiceCollection services)
     {
-        services.AddTransient<IMediator, Mediator>();
+        services.TryAddScoped<IMediator, ThrowingMediator>();
         return services;
     }
 ```
@@ -92,9 +91,10 @@ change.
 
 ## Rule 5 — Internal types stay internal
 
-`src/MediatorLite/Internal/Mediator.cs` is `internal sealed`. Do not expose
-it publicly, do not subclass it in consumers. The only public entry is
-`IMediator`, which is resolved from DI.
+`src/MediatorLite/Internal/ThrowingMediator.cs` is `internal sealed`. Do not
+expose it publicly, do not subclass it in consumers. The only public entry is
+`IMediator`, which is resolved from DI (and implemented by the generated
+`SourceGeneratedMediator`).
 
 ## Rule 6 — Generated namespace is reserved
 

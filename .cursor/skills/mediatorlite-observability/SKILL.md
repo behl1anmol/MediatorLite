@@ -13,7 +13,7 @@ MediatorLite emits **two** orthogonal observability signals at dispatch boundari
 1. **Structured logs** under the fixed logger category `MediatorLite.IMediator` at `LogDebug`.
 2. **Distributed traces** via `System.Diagnostics.ActivitySource` named `"MediatorLite"`, with a small set of well-known tags.
 
-Both are **emitted by the source generator directly into each generated `Pipeline_*` / `Publish_*` method**. There are no pipeline behaviors, no runtime branches, and no allocations when the consumer has opted out — the generator simply does not emit the corresponding statements. This skill teaches you how to reason about, configure, filter, and opt out of these two surfaces.
+Both are **emitted by the source generator directly into each generated `Send_*` / `Publish_*` method**. There are no pipeline behaviors, no runtime branches, and no allocations when the consumer has opted out — the generator simply does not emit the corresponding statements. This skill teaches you how to reason about, configure, filter, and opt out of these two surfaces.
 
 ## When to use
 
@@ -99,7 +99,7 @@ using MediatorLite;
 [assembly: DisableMediatorTracing]
 ```
 
-After applying, rebuild and grep the generated `*.g.cs` output for `__logger` — it should be gone for every `Pipeline_*` / `Publish_*` method.
+After applying, rebuild and grep the generated `*.g.cs` output for `__logger` — it should be gone for every `Send_*` / `Publish_*` method.
 
 ### Custom logging behavior
 
@@ -294,7 +294,7 @@ ActivitySource.AddActivityListener(listener);
 ## Related
 
 - [docs/observability.md](docs/observability.md) — end-user reference.
-- [.cursor/skills/mediatorlite-abstractions/SKILL.md](.cursor/skills/mediatorlite-abstractions/SKILL.md) — for the attribute surface (DisableMediatorLogging / DisableMediatorTracing).
+- [.claude/skills/mediatorlite-abstractions/SKILL.md](.claude/skills/mediatorlite-abstractions/SKILL.md) — for the attribute surface (DisableMediatorLogging / DisableMediatorTracing).
 - [.github/copilot-instructions.md](.github/copilot-instructions.md) — short architecture map.
 - [docs/pipeline-behaviors.md](docs/pipeline-behaviors.md) — how to author custom behaviors that complement built-in emissions.
 - [tests/MediatorLite.Benchmarks/AssemblyInfo.cs](tests/MediatorLite.Benchmarks/AssemblyInfo.cs) — canonical opt-out pattern.

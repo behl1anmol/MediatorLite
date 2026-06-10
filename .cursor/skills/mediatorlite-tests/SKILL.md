@@ -38,7 +38,7 @@ triggers: MediatorLite tests, xUnit, FluentAssertions, TestTypes, source-gen tes
 
 `MediatorTests.cs` demonstrates the exact DI bootstrap every source-gen test uses:
 
-```32:48:tests/MediatorLite.Tests/SourceGeneration/MediatorTests.cs
+```31:50:tests/MediatorLite.Tests/SourceGeneration/MediatorTests.cs
     public void AddGeneratedHandlers_RegistersSourceGeneratedMediator()
     {
         // Arrange
@@ -50,13 +50,17 @@ triggers: MediatorLite tests, xUnit, FluentAssertions, TestTypes, source-gen tes
         var provider = services.BuildServiceProvider();
 
         // Act
-        var sourceGenMediator = provider.GetService<ISourceGeneratedMediator>();
+        var mediator = provider.GetService<IMediator>();
 
         // Assert
-        sourceGenMediator.Should().NotBeNull(
-            "AddGeneratedHandlers should register ISourceGeneratedMediator for zero-reflection dispatch");
+        mediator.Should().NotBeNull(
+            "AddGeneratedHandlers should register the source-generated IMediator for zero-reflection dispatch");
+        mediator.Should().BeOfType<SourceGeneratedMediator>(
+            "the generated mediator must win over the AddMediatorLite() diagnostic fallback");
     }
 ```
+
+The generated `MediatorLite.Generated.SourceGeneratedMediator` *is* the `IMediator` — there is no separate `ISourceGeneratedMediator` to resolve. The test imports `using MediatorLite.Generated;` for `SourceGeneratedMediator`.
 
 `AddLogging()` is required — the emitted pipeline resolves `ILogger<IMediator>` when logging is enabled (default).
 
@@ -331,7 +335,7 @@ public class ValidatedCommandCustomValidator : IValidator<ValidatedCommand>
 **Don't:**
 - Don't add `[MediatorGeneration(Skip = true)]` to new test types — the attribute is obsolete (still honored for legacy compatibility, see the generator's `GetHandlerInfo`).
 - Don't share mutable instance state between handlers; use static fields + `Reset()`.
-- Don't expect a `Mediator` without `AddMediatorLite()` — DI resolution throws with a specific message documented in [Mediator.cs](src/MediatorLite/Internal/Mediator.cs).
+- Don't expect dispatch without `AddGeneratedHandlers()` — without it the only `IMediator` is the [ThrowingMediator](src/MediatorLite/Internal/ThrowingMediator.cs) fallback (registered by `AddMediatorLite()`), which throws with a specific setup-guidance message on every dispatch.
 - Don't put `[NotificationExecution]` on a notification handler — the generator only reads it off the `INotification` implementation.
 
 ## Common tasks

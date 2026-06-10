@@ -1,186 +1,120 @@
 ---
 name: mediatorlite-core
-description: Runtime implementation for MediatorLite -- Mediator.cs internals, AddMediatorLite() DI extension, PipelineBehaviorTypeResolver, NullSourceGeneratedMediator fallback, MediatorDiagnostics (ActivitySource + DiagnosticListener), and the Validation subsystem (ValidationBehavior + DataAnnotationsValidator). Use when touching dispatch, DI registration, diagnostics, or the validation runtime.
-triggers: Mediator.cs, AddMediatorLite, dispatch, ISourceGeneratedMediator runtime, ServiceCollectionExtensions, PipelineBehaviorTypeResolver, MediatorDiagnostics, MediatorActivitySource, NullSourceGeneratedMediator, ValidationBehavior, DataAnnotationsValidator, MediatorLite runtime
+description: Runtime implementation for MediatorLite -- AddMediatorLite() DI extension, the ThrowingMediator diagnostic fallback, the generated SourceGeneratedMediator (implements IMediator via ValueTask typed-switch dispatch), MediatorDiagnostics (ActivitySource + DiagnosticListener), and the Validation subsystem (ValidationBehavior + DataAnnotationsValidator). Use when touching dispatch, DI registration, diagnostics, or the validation runtime.
+triggers: AddMediatorLite, dispatch, SourceGeneratedMediator, ThrowingMediator, ValueTask dispatch, ServiceCollectionExtensions, MediatorDiagnostics, MediatorActivitySource, ValidationBehavior, DataAnnotationsValidator, MediatorLite runtime
 ---
 
 # MediatorLite (Core Runtime)
 
 ## Purpose
 
-`MediatorLite` (project name, not the solution) is the runtime library consumers reference. It contains **only** the `IMediator` implementation, DI extension, helper type resolvers, diagnostic sources, and the validation runtime. The dispatch path contains **zero reflection** at call time — the compile-time `ISourceGeneratedMediator` emitted by `MediatorLite.SourceGeneration` owns all type→handler lookup tables, and this project just routes calls through it. Logging and tracing are emitted inline by the generator, not by this project.
+`MediatorLite` (project name, not the solution) is the runtime library consumers reference. It does **not** contain a hand-written `IMediator` implementation — the real `IMediator` is the generated `SourceGeneratedMediator` emitted by `MediatorLite.SourceGeneration`. This project contains the DI extension (`AddMediatorLite()`), the `ThrowingMediator` diagnostic fallback, diagnostic sources, and the validation runtime. The dispatch path contains **zero reflection** at call time — the generated mediator dispatches via a compile-time C# type-pattern switch. Logging and tracing are emitted inline by the generator, not by this project.
 
 ## When to use
 
-- Changing how `IMediator.SendAsync` / `PublishAsync` routes to the source-generated dispatcher.
-- Adding or tweaking `AddMediatorLite()` registrations (for example, swapping lifetimes or registering additional runtime services).
+- Adding or tweaking `AddMediatorLite()` registrations (for example, registering additional runtime services).
+- Understanding the `ThrowingMediator` diagnostic fallback and how the generated mediator supersedes it.
 - Adjusting `ValidationBehavior` ordering semantics or `DataAnnotationsValidator` behavior.
-- Fixing a bug in `PipelineBehaviorTypeResolver` when wiring closed vs open generic behaviors.
 - Renaming or adding OpenTelemetry tags / activity names in `MediatorDiagnostics`.
 
 ## Project location & entry points
 
 - [MediatorLite.csproj](src/MediatorLite/MediatorLite.csproj) — targets `net10.0`, references `Microsoft.Extensions.DependencyInjection.Abstractions 9.0.0` and `Microsoft.Extensions.Logging.Abstractions 9.0.0`, and project-references [MediatorLite.Abstractions.csproj](src/MediatorLite.Abstractions/MediatorLite.Abstractions.csproj).
-- [Mediator.cs](src/MediatorLite/Internal/Mediator.cs) — the `IMediator` implementation.
+- The `IMediator` implementation is **generated** (`SourceGeneratedMediator` in the `MediatorLite.Generated` namespace) — it is not a file in this project. See the mediatorlite-source-generation skill.
 - [ServiceCollectionExtensions.cs](src/MediatorLite/Configuration/ServiceCollectionExtensions.cs) — `AddMediatorLite()` entry point.
-- [NullSourceGeneratedMediator.cs](src/MediatorLite/Internal/NullSourceGeneratedMediator.cs) — fallback `ISourceGeneratedMediator`.
-- [PipelineBehaviorTypeResolver.cs](src/MediatorLite/Configuration/PipelineBehaviorTypeResolver.cs) — helper used by the source generator and by any manual DI registration.
+- [ThrowingMediator.cs](src/MediatorLite/Internal/ThrowingMediator.cs) — diagnostic fallback `IMediator` that throws if no generator ran.
+- ~~`PipelineBehaviorTypeResolver.cs`~~ — **deleted** (v1 runtime behavior-type resolution; the generated mediator unrolls behaviors at compile time, so nothing needs it).
 - [MediatorDiagnostics.cs](src/MediatorLite/Diagnostics/MediatorDiagnostics.cs) — `MediatorActivitySource` (OpenTelemetry) + `DiagnosticListener`.
 - [ValidationBehavior.cs](src/MediatorLite/Validation/ValidationBehavior.cs) — generic pipeline behavior that runs registered `IValidator<T>`s.
 - [DataAnnotationsValidator.cs](src/MediatorLite/Validation/DataAnnotationsValidator.cs) — built-in validator using `System.ComponentModel.DataAnnotations`.
 
 ## Core types / API surface
 
-### `Mediator` — the O(1) dispatcher
+### The generated `SourceGeneratedMediator` — typed-switch dispatch
 
-```21:32:src/MediatorLite/Internal/Mediator.cs
-internal sealed class Mediator : IMediator
+There is **no** hand-written `Mediator.cs` in v2. The generator emits `SourceGeneratedMediator : global::MediatorLite.IMediator` (namespace `MediatorLite.Generated`) which holds a single `IServiceProvider _sp` field and dispatches via a compile-time C# type-pattern switch:
+
+```csharp
+// Emitted shape (MediatorLite.Generated.SourceGeneratedMediator)
+public sealed class SourceGeneratedMediator : global::MediatorLite.IMediator
 {
-    private readonly IServiceProvider _serviceProvider;
-    private readonly ISourceGeneratedMediator _sourceGeneratedMediator;
+    private readonly IServiceProvider _sp;
+    public SourceGeneratedMediator(IServiceProvider serviceProvider) => _sp = serviceProvider;
 
-    public Mediator(
-        IServiceProvider serviceProvider,
-        ISourceGeneratedMediator sourceGeneratedMediator)
+    public ValueTask<TResponse> SendAsync<TResponse>(IRequest<TResponse> request, CancellationToken ct = default)
     {
-        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
-        _sourceGeneratedMediator = sourceGeneratedMediator ?? throw new ArgumentNullException(nameof(sourceGeneratedMediator));
+        switch (request)
+        {
+            case MyQuery r:
+            {
+                var vt = Send_MyQuery(r, ct);                  // ValueTask<MyResult>
+                if (typeof(TResponse) == typeof(MyResult))
+                    return Unsafe.As<ValueTask<MyResult>, ValueTask<TResponse>>(ref vt);
+                return SlowCast<MyResult, TResponse>(vt);      // covariant IRequest<out T> fallback
+            }
+            case null: throw new ArgumentNullException(nameof(request));
+            default:   throw new InvalidOperationException(/* no handler */);
+        }
     }
-```
-
-`SendAsync` looks up the generated `RequestDispatcher`, invokes it, and casts the `object` result back to `TResponse` (the boxing tradeoff documented in the abstractions skill):
-
-```34:50:src/MediatorLite/Internal/Mediator.cs
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public async Task<TResponse> SendAsync<TResponse>(
-        IRequest<TResponse> request,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-
-        var requestType = request.GetType();
-        var dispatcher = _sourceGeneratedMediator.GetDispatcher(requestType)
-            ?? throw new InvalidOperationException(
-                $"No handler registered for request type {requestType.FullName}. " +
-                $"Ensure a handler implementing IRequestHandler<{requestType.Name}, {typeof(TResponse).Name}> " +
-                "is registered and AddGeneratedHandlers() is called.");
-
-        var result = await dispatcher(_serviceProvider, request, cancellationToken).ConfigureAwait(false);
-        return (TResponse)result;
-    }
-```
-
-`PublishAsync` silently returns `Task.CompletedTask` when no handler is registered for a notification — the test [PublishAsync_WithNoHandlers_CompletesWithoutError](tests/MediatorLite.Tests/SourceGeneration/NotificationTests.cs) verifies this:
-
-```52:64:src/MediatorLite/Internal/Mediator.cs
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Task PublishAsync<TNotification>(
-        TNotification notification,
-        CancellationToken cancellationToken = default)
-        where TNotification : INotification
-    {
-        ArgumentNullException.ThrowIfNull(notification);
-
-        var publisher = _sourceGeneratedMediator.GetPublisher(typeof(TNotification));
-        return publisher is null
-            ? Task.CompletedTask
-            : publisher(_serviceProvider, notification, cancellationToken);
-    }
+    // ...PublishAsync switch + Send_<Type>/Publish_<Type> methods using _sp...
+}
 ```
 
 Key invariants:
-- `Mediator` is marked `[MethodImpl(AggressiveInlining)]` on both hot methods.
-- The dispatcher returns `Task<object>`; the final cast unboxes value-type responses (including `Unit`).
-- The lookup uses `request.GetType()` — **not** `typeof(TRequest)` — so covariant/derived runtime types dispatch correctly even when the caller declares `IRequest<TResponse>`.
+- **No boxing.** Each arm calls a fully typed `Send_<SafeType>(...)` returning `ValueTask<TConcrete>`, converted to `ValueTask<TResponse>` via an identity-guarded `System.Runtime.CompilerServices.Unsafe.As` (the `typeof` guard JIT-folds to a constant). Value-type responses stay typed — there is no `Task<object>` and no `(TResponse)` unbox. v1 boxed; **v2 eliminated it.**
+- **`SlowCast`** is the only fallback, for covariant `IRequest<out T>` dispatch (reference cast, no value-type boxing).
+- **`Send_<SafeType>` per-request methods** are instance methods on `_sp`. A zero-behavior request with diagnostics disabled returns the handler's `ValueTask` directly — **no async state machine**.
+- **`PublishAsync`** has a matching switch over the notification's **runtime type**; `Publish_<SafeType>` methods return `ValueTask`. The `default:` arm returns `default` (no-op) when no handler is registered. Because it matches the runtime type, base/interface-typed publishes dispatch correctly (v1's `typeof(TNotification)` dictionary lookup silently no-oped for those).
+- The `case null:` arm throws `ArgumentNullException` before any handler resolution.
 
 ### `AddMediatorLite()` — DI entry point
 
-```37:41:src/MediatorLite/Configuration/ServiceCollectionExtensions.cs
+```40:47:src/MediatorLite/Configuration/ServiceCollectionExtensions.cs
     public static IServiceCollection AddMediatorLite(this IServiceCollection services)
     {
-        services.AddTransient<IMediator, Mediator>();
+        // TryAdd keeps this order-independent with AddGeneratedHandlers(): the generated
+        // registration uses plain AddScoped, and the container resolves the last IMediator
+        // descriptor, so the generated mediator wins regardless of call order.
+        services.TryAddScoped<IMediator, ThrowingMediator>();
         return services;
     }
 ```
 
-**Transient** is intentional:
-- `Mediator` is stateless; holding it as singleton adds no benefit.
-- Transient matches the conventional lifetime pattern in `Microsoft.Extensions.DependencyInjection` for lightweight dispatchers.
-- The scoped `IServiceProvider` injected into `Mediator` is still used for handler resolution, so transient does not prevent scoped handler resolution.
-- See the workspace rule in [AGENTS.md](AGENTS.md): "the mediator is always registered as `Transient`".
+`AddMediatorLite()` is now an **optional diagnostic fallback**:
+- It registers `ThrowingMediator` via `TryAddScoped<IMediator, ...>`. The real mediator is registered by the generated `AddGeneratedHandlers()` with plain `AddScoped<IMediator, SourceGeneratedMediator>()`.
+- Because the generated registration is unconditional `AddScoped` and the container resolves the **last** `IMediator` descriptor, the generated mediator always wins. The `TryAdd` only takes effect when `AddGeneratedHandlers()` never ran — turning a missing generator into a clear `InvalidOperationException` instead of a resolution failure.
+- **Call order of the two methods no longer matters.** The mediator is **Scoped** (the generated mediator captures the resolving scope's `IServiceProvider`; resolved from the root provider it behaves like a singleton). It is no longer `Transient`.
 
 `AddMediatorLite()` takes **no arguments**. There is no `MediatorOptions` — v2 removed [src/MediatorLite/Configuration/MediatorOptions.cs](src/MediatorLite/Configuration/MediatorOptions.cs) (see git status). All configuration is compile-time via attributes.
 
-### `NullSourceGeneratedMediator` — fallback sentinel
+### `ThrowingMediator` — diagnostic fallback
 
-```8:17:src/MediatorLite/Internal/NullSourceGeneratedMediator.cs
-internal sealed class NullSourceGeneratedMediator : ISourceGeneratedMediator
+```9:26:src/MediatorLite/Internal/ThrowingMediator.cs
+internal sealed class ThrowingMediator : IMediator
 {
-    public static readonly NullSourceGeneratedMediator Instance = new();
+    private const string Message =
+        "No source-generated mediator is registered. Reference the MediatorLite.SourceGeneration " +
+        "analyzer package from the assembly that contains your handlers and call " +
+        "services.AddGeneratedHandlers() so the generated mediator replaces this fallback.";
 
-    private NullSourceGeneratedMediator() { }
+    public ValueTask<TResponse> SendAsync<TResponse>(
+        IRequest<TResponse> request,
+        CancellationToken cancellationToken = default)
+        => throw new InvalidOperationException(Message);
 
-    public RequestDispatcher? GetDispatcher(Type requestType) => null;
-
-    public NotificationPublisher? GetPublisher(Type notificationType) => null;
+    public ValueTask PublishAsync<TNotification>(
+        TNotification notification,
+        CancellationToken cancellationToken = default)
+        where TNotification : INotification
+        => throw new InvalidOperationException(Message);
 }
 ```
 
-This type is used in two places:
-1. Tests that want to exercise `Mediator` without any generated handlers (the singleton `Instance`).
-2. The source-generated `AddGeneratedHandlers` **replaces** any prior `ISourceGeneratedMediator` binding — if no generator runs, resolving `Mediator` will throw the `InvalidOperationException` shown above.
+This type is registered only by `AddMediatorLite()` via `TryAddScoped`. When `AddGeneratedHandlers()` runs (the normal case), the generated `SourceGeneratedMediator` is registered after it and wins resolution, so `ThrowingMediator` never dispatches. If the generator never ran, every dispatch throws the guidance message above.
 
-### `PipelineBehaviorTypeResolver` — behavior interface discovery
+### `PipelineBehaviorTypeResolver` — removed
 
-This helper distinguishes open vs closed behavior types. The source generator uses it when emitting `services.Add*` lines, and manual test code can call it to validate a registration.
-
-```3:18:src/MediatorLite/Configuration/PipelineBehaviorTypeResolver.cs
-internal static class PipelineBehaviorTypeResolver
-{
-    private static readonly Type OpenPipelineBehaviorType = typeof(IPipelineBehavior<,>);
-
-    internal static IReadOnlyList<Type> GetServiceTypesForRegistration(Type behaviorType)
-    {
-        ArgumentNullException.ThrowIfNull(behaviorType);
-
-        if (behaviorType.IsGenericTypeDefinition)
-        {
-            ValidateOpenBehaviorType(behaviorType);
-            return [OpenPipelineBehaviorType];
-        }
-
-        return GetClosedBehaviorInterfacesOrThrow(behaviorType);
-    }
-```
-
-Closed behaviors (e.g. `PlaceOrderAuthorizationBehavior : IPipelineBehavior<PlaceOrderCommand, Unit>`) yield the exact closed interface; open behaviors (`LoggingBehavior<TRequest, TResponse>`) yield the unbound `IPipelineBehavior<,>`.
-
-```67:93:src/MediatorLite/Configuration/PipelineBehaviorTypeResolver.cs
-    internal static void ValidateOpenBehaviorType(Type behaviorType)
-    {
-        ArgumentNullException.ThrowIfNull(behaviorType);
-
-        if (!behaviorType.IsGenericTypeDefinition)
-        {
-            throw new ArgumentException(
-                $"Type {behaviorType.Name} must be an open generic type definition.",
-                "behaviorType");
-        }
-
-        var hasCorrectArity = behaviorType.GetGenericArguments().Length == 2;
-        if (!hasCorrectArity)
-        {
-            throw new ArgumentException(
-                $"Type {behaviorType.Name} must have exactly 2 generic type parameters.",
-                "behaviorType");
-        }
-
-        var implementsPipelineBehavior = behaviorType.GetInterfaces()
-            .Any(IsPipelineBehaviorInterface)
-            .(continued)
-```
-
-`GetClosedBehaviorInterfaceForInvocation` is used if you need to build a runtime pipeline manually (e.g. in a fallback scenario): it resolves the specific `IPipelineBehavior<TRequest, TResponse>` implementation of a closed type.
+This v1 helper (open- vs closed-behavior interface resolution for runtime registration) was deleted: the generated mediator unrolls behaviors itself at compile time, so nothing on the v2 dispatch or registration path needs runtime behavior-type resolution. Do not reintroduce it — behavior discovery/expansion belongs to the source generator (`ExpandBehaviors` in `HandlerDiscoveryGenerator.cs`).
 
 ### `MediatorActivitySource` + `MediatorDiagnostics`
 
@@ -346,16 +280,16 @@ public class DataAnnotationsValidator<TRequest> : IValidator<TRequest>
 ## Patterns & invariants
 
 **Do:**
-- Call `services.AddGeneratedHandlers().AddMediatorLite()` in that order. `AddGeneratedHandlers()` is provided by the generator and registers `ISourceGeneratedMediator` + all handlers/behaviors/validators; `AddMediatorLite()` only adds the `IMediator` facade.
-- Keep `Mediator.cs` small. All the heavy lifting (dispatch tables, pipeline composition, logging, tracing) is emitted by the generator.
+- Call `services.AddGeneratedHandlers().AddMediatorLite()`. `AddGeneratedHandlers()` is provided by the generator and registers `IMediator` (the generated `SourceGeneratedMediator`) + all handlers/behaviors/validators; `AddMediatorLite()` only adds the optional `ThrowingMediator` diagnostic fallback. Call order is interchangeable.
+- Let the generator do all the heavy lifting (typed-switch dispatch, pipeline composition, logging, tracing). There is no hand-written mediator to keep small.
 - Let `ValidationBehavior` aggregate errors across validators — that is intentional.
 - Use `MediatorActivitySource.Source` as the subscription target in OpenTelemetry setup (`builder.AddSource("MediatorLite")`).
 
 **Don't:**
-- Don't add reflection-based dispatch. v2 deliberately removed it; see the `Mediator.cs` remarks.
-- Don't register `IMediator` manually — always go through `AddMediatorLite()`.
-- Don't change `Mediator` to `Scoped` or `Singleton` without coordinating with generated code. The injected `IServiceProvider` is the scope root; the mediator being transient avoids any captive-dependency issues.
-- Don't throw on `PublishAsync` when there are no handlers. Returning `Task.CompletedTask` is a behavioral contract verified in tests.
+- Don't add reflection-based dispatch. v2 dispatch is a compile-time typed switch in the generated mediator.
+- Don't register `IMediator` manually — `AddGeneratedHandlers()` registers it.
+- Don't expect `ThrowingMediator` to dispatch when the generator ran — the generated `SourceGeneratedMediator` always wins resolution (last `AddScoped` descriptor).
+- Don't return an error from `PublishAsync` when there are no handlers. The generated switch's `default:` arm returns `default` (a no-op) — a behavioral contract verified in tests.
 - Don't introduce a `MediatorOptions` class. The file was deliberately deleted.
 
 ## Common tasks
@@ -378,25 +312,25 @@ public class DataAnnotationsValidator<TRequest> : IValidator<TRequest>
    1. `services.AddTransient<IValidator<MyCommand>, MyValidator>();`
    2. Also register `ValidationBehavior<,>` for the request — normally the generator does this, but if you're mixing manual DI it must live in `IPipelineBehavior<MyCommand, TResponse>`.
 
-5. **Unit-test the dispatch path without the generator**
-   1. Build the mediator directly: `var mediator = new Mediator(serviceProvider, NullSourceGeneratedMediator.Instance);`
-   2. `SendAsync` will throw `InvalidOperationException` — useful to verify error messaging.
-   3. For positive tests, always let the test project's source generator run (it is already wired — see [tests/MediatorLite.Tests/MediatorLite.Tests.csproj](tests/MediatorLite.Tests/MediatorLite.Tests.csproj)).
+5. **Verify the missing-generator diagnostic**
+   1. Register only `services.AddMediatorLite()` (no `AddGeneratedHandlers()`), build the provider, and resolve `IMediator` — you get the `ThrowingMediator` fallback.
+   2. `SendAsync` / `PublishAsync` then throw `InvalidOperationException` with the "call services.AddGeneratedHandlers()" guidance — useful to verify error messaging.
+   3. For positive tests, always let the test project's source generator run (it is already wired — see [tests/MediatorLite.Tests/MediatorLite.Tests.csproj](tests/MediatorLite.Tests/MediatorLite.Tests.csproj)). Resolved `IMediator` will be `MediatorLite.Generated.SourceGeneratedMediator`.
 
 ## Pitfalls & gotchas
 
-- **`request.GetType()` vs `typeof(TRequest)`**: dispatch uses the runtime type, which matters if callers declare the parameter as `IRequest<T>`. Test `MediatorTests` uses `mediator.SendAsync(new Ping("hi"))` — the generic is inferred from the record and then `GetType()` resolves the closed dispatcher.
-- **Null requests on `PublishAsync`** throw `ArgumentNullException`, **not** `ArgumentException`. Tests in [MediatorTests.cs](tests/MediatorLite.Tests/SourceGeneration/MediatorTests.cs) assert this precisely.
-- **`PipelineBehaviorTypeResolver.ValidateOpenBehaviorType` throws `ArgumentException("Type X must be an open generic...")`** — note the literal `"behaviorType"` parameter name (no `nameof` is used), so downstream consumers that catch on the parameter name should use the string literal.
+- **Runtime-type dispatch**: the generated switch matches the request/notification's **runtime type**, which matters if callers declare the parameter as `IRequest<T>` / `INotification`. Notification dispatch by runtime type is why base/interface-typed publishes now dispatch (they silently no-oped in v1).
+- **Null requests on `PublishAsync`** throw `ArgumentNullException` from the switch's `case null:` arm. Tests in [MediatorTests.cs](tests/MediatorLite.Tests/SourceGeneration/MediatorTests.cs) assert this precisely.
+- **`PipelineBehaviorTypeResolver` was deleted** — do not reintroduce runtime behavior-type resolution; the generated mediator unrolls behaviors itself at compile time.
 - **`MediatorOptions.cs` is deleted** (see git status `D src/MediatorLite/Configuration/MediatorOptions.cs`). Do not re-introduce it.
-- **`ValidationBehavior.Validators` is stored once** in the constructor (`validators.ToList()`). If a scoped container registers different validators per scope, a transient mediator still re-resolves per scope — this works correctly only because `ValidationBehavior` itself is transient via DI.
+- **`ValidationBehavior.Validators` is stored once** in the constructor (`validators.ToList()`). Scoped handler/validator lifetimes still work because the generated mediator is Scoped and resolves them from the resolving scope's `IServiceProvider`.
 - **`ValidationException` is thrown inside `await validator.ValidateAsync(...)`**; it does **not** wrap individual validator errors — all errors flatten into one exception.
 - **`DiagnosticListener Listener = new("MediatorLite")`** is publicly visible — do not rename its source without coordinating with downstream diagnostic observers.
 
 ## Related skills & rules
 
-- **mediatorlite-abstractions** — defines `IMediator`, `IRequest`, `IPipelineBehavior`, `ISourceGeneratedMediator`, and the `IValidator<T>` / validation model types consumed here.
-- **mediatorlite-source-generation** — emits the `ISourceGeneratedMediator` implementation that this project routes through, plus `AddGeneratedHandlers` that registers everything before `AddMediatorLite`.
-- **mediatorlite-tests** — `tests/MediatorLite.Tests/SourceGeneration/MediatorTests.cs`, `ValidationTests.cs`, `PipelineBehaviorTests.cs`, and `NotificationTests.cs` exercise `Mediator.cs`, `ValidationBehavior`, and the DI wiring.
-- [AGENTS.md](AGENTS.md) — "The mediator is always registered as `Transient`. `Mediator.cs` depends on `ISourceGeneratedMediator`; do not rely on reflection fallback".
+- **mediatorlite-abstractions** — defines `IMediator` (ValueTask), `IRequest`, `IPipelineBehavior`, and the `IValidator<T>` / validation model types consumed here.
+- **mediatorlite-source-generation** — emits the `SourceGeneratedMediator` (implementing `IMediator`) that owns all dispatch, plus `AddGeneratedHandlers` that registers it (`AddScoped<IMediator, SourceGeneratedMediator>`) and everything else; `AddMediatorLite` adds only the `ThrowingMediator` fallback.
+- **mediatorlite-tests** — `tests/MediatorLite.Tests/SourceGeneration/MediatorTests.cs`, `ValidationTests.cs`, `PipelineBehaviorTests.cs`, and `NotificationTests.cs` exercise the generated mediator, `ValidationBehavior`, and the DI wiring.
+- [AGENTS.md](AGENTS.md) — the generated `SourceGeneratedMediator` (Scoped) is the `IMediator`; v2 has no reflection fallback.
 - Docs: [docs/observability.md](docs/observability.md), [docs/validation.md](docs/validation.md), [docs/pipeline-behaviors.md](docs/pipeline-behaviors.md).

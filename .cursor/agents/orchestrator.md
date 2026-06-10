@@ -22,7 +22,7 @@ and synthesis.
 
 - Keep a clean, queryable audit trail of every session in the context DB.
 - Pick the cheapest correct execution mode for each user request.
-- Dispatch well-scoped briefs to role agents via the `Task` tool, then merge their handoff blocks
+- Dispatch well-scoped briefs to role agents via the `Agent` tool, then merge their handoff blocks
   into one coherent reply for the user.
 - Enforce the **review gate**: no backend/frontend/tester handoff lands without a matching
   `code-reviewer` finding keyed on the staged `diff_hash`.
@@ -31,7 +31,7 @@ and synthesis.
 
 ## Skills they load
 
-Read these at session start (the beforeTurn hook injects a pointer, but fetch on first use):
+Read these at session start (the PreToolUse hook (throttled) injects a pointer, but fetch on first use):
 
 - [`.cursor/skills/agentic-workflow/SKILL.md`](../skills/agentic-workflow/SKILL.md) — team shape,
   mode selection, handoff contract.
@@ -51,10 +51,10 @@ Also read (context, not loaded every turn):
 ## Rules always in force
 
 - [`.cursor/rules/00-project-conventions.mdc`](../rules/00-project-conventions.mdc) — TFM,
-  nullability, warnings-as-errors, async surface split.
+  nullability, warnings-as-errors, `ValueTask`-based async surface.
 - [`.cursor/rules/10-dispatch-invariants.mdc`](../rules/10-dispatch-invariants.mdc) — no
-  reflection fallback, `ISourceGeneratedMediator` is mandatory, `AddMediatorLite()` is
-  parameterless.
+  reflection fallback, the generated `SourceGeneratedMediator` IS the `IMediator`,
+  `AddMediatorLite()` is parameterless.
 - [`.cursor/rules/20-source-generator.mdc`](../rules/20-source-generator.mdc) — `IIncrementalGenerator`
   contract, diagnostic counts, inlined logging/tracing.
 - [`.cursor/rules/60-agentic-workflow.mdc`](../rules/60-agentic-workflow.mdc) — handoff contract,
@@ -93,7 +93,7 @@ Reference: [`.cursor/db/schema.sql`](../db/schema.sql).
    - Unclear → ask the user one focused question before dispatching.
    Log the choice with `ContextDb.LogDecision("mode", "parallel"|"orchestration", rationale)`.
 4. **Dispatch.** For each role agent:
-   - Use the `Task` tool with `subagent_type` aligned to the role (generalPurpose by default;
+   - Use the `Agent` tool with `subagent_type` aligned to the role (generalPurpose by default;
      fall back to shell/explore only when the role genuinely needs it).
    - In the brief, include: (a) the task boundary, (b) a pointer to recent `agent_messages` the
      downstream agent should query (`ContextDb.ReadRecent(limit:10)` filtered by the upstream

@@ -149,7 +149,7 @@ Add a fifth discovery pipeline to [`HandlerDiscoveryGenerator`](src/MediatorLite
 
 - Rules: [.cursor/rules/20-source-generator.mdc](.cursor/rules/20-source-generator.mdc), [.cursor/rules/10-dispatch-invariants.mdc](.cursor/rules/10-dispatch-invariants.mdc).
 - Generator entry point: [src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs](src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs).
-- Abstractions: [ISourceGeneratedMediator.cs](src/MediatorLite.Abstractions/Abstractions/ISourceGeneratedMediator.cs).
+- Abstractions: [IMediator.cs](src/MediatorLite.Abstractions/Abstractions/IMediator.cs) (implemented by the generated `SourceGeneratedMediator`).
 - Tests: [tests/MediatorLite.Tests/SourceGeneration/MediatorTests.cs](tests/MediatorLite.Tests/SourceGeneration/MediatorTests.cs).
 - Agents: [.cursor/agents/orchestrator.md](.cursor/agents/orchestrator.md), [.github/agents/code-reviewer.agent.md](.github/agents/code-reviewer.agent.md).
 - Related instructions: [add-new-request-handler.md](add-new-request-handler.md), [add-new-pipeline-behavior.md](add-new-pipeline-behavior.md).

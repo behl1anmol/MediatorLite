@@ -141,7 +141,7 @@ Add a cross-cutting `IPipelineBehavior<TRequest, TResponse>` that wraps one or m
 - `[BehaviorOrder]` produces the documented execution order (verify with a tracking behavior if in doubt).
 - Short-circuit behaviors must have a dedicated test asserting inner handlers/behaviors do **not** run.
 - `MediatorLiteRegistration.BehaviorCount` increased by exactly one per new non-validation behavior.
-- No runtime reflection was introduced; the dispatcher lookup in [Mediator.cs](src/MediatorLite/Internal/Mediator.cs) is untouched.
+- No runtime reflection was introduced; the generated typed-switch dispatch (emitted by [HandlerDiscoveryGenerator.cs](src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs)) is untouched.
 
 ## Handoff / Exit criteria
 

@@ -222,18 +222,20 @@ The emission difference is resolved at compile time — no runtime branching, so
 
 5. **Interpret results (`docs/benchmarks.md` conventions)**
    - `Mean` — average time per operation.
-   - `Ratio` — mean relative to MediatR baseline (`1.00`). `1.24` means MediatorLite is 24% slower in that metric.
-   - `Alloc Ratio` — allocation relative to baseline. `0.78` means MediatorLite allocates 22% less.
+   - `Ratio` — mean relative to MediatR baseline (`1.00`). MediatorLite currently wins every scenario, e.g. `0.50` means MediatorLite is ~2x faster in that metric.
+   - `Alloc Ratio` — allocation relative to baseline. `0.46` means MediatorLite allocates ~54% less.
    - `Gen0/Gen1/Gen2` — GC events per 1000 ops. Lower is better.
+   - As of the v2 typed-switch rewrite, MediatorLite beats MediatR on **both latency and allocations in every scenario** (~2x faster on request dispatch, ~3x on notifications). See [docs/benchmarks.md](docs/benchmarks.md) for the current numbers.
 
 ## Pitfalls & gotchas
 
-- **Boxing on value-type responses**: `RequestDispatcher` returns `Task<object>`, so a response like `int` or `Guid` incurs a heap box per call. See the note in [ISourceGeneratedMediator.cs](src/MediatorLite.Abstractions/Abstractions/ISourceGeneratedMediator.cs). Current benchmarks use reference-type responses (records), so the box is amortized; keep this in mind when adding new scenarios.
+- **No response boxing**: responses stay typed (`ValueTask<TResponse>`) end-to-end through the generated typed-switch dispatch — there is no `Task<object>` and no value-type box per call. (v1 boxed value-type responses; v2 eliminated it.) Adding value-type-response scenarios no longer carries a boxing cost.
 - **`[assembly: Disable*]` is project-wide**: even if you test "with logging enabled" later, you must remove those attributes — no runtime toggle exists.
-- **MediatR's `Send` returns `Task<T>`, MediatorLite's `SendAsync` returns `Task<T>`** at the public API layer — but MediatorLite's handlers internally use `ValueTask<T>`. The benchmark intentionally compares the outer `Task<T>` path for parity.
+- **MediatR's `Send` returns `Task<T>`; MediatorLite's `SendAsync` returns `ValueTask<T>`** at the public API layer (and handlers use `ValueTask<T>`). The benchmark `await`s each once, so the comparison is fair; MediatorLite's zero-allocation `ValueTask` path is part of what it measures.
 - **`warmupCount: 3, iterationCount: 10`** is a trade-off for CI speed. For higher-confidence results, increase `iterationCount` or use `[SimpleJob]` with BenchmarkDotNet's default `Default` job.
 - **MediatR 12.x is the reference version**. If you bump MediatR in [MediatorLite.Benchmarks.csproj](tests/MediatorLite.Benchmarks/MediatorLite.Benchmarks.csproj), update [docs/benchmarks.md](docs/benchmarks.md) accordingly — different MediatR versions have different allocation profiles.
 - **`NotificationBenchmarks`** uses the library default (`Sequential` + `StopOnFirstError`) for the un-attributed notification; results reflect exactly one code path per strategy because the generator emits no runtime branch on strategy.
+- **Behavior-count parity**: each MediatorLite scenario uses its **own request type** with *closed* pipeline behaviors (0/1/3) so the behavior count exactly matches the corresponding MediatR setup. Open-generic behaviors would otherwise be applied to every request type in the assembly at compile time, breaking parity.
 
 ## Related skills & rules
 

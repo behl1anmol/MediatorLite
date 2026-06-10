@@ -339,5 +339,5 @@ Provide a thin adapter implementing `IValidator<TRequest>` over `FluentValidatio
 
 - [docs/validation.md](docs/validation.md) — end-user reference.
 - [docs/pipeline-behaviors.md](docs/pipeline-behaviors.md) — ordering semantics for complementary behaviors.
-- [.cursor/skills/mediatorlite-abstractions/SKILL.md](.cursor/skills/mediatorlite-abstractions/SKILL.md) — for the underlying `IValidator<T>` / `ValidationException` contracts.
+- [.claude/skills/mediatorlite-abstractions/SKILL.md](.claude/skills/mediatorlite-abstractions/SKILL.md) — for the underlying `IValidator<T>` / `ValidationException` contracts.
 - [tests/MediatorLite.Tests/SourceGeneration/ValidationTests.cs](tests/MediatorLite.Tests/SourceGeneration/ValidationTests.cs) — regression fixtures for auto-wiring.

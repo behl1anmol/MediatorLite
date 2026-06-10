@@ -10,9 +10,9 @@
   this memory describes — `MediatorOptions.cs`, `AddMediatorBehavior`, the
   `IMediator` runtime `Mediator.cs` and its reflection-fallback invocation matching,
   and the `tests/MediatorLite.Tests/Reflection/` suite are all gone.
-  `PipelineBehaviorTypeResolver.cs` still physically exists but is orphaned (no source
-  references it on the dispatch path). Behavior expansion/registration is now owned by
-  the source generator. Do not reuse this guidance; see the superseding memory.
+  `PipelineBehaviorTypeResolver.cs` has since been deleted as well (it was orphaned —
+  no source referenced it on the dispatch path). Behavior expansion/registration is now
+  owned by the source generator. Do not reuse this guidance; see the superseding memory.
 
 ## Source Context
 - Triggering task: Capture latest review findings for ServiceCollectionExtensions and options validation.

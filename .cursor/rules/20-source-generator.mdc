@@ -52,7 +52,7 @@ Mirrored-constant comments must stay in sync with
 Every generated `MediatorLiteRegistration` must expose these four `int` count
 properties. Tests, samples, and benchmarks read them for sanity checks.
 
-```791:800:src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs
+```834:843:src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs
         sb.AppendLine($"        public static int RequestHandlerCount => {requestHandlers.Count};");
         ...
         sb.AppendLine($"        public static int NotificationHandlerCount => {notificationHandlers.Count};");
@@ -64,7 +64,7 @@ properties. Tests, samples, and benchmarks read them for sanity checks.
 
 The empty-assembly fallback must still emit all four with value `0`:
 
-```597:600:src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs
+```638:641:src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs
                              public static int RequestHandlerCount => 0;
                              public static int NotificationHandlerCount => 0;
                              public static int BehaviorCount => 0;
@@ -75,14 +75,14 @@ Renaming any of these is a breaking change.
 
 ## Rule 4 — Logging is inlined under category `MediatorLite.IMediator`
 
-Generated `Pipeline_*` / `Publish_*` methods call `LogDebug` through an
-`ILogger<MediatorLite.IMediator>` resolved from the service provider. Emit the
-calls exactly as the existing template does so consumers can filter on the
-category:
+Generated `Send_*` / `Publish_*` methods call `LogDebug` through an
+`ILogger<MediatorLite.IMediator>` resolved from the mediator's scoped service
+provider (`_sp`). Emit the calls exactly as the existing template does so
+consumers can filter on the category:
 
-```1038:1039:src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs
-                sb.AppendLine("            var __logger = sp.GetRequiredService<global::Microsoft.Extensions.Logging.ILogger<global::MediatorLite.IMediator>>();");
-                sb.AppendLine($"            __logger.LogDebug(\"Sending request {{RequestType}}\", \"{simpleRequest}\");");
+```1132:1133:src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs
+            sb.AppendLine("            var __logger = _sp.GetRequiredService<global::Microsoft.Extensions.Logging.ILogger<global::MediatorLite.IMediator>>();");
+            sb.AppendLine($"            __logger.LogDebug(\"Sending request {{RequestType}}\", \"{simpleRequest}\");");
 ```
 
 - Always `LogDebug`, never `LogInformation`/`LogError`. Level is a consumer
