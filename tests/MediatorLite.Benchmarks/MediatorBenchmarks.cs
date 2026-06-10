@@ -22,6 +22,14 @@ public class MediatorBenchmarks
 
     #region MediatorLite Types
 
+    // Behaviors are discovered assembly-wide at compile time, and open-generic behaviors are
+    // expanded to every request type — which would unfairly add pipeline depth to the
+    // zero-behavior scenario. Each scenario therefore gets its own request type, with closed
+    // behaviors targeting exactly that type so behavior counts match the MediatR setups:
+    //   MediatorLiteQuery       → 0 behaviors (MediatorBenchmarks)
+    //   MediatorLiteSingleQuery → 1 behavior  (PipelineBenchmarks)
+    //   MediatorLiteMultiQuery  → 3 behaviors (MultipleBehaviorsBenchmarks)
+
     public record MediatorLiteQuery(int Id) : MediatorLite.IRequest<MediatorLiteResult>;
     public record MediatorLiteResult(int Id, string Name);
 
@@ -33,24 +41,53 @@ public class MediatorBenchmarks
         }
     }
 
-    public class MediatorLiteLoggingBehavior<TRequest, TResponse> : MediatorLite.IPipelineBehavior<TRequest, TResponse>
-        where TRequest : MediatorLite.IRequest<TResponse>
+    public record MediatorLiteSingleQuery(int Id) : MediatorLite.IRequest<MediatorLiteResult>;
+
+    public class MediatorLiteSingleQueryHandler : MediatorLite.IRequestHandler<MediatorLiteSingleQuery, MediatorLiteResult>
     {
-        public async ValueTask<TResponse> HandleAsync(
-            TRequest request,
-            MediatorLite.RequestHandlerDelegate<TResponse> next,
+        public ValueTask<MediatorLiteResult> HandleAsync(MediatorLiteSingleQuery request, CancellationToken cancellationToken = default)
+        {
+            return ValueTask.FromResult(new MediatorLiteResult(request.Id, "Test"));
+        }
+    }
+
+    public class MediatorLiteSingleLoggingBehavior : MediatorLite.IPipelineBehavior<MediatorLiteSingleQuery, MediatorLiteResult>
+    {
+        public async ValueTask<MediatorLiteResult> HandleAsync(
+            MediatorLiteSingleQuery request,
+            MediatorLite.RequestHandlerDelegate<MediatorLiteResult> next,
             CancellationToken cancellationToken = default)
         {
             return await next();
         }
     }
 
-    public class MediatorLiteValidationBehavior<TRequest, TResponse> : MediatorLite.IPipelineBehavior<TRequest, TResponse>
-        where TRequest : MediatorLite.IRequest<TResponse>
+    public record MediatorLiteMultiQuery(int Id) : MediatorLite.IRequest<MediatorLiteResult>;
+
+    public class MediatorLiteMultiQueryHandler : MediatorLite.IRequestHandler<MediatorLiteMultiQuery, MediatorLiteResult>
     {
-        public async ValueTask<TResponse> HandleAsync(
-            TRequest request,
-            MediatorLite.RequestHandlerDelegate<TResponse> next,
+        public ValueTask<MediatorLiteResult> HandleAsync(MediatorLiteMultiQuery request, CancellationToken cancellationToken = default)
+        {
+            return ValueTask.FromResult(new MediatorLiteResult(request.Id, "Test"));
+        }
+    }
+
+    public class MediatorLiteLoggingBehavior : MediatorLite.IPipelineBehavior<MediatorLiteMultiQuery, MediatorLiteResult>
+    {
+        public async ValueTask<MediatorLiteResult> HandleAsync(
+            MediatorLiteMultiQuery request,
+            MediatorLite.RequestHandlerDelegate<MediatorLiteResult> next,
+            CancellationToken cancellationToken = default)
+        {
+            return await next();
+        }
+    }
+
+    public class MediatorLiteValidationBehavior : MediatorLite.IPipelineBehavior<MediatorLiteMultiQuery, MediatorLiteResult>
+    {
+        public async ValueTask<MediatorLiteResult> HandleAsync(
+            MediatorLiteMultiQuery request,
+            MediatorLite.RequestHandlerDelegate<MediatorLiteResult> next,
             CancellationToken cancellationToken = default)
         {
             // Simulated validation - no actual work but adds to pipeline depth
@@ -58,12 +95,11 @@ public class MediatorBenchmarks
         }
     }
 
-    public class MediatorLiteMetricsBehavior<TRequest, TResponse> : MediatorLite.IPipelineBehavior<TRequest, TResponse>
-        where TRequest : MediatorLite.IRequest<TResponse>
+    public class MediatorLiteMetricsBehavior : MediatorLite.IPipelineBehavior<MediatorLiteMultiQuery, MediatorLiteResult>
     {
-        public async ValueTask<TResponse> HandleAsync(
-            TRequest request,
-            MediatorLite.RequestHandlerDelegate<TResponse> next,
+        public async ValueTask<MediatorLiteResult> HandleAsync(
+            MediatorLiteMultiQuery request,
+            MediatorLite.RequestHandlerDelegate<MediatorLiteResult> next,
             CancellationToken cancellationToken = default)
         {
             // Simulated metrics collection
@@ -291,7 +327,7 @@ public class PipelineBenchmarks
     [Benchmark]
     public async Task<MediatorBenchmarks.MediatorLiteResult> MediatorLite_WithBehavior()
     {
-        return await _mediatorLite.SendAsync(new MediatorBenchmarks.MediatorLiteQuery(1));
+        return await _mediatorLite.SendAsync(new MediatorBenchmarks.MediatorLiteSingleQuery(1));
     }
 
     [GlobalCleanup]
@@ -346,7 +382,7 @@ public class MultipleBehaviorsBenchmarks
     [Benchmark]
     public async Task<MediatorBenchmarks.MediatorLiteResult> MediatorLite_WithMultipleBehaviors()
     {
-        return await _mediatorLite.SendAsync(new MediatorBenchmarks.MediatorLiteQuery(1));
+        return await _mediatorLite.SendAsync(new MediatorBenchmarks.MediatorLiteMultiQuery(1));
     }
 
     [GlobalCleanup]

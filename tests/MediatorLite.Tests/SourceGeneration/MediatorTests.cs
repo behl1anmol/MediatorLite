@@ -40,11 +40,13 @@ public class MediatorTests
         var provider = services.BuildServiceProvider();
 
         // Act
-        var sourceGenMediator = provider.GetService<ISourceGeneratedMediator>();
+        var mediator = provider.GetService<IMediator>();
 
         // Assert
-        sourceGenMediator.Should().NotBeNull(
-            "AddGeneratedHandlers should register ISourceGeneratedMediator for zero-reflection dispatch");
+        mediator.Should().NotBeNull(
+            "AddGeneratedHandlers should register the source-generated IMediator for zero-reflection dispatch");
+        mediator.Should().BeOfType<SourceGeneratedMediator>(
+            "the generated mediator must win over the AddMediatorLite() diagnostic fallback");
     }
 
     [Fact]
@@ -157,17 +159,36 @@ public class MediatorTests
 
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
-        var sourceGenMediator = provider.GetService<ISourceGeneratedMediator>();
 
-        // Verify source-gen mediator has a dispatcher for our request type
-        var dispatcher = sourceGenMediator?.GetDispatcher(typeof(GetUserByIdQuery));
-
-        // Assert
-        dispatcher.Should().NotBeNull("Source-generated mediator should have dispatcher for GetUserByIdQuery");
+        // Assert - dispatch goes through the generated mediator
+        mediator.Should().BeOfType<SourceGeneratedMediator>(
+            "source-generated dispatch should be used for GetUserByIdQuery");
 
         // Execute through mediator
         var result = await mediator.SendAsync(new GetUserByIdQuery(1));
         result.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task SendAsync_WithCovariantRequestReference_DispatchesCorrectly()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddGeneratedHandlers();
+        services.AddMediatorLite();
+        services.AddLogging();
+
+        var provider = services.BuildServiceProvider();
+        var mediator = provider.GetRequiredService<IMediator>();
+
+        // Act - dispatch through a covariant IRequest<object> reference (IRequest<out T>),
+        // exercising the typed-dispatch fallback cast path instead of the exact-type fast path
+        IRequest<object> request = new GetUserByIdQuery(7);
+        var result = await mediator.SendAsync(request);
+
+        // Assert
+        result.Should().BeOfType<UserDto>();
+        ((UserDto)result).Id.Should().Be(7);
     }
 
     [Fact]

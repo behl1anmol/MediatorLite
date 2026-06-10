@@ -73,11 +73,9 @@ public class PipelineBehaviorTests
 
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
-        var sourceGenMediator = provider.GetRequiredService<ISourceGeneratedMediator>();
 
-        // Verify source-gen has a dispatcher for this request type
-        var dispatcher = sourceGenMediator.GetDispatcher(typeof(GetUserByIdQuery));
-        dispatcher.Should().NotBeNull("GetDispatcher should recognize GetUserByIdQuery");
+        // Verify dispatch goes through the generated mediator
+        mediator.Should().BeOfType<MediatorLite.Generated.SourceGeneratedMediator>();
 
         // Act - Execute through mediator
         var result = await mediator.SendAsync(new GetUserByIdQuery(42));
@@ -135,19 +133,19 @@ public class PipelineBehaviorTests
     /// Verifies that source-gen dispatch recognizes request types.
     /// </summary>
     [Fact]
-    public void SourceGenDispatch_RecognizesRequestTypes()
+    public async Task SourceGenDispatch_RecognizesRequestTypes()
     {
-        // Verify that source-gen dispatch has a dispatcher for the request type
+        // Verify that source-gen dispatch recognizes the request type
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
         services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
-        var sourceGenMediator = provider.GetRequiredService<ISourceGeneratedMediator>();
+        var mediator = provider.GetRequiredService<IMediator>();
 
-        // Verify GetDispatcher returns a dispatcher for known request types
-        var dispatcher = sourceGenMediator.GetDispatcher(typeof(ComputeValueQuery));
-        dispatcher.Should().NotBeNull("GetDispatcher should recognize ComputeValueQuery");
+        // A recognized request type dispatches without throwing InvalidOperationException
+        var act = async () => await mediator.SendAsync(new ComputeValueQuery(21));
+        await act.Should().NotThrowAsync("source-generated dispatch should recognize ComputeValueQuery");
     }
 }

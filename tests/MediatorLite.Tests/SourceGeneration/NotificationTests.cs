@@ -73,13 +73,6 @@ public class NotificationTests
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
-        var sourceGenMediator = provider.GetRequiredService<ISourceGeneratedMediator>();
-
-        // Act - Check if source-gen has a publisher for this notification type
-        var publisher = sourceGenMediator.GetPublisher(typeof(UserCreatedEvent));
-
-        // Assert - Publisher should exist
-        publisher.Should().NotBeNull("GetPublisher should recognize UserCreatedEvent");
 
         // Execute and verify handlers ran in order
         UserCreatedEventHandler1.Reset();
