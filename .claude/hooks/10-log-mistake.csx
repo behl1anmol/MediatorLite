@@ -1,4 +1,5 @@
 #!/usr/bin/env dotnet-script
+#nullable enable
 // .claude/hooks/10-log-mistake.csx
 // Event: onAgentError (any hook/tool failure payload from Cursor)
 // Purpose: capture the error in the `mistakes` table AND emit a stub

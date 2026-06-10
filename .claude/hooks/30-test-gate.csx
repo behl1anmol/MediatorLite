@@ -1,4 +1,5 @@
 #!/usr/bin/env dotnet-script
+#nullable enable
 // .claude/hooks/30-test-gate.csx
 // Event: beforePush
 // Purpose: refuse to push if `dotnet test` fails for any project in the solution.

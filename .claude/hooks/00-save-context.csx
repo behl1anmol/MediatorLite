@@ -1,4 +1,5 @@
 #!/usr/bin/env dotnet-script
+#nullable enable
 // .claude/hooks/00-save-context.csx
 // Event: beforeCompaction
 // Purpose: durability — dump the current session (sessions/agent_messages/plans/decisions)

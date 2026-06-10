@@ -81,21 +81,44 @@ public record OrderCompletedNotification(int OrderId) : INotification;
 
 ### Parallel
 
-All handlers are started before any is awaited, so they execute concurrently (`ValueTask` fan-out with no task array). Best for independent handlers.
+Parallel execution is **cooperative `ValueTask` fan-out** — not thread offload. The generated `Publish_*` method runs in two distinct phases. Reading it without that split in mind is what makes it *look* sequential.
 
 ```csharp
 [NotificationExecution(NotificationExecutionStrategy.Parallel)]
 public record UserCreatedNotification(int UserId) : INotification;
 ```
 
+**1. Start phase** — every handler's `HandleAsync` is *invoked* before any result is awaited. Each call runs the handler body synchronously up to its first suspending `await`, then returns a `ValueTask` for the remainder. A handler that throws synchronously is captured into a faulted `ValueTask`, so one handler's synchronous throw never stops the others from being started:
+
+```csharp
+ValueTask vt1;
+try { vt1 = h1.HandleAsync(notification, ct); }
+catch (Exception ex) { vt1 = ValueTask.FromException(ex); }
+ValueTask vt2;
+try { vt2 = h2.HandleAsync(notification, ct); }
+catch (Exception ex) { vt2 = ValueTask.FromException(ex); }
+```
+
+**2. Await phase** — the already-started `ValueTask`s are awaited in start order, collecting faults:
+
+```csharp
+List<Exception>? exceptions = null;
+try { await vt1.ConfigureAwait(false); }
+catch (Exception ex) { (exceptions ??= new()).Add(ex); }
+try { await vt2.ConfigureAwait(false); }
+catch (Exception ex) { (exceptions ??= new()).Add(ex); }
+```
+
+> **Concurrency here is cooperative, not parallel threads.** Handlers overlap only at their `await` suspension points. Two handlers whose bodies are fully synchronous — or that throw before any `await` — run their bodies back-to-back during the start phase (*sequential in effect*), because neither yields the thread. A handler with a real `await` (I/O, `Task.Delay`, …) genuinely overlaps the others. MediatorLite never wraps handlers in `Task.Run`, which would cost a thread-pool hop and an allocation per handler.
+
 **Error Strategy Behavior:**
 
-> ⚠️ **Important:** `[NotificationError]` is **ignored** for parallel execution.
+`[NotificationError]` **is** honored in parallel — but it cannot un-start an in-flight handler, so **every started handler is awaited to completion** regardless of strategy. The strategy decides only *which* fault is surfaced:
 
-Since all handlers start immediately and run concurrently, it's impossible to "stop on first error" - handlers cannot be cancelled mid-execution. Parallel mode **always aggregates exceptions**:
-
-- All handlers run to completion
-- If any fail, all exceptions are collected into `AggregateException`
+| Error Strategy | Behavior |
+|----------------|----------|
+| `ContinueAndAggregate` | All faults are collected and thrown as a single `AggregateException`. A requested cancellation is rethrown as `OperationCanceledException` ahead of the aggregate. |
+| `StopOnFirstError` (default) | Every handler still runs to completion, but only the **first** fault (in handler order) is rethrown — unwrapped, preserving its original stack. |
 
 ### StopOnFirst
 
@@ -133,7 +156,7 @@ public record GetDataNotification(string Key) : INotification;
 | Strategy | Order Matters | Stops Early | Error Strategy |
 |----------|--------------|-------------|----------------|
 | Sequential | ✅ Yes | ❌ No | ✅ Applies |
-| Parallel | ❌ No | ❌ No | ❌ Always aggregates |
+| Parallel | Start order only | ❌ No | ✅ Applies (all vs. first fault) |
 | StopOnFirst | ✅ Yes | ✅ On success | ✅ Applies |
 
 ## Per-Notification Configuration (v2)

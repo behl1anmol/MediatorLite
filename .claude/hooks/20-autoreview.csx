@@ -1,4 +1,5 @@
 #!/usr/bin/env dotnet-script
+#nullable enable
 // .claude/hooks/20-autoreview.csx
 // Event: beforeCommit (first in the chain)
 // Purpose: block the commit if the code-reviewer has not yet reviewed the

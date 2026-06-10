@@ -512,3 +512,64 @@ public class ParallelSyncThrowHandler2 : INotificationHandler<ParallelSyncThrowE
 }
 
 #endregion
+
+#region Parallel start/await phase probe fixtures
+
+/// <summary>
+/// Notification used to observe the two phases of parallel publishing: the synchronous
+/// "start phase" (every handler invoked before any is awaited) and the "await phase"
+/// (every started <see cref="ValueTask"/> awaited to completion). Both handlers suspend
+/// on a shared gate so a test can inspect state exactly at the phase boundary.
+/// </summary>
+[NotificationExecution(NotificationExecutionStrategy.Parallel)]
+public record ParallelPhaseEvent(string Message) : INotification;
+
+/// <summary>
+/// Shared probe state for <see cref="ParallelPhaseEvent"/> handlers. The gate is completed
+/// inline by the test thread, so handler continuations resume single-threaded — the lists
+/// need no synchronization.
+/// </summary>
+public static class ParallelPhaseProbe
+{
+    /// <summary>Records each handler's synchronous prefix — the start phase.</summary>
+    public static List<string> StartLog { get; private set; } = [];
+
+    /// <summary>Records each handler's post-await continuation — the await phase.</summary>
+    public static List<string> EndLog { get; private set; } = [];
+
+    /// <summary>Gate that every handler suspends on until the test releases it.</summary>
+    public static TaskCompletionSource Gate { get; private set; } = new();
+
+    public static void Reset()
+    {
+        StartLog = [];
+        EndLog = [];
+        Gate = new TaskCompletionSource();
+    }
+
+    /// <summary>Releases the gate, unblocking every started handler's await phase.</summary>
+    public static void Release() => Gate.TrySetResult();
+}
+
+public sealed class ParallelPhaseHandler1 : INotificationHandler<ParallelPhaseEvent>
+{
+    public async ValueTask HandleAsync(ParallelPhaseEvent notification, CancellationToken cancellationToken = default)
+    {
+        ParallelPhaseProbe.StartLog.Add("h1");                    // start phase: runs before any await
+        await ParallelPhaseProbe.Gate.Task.ConfigureAwait(false); // suspend → lets the next handler start
+        ParallelPhaseProbe.EndLog.Add("h1");                      // await phase: continuation after release
+    }
+}
+
+[NotificationHandlerOrder(1)]
+public sealed class ParallelPhaseHandler2 : INotificationHandler<ParallelPhaseEvent>
+{
+    public async ValueTask HandleAsync(ParallelPhaseEvent notification, CancellationToken cancellationToken = default)
+    {
+        ParallelPhaseProbe.StartLog.Add("h2");
+        await ParallelPhaseProbe.Gate.Task.ConfigureAwait(false);
+        ParallelPhaseProbe.EndLog.Add("h2");
+    }
+}
+
+#endregion

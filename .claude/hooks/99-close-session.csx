@@ -1,4 +1,5 @@
 #!/usr/bin/env dotnet-script
+#nullable enable
 // .claude/hooks/99-close-session.csx
 // Event: onSessionEnd
 // Purpose: mark the session row closed, force one final snapshot, VACUUM.

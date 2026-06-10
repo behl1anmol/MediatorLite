@@ -366,4 +366,71 @@ public class NotificationTests
             .ContainSingle(e => e.Message.Contains("sync-throw-handler-1"))
             .And.ContainSingle(e => e.Message.Contains("sync-throw-handler-2"));
     }
+
+    [Fact]
+    public async Task PublishAsync_Parallel_StartPhase_InvokesEveryHandlerBeforeAwaitingAny()
+    {
+        // Parallel publishing has two phases. This test pins the START PHASE:
+        // calling PublishAsync runs the generated Publish_* method synchronously up to its
+        // first `await vtN`. Because each handler suspends on a shared gate instead of
+        // completing, every handler's synchronous prefix executes here — in start order —
+        // before any handler's result is awaited.
+        ParallelPhaseProbe.Reset();
+
+        var services = new ServiceCollection();
+        services.AddGeneratedHandlers();
+        services.AddMediatorLite();
+        services.AddLogging();
+
+        var provider = services.BuildServiceProvider();
+        var mediator = provider.GetRequiredService<IMediator>();
+
+        // Act - invoke, but do NOT release the gate yet.
+        var publishTask = mediator.PublishAsync(new ParallelPhaseEvent("test")).AsTask();
+
+        // Assert - both handlers were *started* (in [NotificationHandlerOrder] order) before
+        // any was awaited. Sequential execution would show only "h1" here, because h2 would
+        // not start until h1 fully completed.
+        ParallelPhaseProbe.StartLog.Should().Equal(new[] { "h1", "h2" },
+            "the start phase invokes every handler before awaiting any");
+        ParallelPhaseProbe.EndLog.Should().BeEmpty("no handler continuation runs until the await phase");
+        publishTask.IsCompleted.Should().BeFalse("the publisher is suspended awaiting the in-flight handlers");
+
+        // Cleanup - release the gate so the publish can complete and the task is observed.
+        ParallelPhaseProbe.Release();
+        await publishTask;
+    }
+
+    [Fact]
+    public async Task PublishAsync_Parallel_AwaitPhase_ObservesEveryStartedHandlerToCompletion()
+    {
+        // This test pins the AWAIT PHASE: after the start phase has invoked every handler,
+        // the publisher awaits the ValueTasks it already started. Releasing the gate lets
+        // those started tasks complete; no new handler is started during the await phase.
+        ParallelPhaseProbe.Reset();
+
+        var services = new ServiceCollection();
+        services.AddGeneratedHandlers();
+        services.AddMediatorLite();
+        services.AddLogging();
+
+        var provider = services.BuildServiceProvider();
+        var mediator = provider.GetRequiredService<IMediator>();
+
+        // Start phase ran synchronously inside this call; the publisher is now suspended
+        // in its await phase, waiting on the two in-flight handlers.
+        var publishTask = mediator.PublishAsync(new ParallelPhaseEvent("test")).AsTask();
+        ParallelPhaseProbe.StartLog.Should().Equal("h1", "h2");
+        ParallelPhaseProbe.EndLog.Should().BeEmpty();
+
+        // Act - release the gate, unblocking the await phase.
+        ParallelPhaseProbe.Release();
+        await publishTask;
+
+        // Assert - every started handler was awaited to completion, and no extra handler ran.
+        ParallelPhaseProbe.EndLog.Should().HaveCount(2);
+        ParallelPhaseProbe.EndLog.Should().Contain("h1").And.Contain("h2");
+        ParallelPhaseProbe.StartLog.Should().Equal(new[] { "h1", "h2" },
+            "the await phase only observes handlers started during the start phase");
+    }
 }

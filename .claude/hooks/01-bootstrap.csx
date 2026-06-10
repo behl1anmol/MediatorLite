@@ -1,4 +1,5 @@
 #!/usr/bin/env dotnet-script
+#nullable enable
 // .claude/hooks/01-bootstrap.csx
 // Event: onSessionStart
 // Purpose: one-time per-session setup.

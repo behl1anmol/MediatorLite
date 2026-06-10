@@ -1,4 +1,5 @@
 #!/usr/bin/env dotnet-script
+#nullable enable
 // .claude/hooks/40-snapshot-plan.csx
 // Event: afterPlanCreation (Cursor) / PostToolUse on ExitPlanMode or TodoWrite (Claude Code)
 // Purpose: mirror every plan file under .claude/plans/ into the `plans` table

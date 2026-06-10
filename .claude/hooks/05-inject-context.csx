@@ -1,4 +1,5 @@
 #!/usr/bin/env dotnet-script
+#nullable enable
 // .claude/hooks/05-inject-context.csx
 // Event: beforeTurn (Cursor) / PreToolUse throttled (Claude Code)
 // Purpose: give cross-chat persistence — prints the most recent N agent_messages

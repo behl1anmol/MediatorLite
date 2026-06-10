@@ -1,4 +1,5 @@
 #!/usr/bin/env dotnet-script
+#nullable enable
 // .claude/hooks/21-build-gate.csx
 // Event: beforeCommit
 // Purpose: refuse to commit if the solution does not build.

@@ -1,4 +1,5 @@
 #!/usr/bin/env dotnet-script
+#nullable enable
 // .claude/hooks/22-lint-gate.csx
 // Event: beforeCommit
 // Purpose: cheap style/formatting gate before commit.

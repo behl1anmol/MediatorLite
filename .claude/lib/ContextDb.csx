@@ -1,4 +1,5 @@
 #!/usr/bin/env dotnet-script
+#nullable enable
 // .claude/lib/ContextDb.csx
 // Shared SQLite helper for every MediatorLite hook and agent tool.
 //
