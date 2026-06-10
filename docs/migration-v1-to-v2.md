@@ -14,7 +14,7 @@ MediatorLite v2 is a **source-generation-only** architecture. The reflection-bas
 |---------|----|----|
 | Handler discovery | Runtime reflection + optional source-gen | **Compile-time only** |
 | Pipeline behavior wrapping | Runtime delegate chains | **Generated unrolled pipelines** |
-| Handler resolution | `ConcurrentDictionary` caching | **Static `Dictionary<Type, Delegate>`** |
+| Handler resolution | `ConcurrentDictionary` caching | **Compile-time type-pattern switch** |
 | Notification handler ordering | Runtime sorting | **Compile-time sorting** |
 
 ---
@@ -32,26 +32,60 @@ MediatorLite v2 is a **source-generation-only** architecture. The reflection-bas
 services.AddTransient<IRequestHandler<MyRequest, MyResponse>, MyHandler>();
 services.AddMediatorLite();
 
-// v2 - Must call AddGeneratedHandlers()
+// v2 - Must call AddGeneratedHandlers(); it registers IMediator itself
 services.AddGeneratedHandlers();  // Required!
-services.AddMediatorLite();
+services.AddMediatorLite();       // Optional — diagnostic fallback only (see below)
 ```
 
-### 2. Handler Registration Order
+`AddMediatorLite()` is now **optional**: the generated `AddGeneratedHandlers()` registers `IMediator` directly (scoped lifetime — it captures the resolving scope's `IServiceProvider` so scoped handler dependencies work; when resolved from the root provider it behaves like a singleton). `AddMediatorLite()` only registers a diagnostic fallback (`TryAddScoped<IMediator, ThrowingMediator>`) that throws a clear `InvalidOperationException` if the source generator never ran. The calling order of the two methods doesn't matter.
+
+### 2. `SendAsync` / `PublishAsync` Return `ValueTask`
+
+**v1:** `IMediator.SendAsync<TResponse>` returned `Task<TResponse>`; `IMediator.PublishAsync` returned `Task`.
+
+**v2:** `SendAsync<TResponse>` returns `ValueTask<TResponse>` and `PublishAsync` returns `ValueTask`. This enables zero-allocation dispatch: for a request with no behaviors, a synchronously completing handler allocates nothing at all.
+
+Plain `await` works exactly as before:
+
+```csharp
+var user = await _mediator.SendAsync(new GetUserQuery(id), ct);
+await _mediator.PublishAsync(new UserCreatedNotification(user.Id), ct);
+```
+
+> ⚠️ **A `ValueTask` must be consumed exactly once** — `await` it directly. For `Task.WhenAll`, fan-out, storing the result, or awaiting more than once, convert it first with `.AsTask()`:
+
+```csharp
+var userTask = _mediator.SendAsync(new GetUserQuery(1), ct).AsTask();
+var orderTask = _mediator.SendAsync(new GetOrderQuery(1), ct).AsTask();
+await Task.WhenAll(userTask, orderTask);
+```
+
+### 3. Handler Registration Order
 
 **v1:** Handlers were discovered at runtime in arbitrary order.
 
 **v2:** Handlers are discovered at compile-time. Use `[BehaviorOrder]` to control execution order.
 
-### 3. `ISourceGeneratedMediator` is Required
+### 4. `ISourceGeneratedMediator`, `RequestDispatcher`, and `NotificationPublisher` Are Deleted
 
-**v2** dispatches through `ISourceGeneratedMediator`. If you don't call `AddGeneratedHandlers()`, you'll get:
+**v2** has no runtime dispatch layer. The source generator emits a `SourceGeneratedMediator` class (namespace `MediatorLite.Generated`) that implements `IMediator` directly. Dispatch is a compile-time type-pattern switch — no `Dictionary<Type,...>` lookup, no `Task<object>` boxing, and no runtime `Mediator` wrapper class (that class is deleted too).
+
+If you don't call `AddGeneratedHandlers()`, the `ThrowingMediator` fallback registered by `AddMediatorLite()` throws on every dispatch:
 
 ```
-InvalidOperationException: No handler registered for request type 'MyRequest'
+InvalidOperationException: No source-generated mediator is registered. Reference the
+MediatorLite.SourceGeneration analyzer package from the assembly that contains your
+handlers and call services.AddGeneratedHandlers() so the generated mediator replaces
+this fallback.
 ```
 
-### 4. Runtime Options Are Gone
+### 5. Notification Dispatch Matches the Runtime Type
+
+**v1:** `PublishAsync` dispatched on `typeof(TNotification)`, so publishing through a base- or interface-typed reference (e.g. a variable typed as `INotification`) silently no-oped.
+
+**v2:** The generated type-pattern switch matches the notification's **runtime type**, so base/interface-typed publishes now correctly dispatch to the concrete notification's handlers.
+
+### 6. Runtime Options Are Gone
 
 **v1:** `AddMediatorLite` accepted a configure lambda that exposed a `MediatorOptions` instance (logging toggles, tracing toggles, lifetimes, open-behavior list, notification strategies).
 

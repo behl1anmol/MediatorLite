@@ -130,15 +130,15 @@ The source generator automatically discovers all handlers at compile time. **You
 using MediatorLite.Generated;
 
 services
-    .AddGeneratedHandlers()   // MUST be called first — registers handlers and O(1) dispatch
-    .AddMediatorLite();       // Registers the mediator runtime
+    .AddGeneratedHandlers()   // Registers handlers and the generated IMediator (typed dispatch)
+    .AddMediatorLite();       // Optional diagnostic fallback; call order doesn't matter
 ```
 
 `AddGeneratedHandlers()` registers:
 - All `IRequestHandler<,>` implementations
 - All `INotificationHandler<>` implementations
 - All `IPipelineBehavior<,>` implementations (ordered by `[BehaviorOrder]`)
-- The `ISourceGeneratedMediator` for O(1) dispatch
+- The source-generated `IMediator` implementation (typed switch dispatch, no reflection, no boxing)
 
 Built-in logging and tracing are on by default and emitted inline by the source generator. Opt out at compile time with assembly-level attributes:
 
@@ -154,7 +154,7 @@ The log **level** is controlled through `Microsoft.Extensions.Logging` configura
 services.AddLogging(b => b.AddFilter("MediatorLite.IMediator", LogLevel.Information));
 ```
 
-The mediator is always registered as `Transient`. Handler lifetimes remain controlled by you at DI registration.
+The generated mediator is registered as `Scoped` — it captures the resolving scope's `IServiceProvider`, so scoped handler dependencies resolve correctly. Handler lifetimes remain controlled by you at DI registration.
 
 > ⚠️ **v2 Change:** `MediatorOptions`, the `AddMediatorLite(configure)` lambda, and the old `[NotificationOptions]` attribute have been **removed**. Notification execution/error strategies are compile-time only — use `[NotificationExecution]` / `[NotificationError]` on notification types, or `[assembly: DefaultNotificationExecution]` / `[assembly: DefaultNotificationError]` for an assembly-wide default.
 
@@ -170,17 +170,14 @@ services
     .AddMediatorLite();
 ```
 
-#### Manual DI Registration (Deprecated)
+#### Manual DI Registration (Not Supported)
 
-> ⚠️ **Deprecated in v2:** Manual DI registration uses the reflection fallback which is deprecated. Use source generation for O(1) dispatch.
-
-You can register handlers manually with standard DI, but this falls back to reflection-based dispatch:
+> ⚠️ **Not supported in v2:** There is no reflection fallback. Without `AddGeneratedHandlers()`, the `IMediator` registered by `AddMediatorLite()` throws an `InvalidOperationException` with setup guidance on first use — manual handler registrations alone cannot be dispatched.
 
 ```csharp
 services.AddTransient<IRequestHandler<GetUserQuery, User>, GetUserQueryHandler>();
 services.AddTransient<INotificationHandler<UserCreatedNotification>, SendWelcomeEmailHandler>();
-services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
-services.AddMediatorLite();  // Uses reflection fallback when ISourceGeneratedMediator is not registered
+services.AddMediatorLite();  // Without AddGeneratedHandlers(), dispatch throws at first use
 ```
 
 #### Excluding Types from Source Generation

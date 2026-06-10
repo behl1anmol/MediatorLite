@@ -30,10 +30,13 @@ documents as the canonical style.
 
 ## Async surface
 
-MediatorLite intentionally splits `Task` vs. `ValueTask`:
+MediatorLite is `ValueTask`-based end-to-end:
 
-- **Public mediator surface** returns `Task` / `Task<T>` so consumers can use
-  `Task.WhenAll` naturally. See `IMediator.SendAsync` / `PublishAsync`.
+- **Public mediator surface** returns `ValueTask` / `ValueTask<T>` so a
+  zero-behavior request whose handler completes synchronously allocates
+  nothing. See `IMediator.SendAsync` / `PublishAsync`. Consumers must consume
+  the result exactly once; `.AsTask()` is the documented escape hatch for
+  `Task.WhenAll` / fan-out / multi-await.
 - **Handlers, behaviors, validators, notification handlers** return
   `ValueTask` / `ValueTask<T>` to keep synchronous completion allocation-free.
 
@@ -47,7 +50,8 @@ Concretely:
 ```
 
 Do not change handler/behavior signatures to `Task<T>`. Do not change
-`IMediator` to `ValueTask<T>`.
+`IMediator` back to `Task<T>` — the zero-allocation fast path depends on
+forwarding the handler's `ValueTask` unchanged.
 
 ## Void commands
 

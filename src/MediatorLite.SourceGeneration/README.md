@@ -366,21 +366,20 @@ The generator may emit warnings for:
 
 These are informational and help catch configuration issues early.
 
-## Manual Registration (Deprecated)
+## Manual Registration (Not Supported)
 
-If you prefer manual registration, you can skip the source generator package, but this is **deprecated in v2**:
+Manual registration without the source generator is **not supported in v2** — there is no reflection fallback:
 
 ```csharp
-// Install only MediatorLite package (deprecated path)
+// Install only MediatorLite package (unsupported path)
 dotnet add package MediatorLite
 
-// Register manually (uses reflection fallback)
 services.AddTransient<IRequestHandler<GetUserQuery, User>, GetUserQueryHandler>();
 services.AddTransient<INotificationHandler<UserCreated>, SendEmailHandler>();
-services.AddMediatorLite();  // Falls back to reflection when ISourceGeneratedMediator is not registered
+services.AddMediatorLite();  // Without AddGeneratedHandlers(), dispatch throws at first use
 ```
 
-> ⚠️ **Deprecated:** Manual registration uses reflection-based dispatch and does not support `[BehaviorOrder]`, `[NotificationExecution]`, `[NotificationError]`, or the assembly-level default attributes.
+> ⚠️ The `IMediator` registered by `AddMediatorLite()` alone is a diagnostic fallback that throws an `InvalidOperationException` with setup guidance. Reference the `MediatorLite.SourceGeneration` package and call `AddGeneratedHandlers()`.
 
 ## Source Code
 

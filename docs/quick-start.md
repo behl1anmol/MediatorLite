@@ -82,15 +82,15 @@ public class GetUserQueryHandler : IRequestHandler<GetUserQuery, User>
 using MediatorLite.Generated;
 
 services
-    .AddGeneratedHandlers()   // MUST be called first — registers handlers and O(1) dispatch
-    .AddMediatorLite();       // Takes no arguments; mediator is always registered as Transient
+    .AddGeneratedHandlers()   // Registers handlers and the generated IMediator (typed dispatch)
+    .AddMediatorLite();       // Optional diagnostic fallback; call order doesn't matter
 ```
 
 `AddGeneratedHandlers()` registers:
 - All `IRequestHandler<,>` implementations
 - All `INotificationHandler<>` implementations
 - All `IPipelineBehavior<,>` implementations (ordered by `[BehaviorOrder]`)
-- The `ISourceGeneratedMediator` for O(1) dispatch
+- The source-generated `IMediator` implementation (scoped; typed switch dispatch, no reflection, no boxing)
 
 ### Observability (on by default, compile-time opt-out)
 
@@ -117,15 +117,14 @@ services
     .AddMediatorLite();
 ```
 
-### Manual DI Registration (Deprecated)
+### Manual DI Registration (Not Supported)
 
-> ⚠️ **Deprecated in v2:** Manual DI registration uses the reflection fallback which is deprecated. Use source generation for O(1) dispatch.
+> ⚠️ **Not supported in v2:** There is no reflection fallback. Without `AddGeneratedHandlers()`, the `IMediator` registered by `AddMediatorLite()` throws an `InvalidOperationException` with setup guidance on first use — manual handler registrations alone cannot be dispatched.
 
 ```csharp
 services.AddTransient<IRequestHandler<GetUserQuery, User>, GetUserQueryHandler>();
 services.AddTransient<INotificationHandler<UserCreatedNotification>, SendWelcomeEmailHandler>();
-services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
-services.AddMediatorLite();  // Falls back to reflection when ISourceGeneratedMediator is not registered
+services.AddMediatorLite();  // Without AddGeneratedHandlers(), dispatch throws at first use
 ```
 
 ### Excluding Types from Source Generation

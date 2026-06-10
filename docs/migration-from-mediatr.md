@@ -29,20 +29,28 @@ MediatorLite v2 introduces a **source-generation-first architecture**:
 | `INotificationHandler<T>` | `INotificationHandler<T>` | Handler returns `ValueTask` |
 | `IPipelineBehavior<TRequest, TResponse>` | `IPipelineBehavior<TRequest, TResponse>` | Behavior returns `ValueTask<T>` |
 | `Unit` | `Unit` | Same concept |
-| `IMediator.Send<T>()` returns `Task<T>` | `IMediator.SendAsync<T>()` returns `Task<T>` | **Same return type for consumer ergonomics** |
-| `IMediator.Publish()` returns `Task` | `IMediator.PublishAsync()` returns `Task` | **Same return type for consumer ergonomics** |
+| `IMediator.Send<T>()` returns `Task<T>` | `IMediator.SendAsync<T>()` returns `ValueTask<T>` | **Zero-allocation dispatch on synchronous paths** |
+| `IMediator.Publish()` returns `Task` | `IMediator.PublishAsync()` returns `ValueTask` | **Zero-allocation dispatch on synchronous paths** |
 
 ## Key Differences
 
-### 1. Public API: Task-based for Consumer Ergonomics
+### 1. Public API: ValueTask-based for Performance
 
-MediatorLite's `IMediator` interface returns `Task<T>` and `Task` for maximum consumer ergonomics, enabling natural parallel execution patterns:
+MediatorLite's `IMediator` interface returns `ValueTask<T>` and `ValueTask`. A request with no
+behaviors whose handler completes synchronously allocates nothing at all. Plain `await` works
+exactly like MediatR:
 
 ```csharp
-// MediatorLite supports natural parallel execution
-var task1 = _mediator.SendAsync(new GetUserQuery(1));
-var task2 = _mediator.SendAsync(new GetOrderQuery(1));
-await Task.WhenAll(task1, task2);  // Works naturally!
+var user = await _mediator.SendAsync(new GetUserQuery(1));
+```
+
+> ⚠️ **A `ValueTask` must be consumed exactly once.** Unlike MediatR's `Task`, you cannot await
+> it twice or hand it to `Task.WhenAll` directly. For fan-out or storage, convert with `.AsTask()`:
+
+```csharp
+var task1 = _mediator.SendAsync(new GetUserQuery(1)).AsTask();
+var task2 = _mediator.SendAsync(new GetOrderQuery(1)).AsTask();
+await Task.WhenAll(task1, task2);
 ```
 
 ### 2. Handler Internals: ValueTask for Performance
@@ -280,23 +288,25 @@ services.AddGeneratedNotificationHandlers();   // Only notification handlers
 services.AddGeneratedBehaviors();              // Only pipeline behaviors
 ```
 
-### O(1) Dispatch
+### Typed Switch Dispatch
 
-`AddGeneratedHandlers()` registers a `SourceGeneratedMediator` that implements `ISourceGeneratedMediator`. This provides O(1) dispatch via generated switch expressions:
+`AddGeneratedHandlers()` registers a `SourceGeneratedMediator` that implements `IMediator` directly — there is no runtime dispatch layer, no `Dictionary<Type, ...>` lookup, and no boxing. Dispatch is a compile-time type-pattern switch:
 
 ```csharp
 // Generated code (simplified)
-public ValueTask<TResponse> SendAsync<TRequest, TResponse>(TRequest request, ...) =>
-    request switch
+public ValueTask<TResponse> SendAsync<TResponse>(IRequest<TResponse> request, ...)
+{
+    switch (request)
     {
-        GetUserQuery q => HandleGetUserQuery(q, ct),
-        CreateOrderCommand c => HandleCreateOrderCommand(c, ct),
-        // ... O(1) lookup, not dictionary-based
-    };
+        case GetUserQuery q: return Send_GetUserQuery(q, ct);
+        case CreateOrderCommand c: return Send_CreateOrderCommand(c, ct);
+        // ...
+    }
+}
 ```
 
 The source-generated mediator provides:
-- **O(1) request dispatch** — Generated switch expression instead of `MakeGenericType`/`MethodInfo.Invoke`
+- **Typed request dispatch** — Generated type-pattern switch instead of `MakeGenericType`/`MethodInfo.Invoke`; the response stays fully typed end-to-end (no `Task<object>` boxing)
 - **Typed behavior resolution** — Resolve `IPipelineBehavior<TRequest, TResponse>` without reflection
 - **Handler ordering** — Compile-time lookup of `[NotificationHandlerOrder]` attributes
 - **Notification strategies** — Compile-time resolution of `[NotificationExecution]` / `[NotificationError]` attributes, merged with `[assembly: DefaultNotificationExecution]` / `[assembly: DefaultNotificationError]`

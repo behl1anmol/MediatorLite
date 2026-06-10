@@ -81,7 +81,7 @@ public record OrderCompletedNotification(int OrderId) : INotification;
 
 ### Parallel
 
-All handlers execute concurrently using `Task.WhenAll`. Best for independent handlers.
+All handlers are started before any is awaited, so they execute concurrently (`ValueTask` fan-out with no task array). Best for independent handlers.
 
 ```csharp
 [NotificationExecution(NotificationExecutionStrategy.Parallel)]
