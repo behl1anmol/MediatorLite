@@ -47,10 +47,7 @@ public class NotificationTests
 
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddMediatorLite(options =>
-        {
-            options.NotificationExecutionStrategy = NotificationExecutionStrategy.Sequential;
-        });
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -66,7 +63,8 @@ public class NotificationTests
     [Fact]
     public async Task PublishAsync_UsesSourceGenHandlerOrder()
     {
-        // This test verifies that source-generated TryGetHandlerOrder is used
+        // This test verifies that source-generated notification publisher
+        // has handlers ordered correctly (order is baked into generated code)
 
         // Arrange
         var services = new ServiceCollection();
@@ -75,15 +73,17 @@ public class NotificationTests
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
-        var sourceGenMediator = provider.GetRequiredService<ISourceGeneratedMediator>();
 
-        // Act - Check if source-gen knows the handler order
-        var handler2Order = sourceGenMediator.TryGetHandlerOrder(typeof(UserCreatedEventHandler2));
-        var handler3Order = sourceGenMediator.TryGetHandlerOrder(typeof(UserCreatedEventHandler3));
+        // Execute and verify handlers ran in order
+        UserCreatedEventHandler1.Reset();
+        UserCreatedEventHandler2.Reset();
+        UserCreatedEventHandler3.Reset();
 
-        // Assert
-        handler2Order.Should().Be(1);
-        handler3Order.Should().Be(2);
+        var mediator = provider.GetRequiredService<IMediator>();
+        await mediator.PublishAsync(new UserCreatedEvent(1, "test@test.com"));
+
+        // Order should be: Handler1 (default 0), Handler2 (order 1), Handler3 (order 2)
+        UserCreatedEventHandler1.CallOrder.Should().ContainInOrder(1, 2, 3);
     }
 
     [Fact]
@@ -92,6 +92,7 @@ public class NotificationTests
         // Arrange - Create a notification type that has no handlers registered
         var services = new ServiceCollection();
         services.AddMediatorLite();
+        services.AddGeneratedHandlers();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -128,22 +129,24 @@ public class NotificationTests
     [Fact]
     public async Task PublishAsync_UsesPerNotificationSettings_FromAttribute()
     {
-        // Arrange
+        // Arrange - ParallelEvent has [NotificationExecution(Parallel)] + [NotificationError(ContinueAndAggregate)].
+        // Behavior proves the attribute-driven strategies were baked into the generated publisher:
+        // Parallel + ContinueAndAggregate surfaces as an AggregateException AND the success handler still runs.
+        ParallelEventSuccessHandler.Reset();
+
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
         services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
-        var sourceGenMediator = provider.GetRequiredService<ISourceGeneratedMediator>();
+        var mediator = provider.GetRequiredService<IMediator>();
 
-        // Act - Check if source-gen knows the notification options
-        var parallelOptions = sourceGenMediator.TryGetNotificationOptions(typeof(ParallelEvent));
-
-        // Assert
-        parallelOptions.Should().NotBeNull();
-        parallelOptions!.Value.ExecutionStrategy.Should().Be(NotificationExecutionStrategy.Parallel);
-        parallelOptions!.Value.ErrorStrategy.Should().Be(NotificationErrorStrategy.ContinueAndAggregate);
+        // Act & Assert
+        Func<Task> act = async () => await mediator.PublishAsync(new ParallelEvent("test"));
+        await act.Should().ThrowAsync<AggregateException>();
+        ParallelEventSuccessHandler.WasCalled.Should().BeTrue(
+            "Parallel + ContinueAndAggregate: the success handler must run even when the failing handler throws");
     }
 
     [Fact]
@@ -194,30 +197,33 @@ public class NotificationTests
     }
 
     [Fact]
-    public async Task PublishAsync_GlobalStrategy_CanBeOverriddenByAttribute()
+    public async Task PublishAsync_PerNotificationAttribute_WinsOverLibraryDefaults()
     {
-        // Arrange - Set global to Sequential, but ParallelEvent has Parallel attribute
+        // Arrange - UserCreatedEvent has no per-type attribute, so it falls back to library defaults
+        // (Sequential + StopOnFirstError). ParallelEvent has [NotificationExecution(Parallel)] +
+        // [NotificationError(ContinueAndAggregate)] which must override the library defaults.
+        // This mirrors the resolution precedence: per-notification attribute > assembly default > library default.
         ParallelEventSuccessHandler.Reset();
+        UserCreatedEventHandler1.Reset();
+        UserCreatedEventHandler2.Reset();
+        UserCreatedEventHandler3.Reset();
 
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddMediatorLite(options =>
-        {
-            options.NotificationExecutionStrategy = NotificationExecutionStrategy.Sequential;
-            options.NotificationErrorStrategy = NotificationErrorStrategy.StopOnFirstError;
-        });
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
 
-        // Act & Assert - Should use attribute settings (Parallel, ContinueAndAggregate)
-        // which means AggregateException instead of just the first exception
-        Func<Task> act = async () => await mediator.PublishAsync(new ParallelEvent("test"));
-        await act.Should().ThrowAsync<AggregateException>();
-
-        // Success handler should have been called due to ContinueAndAggregate
+        // ParallelEvent: attribute-driven Parallel + ContinueAndAggregate wins.
+        Func<Task> publishParallel = async () => await mediator.PublishAsync(new ParallelEvent("test"));
+        await publishParallel.Should().ThrowAsync<AggregateException>();
         ParallelEventSuccessHandler.WasCalled.Should().BeTrue();
+
+        // UserCreatedEvent: no attribute, so library defaults (Sequential + StopOnFirstError) apply.
+        await mediator.PublishAsync(new UserCreatedEvent(1, "test@test.com"));
+        UserCreatedEventHandler1.CallOrder.Should().ContainInOrder(1, 2, 3);
     }
 
     [Fact]
@@ -228,10 +234,7 @@ public class NotificationTests
 
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddMediatorLite(options =>
-        {
-            options.EnableTracing = true;
-        });
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -252,10 +255,7 @@ public class NotificationTests
 
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddMediatorLite(options =>
-        {
-            options.EnableBuiltInLogging = true;
-        });
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -297,96 +297,140 @@ public class NotificationTests
     [Fact]
     public async Task PublishAsync_StopOnFirst_WithStopOnFirstError_ThrowsImmediately()
     {
-        // Arrange - StopOnFirstEvent is configured with StopOnFirst + StopOnFirstError (default)
-        StopOnFirstEventHandler1.Reset();
-        StopOnFirstEventHandler2.Reset();
+        // Arrange - StopOnFirstWithStopOnFirstErrorEvent has [NotificationExecution(StopOnFirst)] +
+        // [NotificationError(StopOnFirstError)]. Strategies are resolved at compile time, so this
+        // test verifies the attribute-driven configuration is baked into the generated publisher.
+        StopOnFirstWithStopOnFirstErrorEventFailingHandler.Reset();
+        StopOnFirstWithStopOnFirstErrorEventSuccessHandler.Reset();
 
         var services = new ServiceCollection();
-        services.AddTransient<INotificationHandler<StopOnFirstWithErrorEvent>, StopOnFirstWithErrorEventFailingHandler>();
-        services.AddTransient<INotificationHandler<StopOnFirstWithErrorEvent>, StopOnFirstWithErrorEventSuccessHandler>();
-        services.AddMediatorLite(options =>
-        {
-            options.NotificationExecutionStrategy = NotificationExecutionStrategy.StopOnFirst;
-            options.NotificationErrorStrategy = NotificationErrorStrategy.StopOnFirstError;
-        });
+        services.AddGeneratedHandlers();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
 
-        // Act & Assert - Should throw immediately because StopOnFirstError
-        Func<Task> act = async () => await mediator.PublishAsync(new StopOnFirstWithErrorEvent("test"));
+        // Act & Assert - Should throw immediately because StopOnFirstError (from attribute)
+        Func<Task> act = async () => await mediator.PublishAsync(new StopOnFirstWithStopOnFirstErrorEvent("test"));
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("StopOnFirst handler failed");
 
-        // Success handler should NOT have been called
-        StopOnFirstWithErrorEventSuccessHandler.WasCalled.Should().BeFalse();
+        // Failing handler should run first and throw, success handler should not run.
+        StopOnFirstWithStopOnFirstErrorEventFailingHandler.WasCalled.Should().BeTrue();
+        StopOnFirstWithStopOnFirstErrorEventSuccessHandler.WasCalled.Should().BeFalse();
     }
 
     [Fact]
     public async Task PublishAsync_StopOnFirst_AllHandlersFail_ThrowsAggregateException()
     {
-        // Arrange - Create notification where all handlers fail with ContinueAndAggregate
+        // Arrange - AllFailStopOnFirstWithAggregateEvent has [NotificationExecution(StopOnFirst)] +
+        // [NotificationError(ContinueAndAggregate)]. Strategies are resolved at compile time. This test
+        // verifies the aggregate exception path when every handler fails.
+        AllFailStopOnFirstWithAggregateEventHandler1.Reset();
+        AllFailStopOnFirstWithAggregateEventHandler2.Reset();
+
         var services = new ServiceCollection();
-        services.AddTransient<INotificationHandler<AllFailStopOnFirstEvent>, AllFailStopOnFirstEventHandler1>();
-        services.AddTransient<INotificationHandler<AllFailStopOnFirstEvent>, AllFailStopOnFirstEventHandler2>();
-        services.AddMediatorLite(options =>
-        {
-            options.NotificationExecutionStrategy = NotificationExecutionStrategy.StopOnFirst;
-            options.NotificationErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate;
-        });
+        services.AddGeneratedHandlers();
+        services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
 
         // Act & Assert - Should throw AggregateException with all failures
-        Func<Task> act = async () => await mediator.PublishAsync(new AllFailStopOnFirstEvent("test"));
+        Func<Task> act = async () => await mediator.PublishAsync(new AllFailStopOnFirstWithAggregateEvent("test"));
         var exception = await act.Should().ThrowAsync<AggregateException>();
         exception.Which.InnerExceptions.Should().HaveCount(2);
     }
-}
 
-#region Additional Test Types for StopOnFirst Error Handling
-
-public record StopOnFirstWithErrorEvent(string Message) : INotification;
-
-public class StopOnFirstWithErrorEventFailingHandler : INotificationHandler<StopOnFirstWithErrorEvent>
-{
-    public ValueTask HandleAsync(StopOnFirstWithErrorEvent notification, CancellationToken cancellationToken = default)
+    [Fact]
+    public async Task PublishAsync_ParallelContinueAndAggregate_SyncThrowHandlers_AggregatesAllExceptions()
     {
-        throw new InvalidOperationException("StopOnFirst handler failed");
+        // Arrange - ParallelSyncThrowEvent has Parallel+ContinueAndAggregate.
+        // Both handlers throw synchronously (bare throw, not ValueTask.FromException).
+        // The fix ensures each invocation is wrapped in try/catch so Task.WhenAll sees all faults.
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddGeneratedHandlers();
+        services.AddMediatorLite();
+        var mediator = services.BuildServiceProvider().GetRequiredService<IMediator>();
+
+        // Act
+        Func<Task> act = async () => await mediator.PublishAsync(new ParallelSyncThrowEvent("test"));
+
+        // Assert - both handlers must have run and their exceptions aggregated
+        var ex = await act.Should().ThrowAsync<AggregateException>();
+        ex.Which.InnerExceptions.Should().HaveCount(2);
+        ex.Which.InnerExceptions.Should()
+            .ContainSingle(e => e.Message.Contains("sync-throw-handler-1"))
+            .And.ContainSingle(e => e.Message.Contains("sync-throw-handler-2"));
+    }
+
+    [Fact]
+    public async Task PublishAsync_Parallel_StartPhase_InvokesEveryHandlerBeforeAwaitingAny()
+    {
+        // Parallel publishing has two phases. This test pins the START PHASE:
+        // calling PublishAsync runs the generated Publish_* method synchronously up to its
+        // first `await vtN`. Because each handler suspends on a shared gate instead of
+        // completing, every handler's synchronous prefix executes here — in start order —
+        // before any handler's result is awaited.
+        ParallelPhaseProbe.Reset();
+
+        var services = new ServiceCollection();
+        services.AddGeneratedHandlers();
+        services.AddMediatorLite();
+        services.AddLogging();
+
+        var provider = services.BuildServiceProvider();
+        var mediator = provider.GetRequiredService<IMediator>();
+
+        // Act - invoke, but do NOT release the gate yet.
+        var publishTask = mediator.PublishAsync(new ParallelPhaseEvent("test")).AsTask();
+
+        // Assert - both handlers were *started* (in [NotificationHandlerOrder] order) before
+        // any was awaited. Sequential execution would show only "h1" here, because h2 would
+        // not start until h1 fully completed.
+        ParallelPhaseProbe.StartLog.Should().Equal(new[] { "h1", "h2" },
+            "the start phase invokes every handler before awaiting any");
+        ParallelPhaseProbe.EndLog.Should().BeEmpty("no handler continuation runs until the await phase");
+        publishTask.IsCompleted.Should().BeFalse("the publisher is suspended awaiting the in-flight handlers");
+
+        // Cleanup - release the gate so the publish can complete and the task is observed.
+        ParallelPhaseProbe.Release();
+        await publishTask;
+    }
+
+    [Fact]
+    public async Task PublishAsync_Parallel_AwaitPhase_ObservesEveryStartedHandlerToCompletion()
+    {
+        // This test pins the AWAIT PHASE: after the start phase has invoked every handler,
+        // the publisher awaits the ValueTasks it already started. Releasing the gate lets
+        // those started tasks complete; no new handler is started during the await phase.
+        ParallelPhaseProbe.Reset();
+
+        var services = new ServiceCollection();
+        services.AddGeneratedHandlers();
+        services.AddMediatorLite();
+        services.AddLogging();
+
+        var provider = services.BuildServiceProvider();
+        var mediator = provider.GetRequiredService<IMediator>();
+
+        // Start phase ran synchronously inside this call; the publisher is now suspended
+        // in its await phase, waiting on the two in-flight handlers.
+        var publishTask = mediator.PublishAsync(new ParallelPhaseEvent("test")).AsTask();
+        ParallelPhaseProbe.StartLog.Should().Equal("h1", "h2");
+        ParallelPhaseProbe.EndLog.Should().BeEmpty();
+
+        // Act - release the gate, unblocking the await phase.
+        ParallelPhaseProbe.Release();
+        await publishTask;
+
+        // Assert - every started handler was awaited to completion, and no extra handler ran.
+        ParallelPhaseProbe.EndLog.Should().HaveCount(2);
+        ParallelPhaseProbe.EndLog.Should().Contain("h1").And.Contain("h2");
+        ParallelPhaseProbe.StartLog.Should().Equal(new[] { "h1", "h2" },
+            "the await phase only observes handlers started during the start phase");
     }
 }
-
-public class StopOnFirstWithErrorEventSuccessHandler : INotificationHandler<StopOnFirstWithErrorEvent>
-{
-    public static bool WasCalled { get; private set; }
-    public static void Reset() => WasCalled = false;
-
-    public ValueTask HandleAsync(StopOnFirstWithErrorEvent notification, CancellationToken cancellationToken = default)
-    {
-        WasCalled = true;
-        return ValueTask.CompletedTask;
-    }
-}
-
-public record AllFailStopOnFirstEvent(string Message) : INotification;
-
-public class AllFailStopOnFirstEventHandler1 : INotificationHandler<AllFailStopOnFirstEvent>
-{
-    public ValueTask HandleAsync(AllFailStopOnFirstEvent notification, CancellationToken cancellationToken = default)
-    {
-        throw new InvalidOperationException("Handler1 failed");
-    }
-}
-
-public class AllFailStopOnFirstEventHandler2 : INotificationHandler<AllFailStopOnFirstEvent>
-{
-    public ValueTask HandleAsync(AllFailStopOnFirstEvent notification, CancellationToken cancellationToken = default)
-    {
-        throw new InvalidOperationException("Handler2 failed");
-    }
-}
-
-#endregion

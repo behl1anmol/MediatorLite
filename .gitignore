@@ -129,3 +129,6 @@ Desktop.ini
 *.temp
 *.bak
 *.swp
+
+# Agent artifacts
+agent-artifacts.agents/session.env

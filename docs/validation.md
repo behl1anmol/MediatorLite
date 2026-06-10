@@ -35,26 +35,26 @@ public record CreateUserCommand : IRequest<int>
 
 ### 2. Register Services
 
-#### With Source Generation (Recommended)
+#### With Source Generation (Required for v2)
 
 The source generator automatically handles validation setup:
 
 - **Discovers** all `IValidator<T>` implementations at compile time
 - **Auto-registers** `DataAnnotationsValidator<T>` for request types with DataAnnotation attributes
-- **Registers** `ValidationBehavior<,>` first in the pipeline (before other behaviors) to ensure validation short-circuits early
+- **Registers** `ValidationBehavior<,>` respecting `[BehaviorOrder]` attributes
 
 ```csharp
 using MediatorLite.Generated;
 
 services
-    .AddGeneratedHandlers()   // Registers handlers, validators, behaviors, and source-gen mediator
+    .AddGeneratedHandlers()   // MUST be called first — registers handlers, validators, behaviors with O(1) dispatch
     .AddMediatorLite();
 
 // That's it! No manual validator or behavior registration needed.
 // The source generator:
 //   1. Detects [Required], [Range], etc. on CreateUserCommand properties
 //   2. Registers DataAnnotationsValidator<CreateUserCommand> automatically
-//   3. Registers ValidationBehavior<CreateUserCommand, int> first in the pipeline
+//   3. Registers ValidationBehavior<CreateUserCommand, int> with proper [BehaviorOrder]
 //   4. Discovers any custom IValidator<CreateUserCommand> implementations
 ```
 
@@ -65,22 +65,13 @@ services
     .AddGeneratedRequestHandlers()
     .AddGeneratedNotificationHandlers()
     .AddGeneratedValidators()       // Registers discovered validators + DataAnnotationsValidator
-    .AddGeneratedBehaviors()        // Registers ValidationBehavior first, then other behaviors
+    .AddGeneratedBehaviors()        // Registers behaviors with [BehaviorOrder] ordering
     .AddMediatorLite();
 ```
 
-#### Without Source Generation
+#### Without Source Generation (Not Supported)
 
-```csharp
-using MediatorLite.Validation;
-
-services.AddMediatorLite(options =>
-{
-    options.AddOpenBehavior(typeof(ValidationBehavior<,>));
-});
-
-services.AddTransient<IValidator<CreateUserCommand>, DataAnnotationsValidator<CreateUserCommand>>();
-```
+> ⚠️ **Not supported in v2:** There is no reflection fallback. Manual registrations of `ValidationBehavior<,>` or validators are never dispatched without `AddGeneratedHandlers()` — the `IMediator` registered by `AddMediatorLite()` alone throws on first use. Hand-registering validators alongside source generation is also a smell: the generator already registered them via `AddGeneratedValidators()`, and duplicates inflate `ValidatorCount`.
 
 ### 3. Handle ValidationException
 
@@ -228,21 +219,28 @@ The built-in `DataAnnotationsValidator<T>` supports all standard `System.Compone
 | `[CreditCard]` | Credit card format |
 | Custom attributes | Any attribute inheriting `ValidationAttribute` |
 
-## Validation Behavior Execution Order
+## Validation Behavior Execution Order (v2)
 
-`ValidationBehavior` runs as part of the pipeline. It must execute **first** to short-circuit the pipeline before expensive operations.
+`ValidationBehavior` runs as part of the pipeline. Use `[BehaviorOrder]` to ensure it executes first:
 
 ### With Source Generation (Automatic)
 
-The source generator guarantees `ValidationBehavior` is registered first in the DI container, before any other pipeline behaviors. This ensures validation always executes first:
+The source generator respects `[BehaviorOrder]` attributes. Add `[BehaviorOrder(0)]` to your `ValidationBehavior` to ensure it runs first:
+
+```csharp
+[BehaviorOrder(0)]  // Runs before other behaviors
+public class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse> { }
+```
 
 ```
-Request → ValidationBehavior → LoggingBehavior → OtherBehavior → Handler
+Request → [BehaviorOrder(0)] ValidationBehavior → [BehaviorOrder(1)] LoggingBehavior → Handler
 ```
 
 If validation fails, the pipeline short-circuits and subsequent behaviors/handlers are not executed.
 
-### Without Source Generation (Manual)
+### Without Source Generation (Deprecated)
+
+> ⚠️ **Deprecated in v2:** Manual registration order is deprecated. Use `[BehaviorOrder]` with source generation.
 
 Register `ValidationBehavior` before other behaviors to ensure it runs first:
 
@@ -379,14 +377,14 @@ public async Task Validator_ShouldFailForInvalidEmail()
 
 ## Best Practices
 
-1. **Use `AddGeneratedHandlers()`** - Automatic validator discovery, DataAnnotation detection, and execution order
-2. **Use DataAnnotations for simple validation** - Required, ranges, string lengths, formats
-3. **Use custom validators for business logic** - Async database checks, complex rules
-4. **Validation runs first automatically** - Source generator ensures `ValidationBehavior` is registered before other behaviors
-5. **Create specific error messages** - Help users understand what went wrong
-6. **Include AttemptedValue in errors** - Useful for logging and debugging
-7. **Handle ValidationException at API boundary** - Convert to HTTP 400 responses
-8. **Use `[MediatorGeneration(Skip = true)]`** - To exclude test-only validators from source generation
+1. **Use `AddGeneratedHandlers()` first** — Required for v2 O(1) dispatch and proper `[BehaviorOrder]` support
+2. **Use `[BehaviorOrder(0)]` for ValidationBehavior** — Ensures validation runs first
+3. **Use DataAnnotations for simple validation** — Required, ranges, string lengths, formats
+4. **Use custom validators for business logic** — Async database checks, complex rules
+5. **Create specific error messages** — Help users understand what went wrong
+6. **Include AttemptedValue in errors** — Useful for logging and debugging
+7. **Handle ValidationException at API boundary** — Convert to HTTP 400 responses
+8. **Use `[MediatorGeneration(Skip = true)]`** — To exclude test-only validators from source generation
 
 ## See Also
 

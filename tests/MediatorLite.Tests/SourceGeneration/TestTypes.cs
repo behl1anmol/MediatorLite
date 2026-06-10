@@ -22,36 +22,56 @@ public record ComputeValueQuery(int Value) : IRequest<int>;
 
 public record DelayedRequest : IRequest<string>;
 
+public record ShortCircuitQuery : IRequest;
+
 #endregion
 
 #region Notification Types
 
 public record UserCreatedEvent(int UserId, string Email) : INotification;
 
-[NotificationOptions(
-    ExecutionStrategy = NotificationExecutionStrategy.Parallel,
-    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate,
-    OverrideGlobal = true)]
+[NotificationExecution(NotificationExecutionStrategy.Parallel)]
+[NotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
 public record ParallelEvent(string Message) : INotification;
 
-[NotificationOptions(
-    ExecutionStrategy = NotificationExecutionStrategy.StopOnFirst,
-    OverrideGlobal = true)]
+[NotificationExecution(NotificationExecutionStrategy.StopOnFirst)]
 public record StopOnFirstEvent(string Message) : INotification;
 
 /// <summary>
 /// Notification configured for StopOnFirst execution with ContinueAndAggregate error strategy.
 /// This enables the "fallback pattern" where if one handler fails, the next is tried.
 /// </summary>
-[NotificationOptions(
-    ExecutionStrategy = NotificationExecutionStrategy.StopOnFirst,
-    ErrorStrategy = NotificationErrorStrategy.ContinueAndAggregate,
-    OverrideGlobal = true)]
+[NotificationExecution(NotificationExecutionStrategy.StopOnFirst)]
+[NotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
 public record StopOnFirstFallbackEvent(string Message) : INotification;
+
+/// <summary>
+/// Notification configured for StopOnFirst + StopOnFirstError (default error strategy).
+/// When the first handler fails, it should throw immediately without trying other handlers.
+/// </summary>
+[NotificationExecution(NotificationExecutionStrategy.StopOnFirst)]
+[NotificationError(NotificationErrorStrategy.StopOnFirstError)]
+public record StopOnFirstWithStopOnFirstErrorEvent(string Message) : INotification;
+
+/// <summary>
+/// Notification configured for StopOnFirst + ContinueAndAggregate where ALL handlers fail.
+/// Should throw AggregateException with all handler failures.
+/// </summary>
+[NotificationExecution(NotificationExecutionStrategy.StopOnFirst)]
+[NotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
+public record AllFailStopOnFirstWithAggregateEvent(string Message) : INotification;
 
 #endregion
 
 #region Request Handlers
+
+public class ShortCircuitCommandHandler : IRequestHandler<ShortCircuitQuery>
+{
+    public ValueTask HandleAsync(ShortCircuitQuery request, CancellationToken cancellationToken = default)
+    {
+        return ValueTask.CompletedTask;
+    }
+}
 
 public class GetUserByIdQueryHandler : IRequestHandler<GetUserByIdQuery, UserDto>
 {
@@ -91,7 +111,7 @@ public class FailingRequestHandler : IRequestHandler<FailingRequest, string>
 {
     public ValueTask<string> HandleAsync(FailingRequest request, CancellationToken cancellationToken = default)
     {
-        throw new InvalidOperationException("Handler failed intentionally");
+        return ValueTask.FromException<string>(new InvalidOperationException("Handler failed intentionally"));
     }
 }
 
@@ -163,7 +183,7 @@ public class ParallelEventFailingHandler : INotificationHandler<ParallelEvent>
 {
     public ValueTask HandleAsync(ParallelEvent notification, CancellationToken cancellationToken = default)
     {
-        throw new InvalidOperationException("Parallel handler failed");
+        return ValueTask.FromException(new InvalidOperationException("Parallel handler failed"));
     }
 }
 
@@ -217,7 +237,7 @@ public class StopOnFirstFallbackEventHandler1 : INotificationHandler<StopOnFirst
     {
         WasCalled = true;
         ThrownException = new InvalidOperationException("Primary handler failed");
-        throw ThrownException;
+        return ValueTask.FromException(ThrownException);
     }
 }
 
@@ -253,11 +273,73 @@ public class StopOnFirstFallbackEventHandler3 : INotificationHandler<StopOnFirst
     }
 }
 
+/// <summary>
+/// Handler that fails for StopOnFirstWithStopOnFirstErrorEvent - tests immediate throw behavior.
+/// </summary>
+public class StopOnFirstWithStopOnFirstErrorEventFailingHandler : INotificationHandler<StopOnFirstWithStopOnFirstErrorEvent>
+{
+    public static bool WasCalled { get; private set; }
+    public static void Reset() => WasCalled = false;
+
+    public ValueTask HandleAsync(StopOnFirstWithStopOnFirstErrorEvent notification, CancellationToken cancellationToken = default)
+    {
+        WasCalled = true;
+        return ValueTask.FromException(new InvalidOperationException("StopOnFirst handler failed"));
+    }
+}
+
+/// <summary>
+/// Success handler for StopOnFirstWithStopOnFirstErrorEvent - should NOT be called when first handler fails.
+/// </summary>
+[NotificationHandlerOrder(1)]
+public class StopOnFirstWithStopOnFirstErrorEventSuccessHandler : INotificationHandler<StopOnFirstWithStopOnFirstErrorEvent>
+{
+    public static bool WasCalled { get; private set; }
+    public static void Reset() => WasCalled = false;
+
+    public ValueTask HandleAsync(StopOnFirstWithStopOnFirstErrorEvent notification, CancellationToken cancellationToken = default)
+    {
+        WasCalled = true;
+        return ValueTask.CompletedTask;
+    }
+}
+
+/// <summary>
+/// First failing handler for AllFailStopOnFirstWithAggregateEvent - tests aggregate exception.
+/// </summary>
+public class AllFailStopOnFirstWithAggregateEventHandler1 : INotificationHandler<AllFailStopOnFirstWithAggregateEvent>
+{
+    public static bool WasCalled { get; private set; }
+    public static void Reset() => WasCalled = false;
+
+    public ValueTask HandleAsync(AllFailStopOnFirstWithAggregateEvent notification, CancellationToken cancellationToken = default)
+    {
+        WasCalled = true;
+        return ValueTask.FromException(new InvalidOperationException("Handler1 failed"));
+    }
+}
+
+/// <summary>
+/// Second failing handler for AllFailStopOnFirstWithAggregateEvent - tests aggregate exception.
+/// </summary>
+[NotificationHandlerOrder(1)]
+public class AllFailStopOnFirstWithAggregateEventHandler2 : INotificationHandler<AllFailStopOnFirstWithAggregateEvent>
+{
+    public static bool WasCalled { get; private set; }
+    public static void Reset() => WasCalled = false;
+
+    public ValueTask HandleAsync(AllFailStopOnFirstWithAggregateEvent notification, CancellationToken cancellationToken = default)
+    {
+        WasCalled = true;
+        return ValueTask.FromException(new InvalidOperationException("Handler2 failed"));
+    }
+}
+
 #endregion
 
 #region Pipeline Behaviors
 
-[MediatorGeneration(Skip = true)]
+[BehaviorOrder(1)]
 public class AddOneBehavior : IPipelineBehavior<ComputeValueQuery, int>
 {
     public async ValueTask<int> HandleAsync(
@@ -270,7 +352,7 @@ public class AddOneBehavior : IPipelineBehavior<ComputeValueQuery, int>
     }
 }
 
-[MediatorGeneration(Skip = true)]
+[BehaviorOrder(2)]
 public class MultiplyByTwoBehavior : IPipelineBehavior<ComputeValueQuery, int>
 {
     public async ValueTask<int> HandleAsync(
@@ -283,7 +365,6 @@ public class MultiplyByTwoBehavior : IPipelineBehavior<ComputeValueQuery, int>
     }
 }
 
-[MediatorGeneration(Skip = true)]
 public class GenericLoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
     where TRequest : IRequest<TResponse>
 {
@@ -302,15 +383,31 @@ public class GenericLoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRe
     }
 }
 
-[MediatorGeneration(Skip = true)]
-public class ShortCircuitBehavior : IPipelineBehavior<ComputeValueQuery, int>
+[BehaviorOrder(1)]
+public class ShortCircuitBehavior : IPipelineBehavior<ShortCircuitQuery, Unit>
 {
-    public ValueTask<int> HandleAsync(
-        ComputeValueQuery request,
-        RequestHandlerDelegate<int> next,
+    public static bool Executed = false;
+    public ValueTask<Unit> HandleAsync(
+        ShortCircuitQuery request,
+        RequestHandlerDelegate<Unit> next,
         CancellationToken cancellationToken = default)
     {
-        return ValueTask.FromResult(999);
+        Executed = true;
+        return Unit.CompletedTask;
+    }
+}
+
+[BehaviorOrder(2)]
+public class ShortCircuitLoggerBehavior : IPipelineBehavior<ShortCircuitQuery, Unit>
+{
+    public static bool Executed = false;
+    public ValueTask<Unit> HandleAsync(
+        ShortCircuitQuery request,
+        RequestHandlerDelegate<Unit> next,
+        CancellationToken cancellationToken = default)
+    {
+        Executed = true;
+        return Unit.CompletedTask;
     }
 }
 
@@ -371,9 +468,7 @@ public class ValidatedCommandCustomValidator : IValidator<ValidatedCommand>
 
 /// <summary>
 /// Behavior for tracking execution order in tests.
-/// Marked as Skip so it's not auto-registered - each test controls its own registration.
 /// </summary>
-[MediatorGeneration(Skip = true)]
 public class ExecutionOrderTrackingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
     where TRequest : IRequest<TResponse>
 {
@@ -389,6 +484,91 @@ public class ExecutionOrderTrackingBehavior<TRequest, TResponse> : IPipelineBeha
         var result = await next();
         ExecutionLog.Add($"TrackingBehavior:After:{typeof(TRequest).Name}");
         return result;
+    }
+}
+
+#endregion
+
+#region Parallel sync-throw fixtures
+
+[NotificationExecution(NotificationExecutionStrategy.Parallel)]
+[NotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
+public record ParallelSyncThrowEvent(string Message) : INotification;
+
+public class ParallelSyncThrowHandler1 : INotificationHandler<ParallelSyncThrowEvent>
+{
+    public ValueTask HandleAsync(ParallelSyncThrowEvent notification, CancellationToken cancellationToken = default)
+    {
+        throw new InvalidOperationException("sync-throw-handler-1");
+    }
+}
+
+public class ParallelSyncThrowHandler2 : INotificationHandler<ParallelSyncThrowEvent>
+{
+    public ValueTask HandleAsync(ParallelSyncThrowEvent notification, CancellationToken cancellationToken = default)
+    {
+        throw new InvalidOperationException("sync-throw-handler-2");
+    }
+}
+
+#endregion
+
+#region Parallel start/await phase probe fixtures
+
+/// <summary>
+/// Notification used to observe the two phases of parallel publishing: the synchronous
+/// "start phase" (every handler invoked before any is awaited) and the "await phase"
+/// (every started <see cref="ValueTask"/> awaited to completion). Both handlers suspend
+/// on a shared gate so a test can inspect state exactly at the phase boundary.
+/// </summary>
+[NotificationExecution(NotificationExecutionStrategy.Parallel)]
+public record ParallelPhaseEvent(string Message) : INotification;
+
+/// <summary>
+/// Shared probe state for <see cref="ParallelPhaseEvent"/> handlers. The gate is completed
+/// inline by the test thread, so handler continuations resume single-threaded — the lists
+/// need no synchronization.
+/// </summary>
+public static class ParallelPhaseProbe
+{
+    /// <summary>Records each handler's synchronous prefix — the start phase.</summary>
+    public static List<string> StartLog { get; private set; } = [];
+
+    /// <summary>Records each handler's post-await continuation — the await phase.</summary>
+    public static List<string> EndLog { get; private set; } = [];
+
+    /// <summary>Gate that every handler suspends on until the test releases it.</summary>
+    public static TaskCompletionSource Gate { get; private set; } = new();
+
+    public static void Reset()
+    {
+        StartLog = [];
+        EndLog = [];
+        Gate = new TaskCompletionSource();
+    }
+
+    /// <summary>Releases the gate, unblocking every started handler's await phase.</summary>
+    public static void Release() => Gate.TrySetResult();
+}
+
+public sealed class ParallelPhaseHandler1 : INotificationHandler<ParallelPhaseEvent>
+{
+    public async ValueTask HandleAsync(ParallelPhaseEvent notification, CancellationToken cancellationToken = default)
+    {
+        ParallelPhaseProbe.StartLog.Add("h1");                    // start phase: runs before any await
+        await ParallelPhaseProbe.Gate.Task.ConfigureAwait(false); // suspend → lets the next handler start
+        ParallelPhaseProbe.EndLog.Add("h1");                      // await phase: continuation after release
+    }
+}
+
+[NotificationHandlerOrder(1)]
+public sealed class ParallelPhaseHandler2 : INotificationHandler<ParallelPhaseEvent>
+{
+    public async ValueTask HandleAsync(ParallelPhaseEvent notification, CancellationToken cancellationToken = default)
+    {
+        ParallelPhaseProbe.StartLog.Add("h2");
+        await ParallelPhaseProbe.Gate.Task.ConfigureAwait(false);
+        ParallelPhaseProbe.EndLog.Add("h2");
     }
 }
 

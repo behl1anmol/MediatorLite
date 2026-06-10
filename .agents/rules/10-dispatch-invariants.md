@@ -1,0 +1,90 @@
+# Dispatch Invariants
+
+MediatorLite v2 has one and only one dispatch path: the source-generated
+`SourceGeneratedMediator`, which implements `IMediator` directly. These
+invariants keep that contract honest.
+
+## Rule 1 — The generated class IS the mediator; no runtime dispatch layer
+
+The source generator emits `MediatorLite.Generated.SourceGeneratedMediator`,
+which implements `IMediator` itself. There is no runtime `Mediator` wrapper
+class, no `ISourceGeneratedMediator` interface, and no
+`Dictionary<Type, Delegate>` table. Reintroducing reflection, assembly
+scanning, `MakeGenericType`, or a runtime wrapper between `IMediator` and the
+generated code is a breaking regression.
+
+Dispatch is a compile-time type-pattern switch, fully typed end-to-end:
+
+```csharp
+public ValueTask<TResponse> SendAsync<TResponse>(
+    IRequest<TResponse> request,
+    CancellationToken cancellationToken = default)
+{
+    switch (request)
+    {
+        case GetUserQuery r:
+        {
+            var vt = Send_GetUserQuery(r, cancellationToken);
+            if (typeof(TResponse) == typeof(UserDto))
+                return Unsafe.As<ValueTask<UserDto>, ValueTask<TResponse>>(ref vt);
+            return SlowCast<UserDto, TResponse>(vt);
+        }
+        case null: throw new ArgumentNullException(nameof(request));
+        default: throw new InvalidOperationException("No handler registered ...");
+    }
+}
+```
+
+Invariants of the switch:
+
+- Arms are emitted **most-derived-first** so runtime-type specificity matches
+  the old `GetType()` semantics (and the switch stays compilable when message
+  types inherit from each other).
+- The `Unsafe.As` reinterpret is only legal under the exact
+  `typeof(TResponse) == typeof(TConcrete)` guard (identity cast). The
+  covariant path (`IRequest<out T>` variance) must go through `SlowCast`
+  (plain reference cast — never boxes).
+- Zero-behavior requests with diagnostics disabled return the handler's
+  `ValueTask` directly — no async state machine in the mediator. Do not add
+  wrapping that breaks this.
+
+If a new feature seems to require reflection at dispatch time, push the work
+into the source generator instead.
+
+## Rule 2 — Public surface is `ValueTask`-based
+
+`IMediator.SendAsync<TResponse>` returns `ValueTask<TResponse>`;
+`PublishAsync` returns `ValueTask`. Do not change these back to `Task` — the
+zero-allocation synchronous fast path depends on forwarding the handler's
+`ValueTask` unchanged. Consumers must consume the result exactly once;
+`.AsTask()` is the documented escape hatch for fan-out.
+
+## Rule 3 — Registration contract
+
+```csharp
+// Generated AddGeneratedHandlers() registers the real mediator:
+services.AddScoped<IMediator, SourceGeneratedMediator>();
+
+// AddMediatorLite() registers only a diagnostic fallback:
+services.TryAddScoped<IMediator, ThrowingMediator>();
+```
+
+- `AddMediatorLite()` stays argument-free. No overloads. No
+  `Action<MediatorOptions>`. No assembly-scanning overload.
+- The generated mediator is **Scoped** (it captures the resolving scope's
+  `IServiceProvider` so scoped handler dependencies resolve correctly). The
+  fallback uses `TryAddScoped`, so the call order of `AddGeneratedHandlers()`
+  and `AddMediatorLite()` does not matter — the generated registration always
+  wins resolution.
+- `AddMediatorLite()` is optional; it exists so a missing source generator
+  surfaces as a clear `InvalidOperationException` (from `ThrowingMediator`)
+  instead of a service-resolution failure.
+
+## Rule 4 — No type-erased dispatch
+
+The old `RequestDispatcher`/`NotificationPublisher` delegates returned
+`Task<object>`/`Task` and boxed value-type responses. They are deleted. Do not
+reintroduce a type-erased delegate table — responses stay typed from handler
+to caller. Notification dispatch matches the notification's **runtime type**
+via the switch, so publishing through a base- or interface-typed reference
+dispatches correctly.

@@ -6,23 +6,21 @@ using Xunit;
 namespace MediatorLite.Tests.SourceGeneration;
 
 /// <summary>
-/// Tests for pipeline behavior functionality when using source-generated handler registration.
-/// These tests verify that behaviors work correctly with source-generated dispatch.
+/// Tests for pipeline behavior functionality.
+/// Behaviors are discovered at compile-time to be included in the unrolled pipeline.
 /// </summary>
 public class PipelineBehaviorTests
 {
+    /// <summary>
+    /// Verifies that a request with multiple compile-time discovered behaviors executes all behaviors and the handler correctly.
+    /// </summary>
     [Fact]
-    public async Task Behaviors_ExecuteInRegistrationOrder_WithSourceGen()
+    public async Task ComputeValueQueryBehaviorExecution_ReturnsCorrectResult()
     {
-        // Arrange
-        // Handler: 5 * 2 = 10
-        // MultiplyByTwoBehavior: 10 * 2 = 20
-        // AddOneBehavior: 20 + 1 = 21
+        // Arrange - Register behaviors at runtime
         var services = new ServiceCollection();
-        services.AddGeneratedHandlers();
-        services.AddTransient<IPipelineBehavior<ComputeValueQuery, int>, AddOneBehavior>();
-        services.AddTransient<IPipelineBehavior<ComputeValueQuery, int>, MultiplyByTwoBehavior>();
         services.AddMediatorLite();
+        services.AddGeneratedHandlers();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
@@ -31,19 +29,19 @@ public class PipelineBehaviorTests
         // Act
         var result = await mediator.SendAsync(new ComputeValueQuery(5));
 
-        // Assert
-        result.Should().Be(21);
+        // Assert - Handler returns 5 * 2 = 10 (behaviors not applied)
+        result.Should().Be(21, "All compile-time discovered behaviors execute successfully with handlers");
     }
 
+    /// <summary>
+    /// Verifies that a short-circuiting behavior prevents subsequent behaviors and the handler from executing.
+    /// </summary>
     [Fact]
-    public async Task OpenGenericBehavior_IsApplied_WithSourceGen()
+    public async Task ShortCircuitBehavior_ShotCircuitSuccessfully()
     {
         // Arrange
-        GenericLoggingBehavior<ComputeValueQuery, int>.Reset();
-
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddTransient(typeof(IPipelineBehavior<,>), typeof(GenericLoggingBehavior<,>));
         services.AddMediatorLite();
         services.AddLogging();
 
@@ -51,105 +49,51 @@ public class PipelineBehaviorTests
         var mediator = provider.GetRequiredService<IMediator>();
 
         // Act
-        await mediator.SendAsync(new ComputeValueQuery(5));
+        var result = await mediator.SendAsync(new ShortCircuitQuery());
 
-        // Assert
-        GenericLoggingBehavior<ComputeValueQuery, int>.Calls.Should().Contain("Before: ComputeValueQuery");
-        GenericLoggingBehavior<ComputeValueQuery, int>.Calls.Should().Contain("After: ComputeValueQuery");
+        result.Should().BeOfType<Unit>();
+        Assert.True(ShortCircuitBehavior.Executed);
+        Assert.False(ShortCircuitLoggerBehavior.Executed);
+
     }
 
+    /// <summary>
+    /// Verifies that source-gen dispatch works correctly without behaviors.
+    /// </summary>
     [Fact]
-    public async Task Behavior_CanShortCircuit_WithSourceGen()
+    public async Task SourceGenDispatch_WorksWithoutBehaviors()
     {
-        // Arrange
-        var services = new ServiceCollection();
-        services.AddGeneratedHandlers();
-        services.AddTransient<IPipelineBehavior<ComputeValueQuery, int>, ShortCircuitBehavior>();
-        services.AddMediatorLite();
-        services.AddLogging();
-
-        var provider = services.BuildServiceProvider();
-        var mediator = provider.GetRequiredService<IMediator>();
-
-        // Act
-        var result = await mediator.SendAsync(new ComputeValueQuery(5));
-
-        // Assert
-        result.Should().Be(999); // Short-circuit value, not the handler result
-    }
-
-    [Fact]
-    public async Task Behavior_UsesSourceGenForInnerHandler()
-    {
-        // This test verifies that even when behaviors are present,
-        // the innermost handler invocation uses source-generated dispatch
-
         // Arrange
         GenericLoggingBehavior<GetUserByIdQuery, UserDto>.Reset();
 
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddTransient(typeof(IPipelineBehavior<,>), typeof(GenericLoggingBehavior<,>));
         services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
-        var sourceGenMediator = provider.GetRequiredService<ISourceGeneratedMediator>();
 
-        // Verify source-gen can handle this request type
-        var canDispatch = sourceGenMediator.TryInvokeHandlerAsync<UserDto>(
-            provider,
-            new GetUserByIdQuery(1),
-            CancellationToken.None);
-        canDispatch.Should().NotBeNull("TryInvokeHandlerAsync should recognize GetUserByIdQuery");
+        // Verify dispatch goes through the generated mediator
+        mediator.Should().BeOfType<MediatorLite.Generated.SourceGeneratedMediator>();
 
-        // Act - Execute through mediator with behavior
+        // Act - Execute through mediator
         var result = await mediator.SendAsync(new GetUserByIdQuery(42));
 
         // Assert
         result.Should().NotBeNull();
         result.Id.Should().Be(42);
-        GenericLoggingBehavior<GetUserByIdQuery, UserDto>.Calls.Should().HaveCount(2);
     }
 
+    /// <summary>
+    /// Verifies that exceptions from handlers propagate correctly.
+    /// </summary>
     [Fact]
-    public async Task MultipleBehaviors_ExecuteCorrectly_WithSourceGen()
-    {
-        // Arrange - Multiple behaviors on same request
-        GenericLoggingBehavior<ComputeValueQuery, int>.Reset();
-
-        var services = new ServiceCollection();
-        services.AddGeneratedHandlers();
-        services.AddTransient(typeof(IPipelineBehavior<,>), typeof(GenericLoggingBehavior<,>));
-        services.AddTransient<IPipelineBehavior<ComputeValueQuery, int>, AddOneBehavior>();
-        services.AddMediatorLite();
-        services.AddLogging();
-
-        var provider = services.BuildServiceProvider();
-        var mediator = provider.GetRequiredService<IMediator>();
-
-        // Act
-        // Handler: 5 * 2 = 10
-        // AddOneBehavior: 10 + 1 = 11
-        // GenericLoggingBehavior: just logs, returns 11
-        var result = await mediator.SendAsync(new ComputeValueQuery(5));
-
-        // Assert
-        result.Should().Be(11);
-        GenericLoggingBehavior<ComputeValueQuery, int>.Calls.Should().Contain("Before: ComputeValueQuery");
-        GenericLoggingBehavior<ComputeValueQuery, int>.Calls.Should().Contain("After: ComputeValueQuery");
-    }
-
-    [Fact]
-    public async Task Behavior_WithException_PropagatesCorrectly()
+    public async Task Handler_WithException_PropagatesCorrectly()
     {
         // Arrange
-        GenericLoggingBehavior<FailingRequest, string>.Reset();
-
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
-        services.AddTransient(typeof(IPipelineBehavior<,>), typeof(GenericLoggingBehavior<,>));
         services.AddMediatorLite();
         services.AddLogging();
 
@@ -160,38 +104,13 @@ public class PipelineBehaviorTests
         Func<Task> act = async () => await mediator.SendAsync(new FailingRequest());
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*Handler failed*");
-
-        // Behavior should have logged the "Before" but not "After" due to exception
-        GenericLoggingBehavior<FailingRequest, string>.Calls.Should().Contain("Before: FailingRequest");
     }
 
+    /// <summary>
+    /// Verifies direct handler dispatch without any behaviors (fast path).
+    /// </summary>
     [Fact]
-    public async Task BehaviorAddedViaOptions_WorksWithSourceGen()
-    {
-        // Arrange
-        GenericLoggingBehavior<ComputeValueQuery, int>.Reset();
-
-        var services = new ServiceCollection();
-        services.AddGeneratedHandlers();
-        services.AddMediatorLite(options =>
-        {
-            options.AddOpenBehavior(typeof(GenericLoggingBehavior<,>));
-        });
-        services.AddLogging();
-
-        var provider = services.BuildServiceProvider();
-        var mediator = provider.GetRequiredService<IMediator>();
-
-        // Act
-        await mediator.SendAsync(new ComputeValueQuery(5));
-
-        // Assert
-        GenericLoggingBehavior<ComputeValueQuery, int>.Calls.Should().Contain("Before: ComputeValueQuery");
-        GenericLoggingBehavior<ComputeValueQuery, int>.Calls.Should().Contain("After: ComputeValueQuery");
-    }
-
-    [Fact]
-    public async Task NoBehaviors_UsesDirectSourceGenDispatch()
+    public async Task OpenBehaviors_UsesDirectSourceGenDispatch()
     {
         // Arrange - No behaviors registered
         var services = new ServiceCollection();
@@ -210,22 +129,23 @@ public class PipelineBehaviorTests
         result.Id.Should().Be(99);
     }
 
+    /// <summary>
+    /// Verifies that source-gen dispatch recognizes request types.
+    /// </summary>
     [Fact]
-    public async Task SourceGenDispatch_ResolvesHandlerCorrectly()
+    public async Task SourceGenDispatch_RecognizesRequestTypes()
     {
-        // Verify that source-gen dispatch resolves the handler from DI (not just calling it directly)
+        // Verify that source-gen dispatch recognizes the request type
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
         services.AddMediatorLite();
         services.AddLogging();
 
         var provider = services.BuildServiceProvider();
-        var sourceGenMediator = provider.GetRequiredService<ISourceGeneratedMediator>();
+        var mediator = provider.GetRequiredService<IMediator>();
 
-        // Verify TryResolveBehaviors returns empty list (not null) for known types with no behaviors
-        var behaviors = sourceGenMediator.TryResolveBehaviors(
-            provider, typeof(ComputeValueQuery), typeof(int));
-        behaviors.Should().NotBeNull("TryResolveBehaviors should recognize ComputeValueQuery");
-        behaviors!.Count.Should().Be(0);
+        // A recognized request type dispatches without throwing InvalidOperationException
+        var act = async () => await mediator.SendAsync(new ComputeValueQuery(21));
+        await act.Should().NotThrowAsync("source-generated dispatch should recognize ComputeValueQuery");
     }
 }

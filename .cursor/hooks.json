@@ -1,0 +1,32 @@
+{
+  "$schema": "https://cursor.sh/schemas/hooks.json",
+  "description": "MediatorLite agentic hooks. All hooks are dotnet-script (.csx) files invoked via a PowerShell shim. See .cursor/hooks/run-hook.ps1 and .cursor/hooks/*.csx. Exit codes: 0 = allow, non-zero = block (for commit/push gates).",
+  "hooks": {
+    "onSessionStart": [
+      { "command": "pwsh -NoProfile -File .cursor/hooks/run-hook.ps1 01-bootstrap.csx" }
+    ],
+    "beforeTurn": [
+      { "command": "pwsh -NoProfile -File .cursor/hooks/run-hook.ps1 05-inject-context.csx" }
+    ],
+    "beforeCompaction": [
+      { "command": "pwsh -NoProfile -File .cursor/hooks/run-hook.ps1 00-save-context.csx" }
+    ],
+    "onAgentError": [
+      { "command": "pwsh -NoProfile -File .cursor/hooks/run-hook.ps1 10-log-mistake.csx" }
+    ],
+    "afterPlanCreation": [
+      { "command": "pwsh -NoProfile -File .cursor/hooks/run-hook.ps1 40-snapshot-plan.csx" }
+    ],
+    "beforeCommit": [
+      { "command": "pwsh -NoProfile -File .cursor/hooks/run-hook.ps1 20-autoreview.csx" },
+      { "command": "pwsh -NoProfile -File .cursor/hooks/run-hook.ps1 21-build-gate.csx" },
+      { "command": "pwsh -NoProfile -File .cursor/hooks/run-hook.ps1 22-lint-gate.csx" }
+    ],
+    "beforePush": [
+      { "command": "pwsh -NoProfile -File .cursor/hooks/run-hook.ps1 30-test-gate.csx" }
+    ],
+    "onSessionEnd": [
+      { "command": "pwsh -NoProfile -File .cursor/hooks/run-hook.ps1 99-close-session.csx" }
+    ]
+  }
+}

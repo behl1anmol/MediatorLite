@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Resolve dotnet from a user-local install first, then PATH.
+if [ -x "${HOME}/.dotnet/dotnet" ]; then
+  DOTNET_BIN="${HOME}/.dotnet/dotnet"
+else
+  DOTNET_BIN="$(command -v dotnet || true)"
+fi
+if [ -n "$DOTNET_BIN" ]; then
+  DOTNET_ROOT="$(cd "$(dirname "$DOTNET_BIN")" && pwd)"
+  export DOTNET_ROOT="$(cd "${DOTNET_ROOT}/.." && pwd)"
+  export PATH="${DOTNET_ROOT}:${PATH}"
+else
+  DOTNET_BIN="dotnet"
+fi
+
+# MediatorLite pre-push gate (via core.hooksPath = .agents/hooks)
+set -e
+echo "[gate] Running test gate..."
+"$DOTNET_BIN" test MediatorLite.sln -c Release --no-build --logger "console;verbosity=minimal"
+echo "[gate] All tests passed."

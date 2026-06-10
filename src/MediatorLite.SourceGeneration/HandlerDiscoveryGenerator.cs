@@ -18,6 +18,13 @@ namespace MediatorLite.SourceGeneration;
 [Generator(LanguageNames.CSharp)]
 public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
 {
+    // Mirrors constants in src/MediatorLite/Diagnostics/MediatorDiagnostics.cs.
+    // Kept in sync manually because the generator project (netstandard2.0) cannot
+    // reference the runtime MediatorLite assembly. If the runtime constants change,
+    // update these literals to match.
+    private const string ActivityNameSendRequest = "MediatorLite.Send";
+    private const string ActivityNamePublishNotification = "MediatorLite.Publish";
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         // Find all class declarations that might be handlers
@@ -48,19 +55,77 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 transform: static (context, ct) => GetValidatorInfo(context, ct))
             .Where(static info => info is not null);
 
+        // Assembly-level defaults for notification strategies (compile-time)
+        var assemblyDefaults = context.CompilationProvider
+            .Select(static (compilation, _) => GetAssemblyDefaults(compilation));
+
         // Combine with compilation
         var compilationAndData = context.CompilationProvider
             .Combine(handlerDeclarations.Collect())
             .Combine(notificationDeclarations.Collect())
             .Combine(behaviorDeclarations.Collect())
-            .Combine(validatorDeclarations.Collect());
+            .Combine(validatorDeclarations.Collect())
+            .Combine(assemblyDefaults);
 
         // Generate the output
         context.RegisterSourceOutput(compilationAndData, static (spc, source) =>
         {
-            var ((((compilation, handlers), notifications), behaviors), validators) = source;
-            Execute(spc, compilation, handlers!, notifications!, behaviors!, validators!);
+            var (((((compilation, handlers), notifications), behaviors), validators), defaults) = source;
+            Execute(spc, compilation, handlers!, notifications!, behaviors!, validators!, defaults);
         });
+    }
+
+    /// <summary>
+    /// Reads assembly-level defaults for notification strategies from
+    /// <see cref="DefaultNotificationExecutionAttribute"/> and <see cref="DefaultNotificationErrorAttribute"/>.
+    /// </summary>
+    private static AssemblyDefaults GetAssemblyDefaults(Compilation compilation)
+    {
+        int? execution = null;
+        int? error = null;
+        bool loggingDisabled = false;
+        bool tracingDisabled = false;
+
+        foreach (var attr in compilation.Assembly.GetAttributes())
+        {
+            var name = attr.AttributeClass?.Name;
+            if (name == "DefaultNotificationExecutionAttribute"
+                && attr.ConstructorArguments.Length > 0
+                && attr.ConstructorArguments[0].Value is int es)
+            {
+                execution = es;
+            }
+            else if (name == "DefaultNotificationErrorAttribute"
+                && attr.ConstructorArguments.Length > 0
+                && attr.ConstructorArguments[0].Value is int ers)
+            {
+                error = ers;
+            }
+            else if (name == "DisableMediatorLoggingAttribute")
+            {
+                loggingDisabled = true;
+            }
+            else if (name == "DisableMediatorTracingAttribute")
+            {
+                tracingDisabled = true;
+            }
+        }
+
+        return new AssemblyDefaults(execution, error, loggingDisabled, tracingDisabled);
+    }
+
+    /// <summary>
+    /// Resolves the final (execution, error) strategy tuple for a notification type.
+    /// Precedence per strategy: per-notification attribute &gt; assembly default &gt; library default
+    /// (Sequential=0 for execution, StopOnFirstError=0 for error).
+    /// </summary>
+    private static (int Execution, int Error) ResolveStrategies(
+        NotificationTypeInfo? perType,
+        AssemblyDefaults globals)
+    {
+        int execution = perType?.ExecutionStrategy ?? globals.ExecutionStrategy ?? 0;
+        int error = perType?.ErrorStrategy ?? globals.ErrorStrategy ?? 0;
+        return (execution, error);
     }
 
     private static bool IsHandlerCandidate(SyntaxNode node)
@@ -91,27 +156,27 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         if (!implementsNotification)
             return null;
 
-        var optionsAttr = typeSymbol.GetAttributes()
-            .FirstOrDefault(a => a.AttributeClass?.Name == "NotificationOptionsAttribute");
+        int? executionStrategy = null;
+        int? errorStrategy = null;
 
-        if (optionsAttr == null)
-            return null;
-
-        int executionStrategy = 0;
-        int errorStrategy = 1;
-        bool overrideGlobal = true;
-
-        foreach (var arg in optionsAttr.NamedArguments)
+        foreach (var attr in typeSymbol.GetAttributes())
         {
-            if (arg.Key == "ExecutionStrategy" && arg.Value.Value is int es)
+            var name = attr.AttributeClass?.Name;
+            if (name == "NotificationExecutionAttribute"
+                && attr.ConstructorArguments.Length > 0
+                && attr.ConstructorArguments[0].Value is int es)
+            {
                 executionStrategy = es;
-            else if (arg.Key == "ErrorStrategy" && arg.Value.Value is int ers)
+            }
+            else if (name == "NotificationErrorAttribute"
+                && attr.ConstructorArguments.Length > 0
+                && attr.ConstructorArguments[0].Value is int ers)
+            {
                 errorStrategy = ers;
-            else if (arg.Key == "OverrideGlobal" && arg.Value.Value is bool og)
-                overrideGlobal = og;
+            }
         }
 
-        if (!overrideGlobal)
+        if (executionStrategy is null && errorStrategy is null)
             return null;
 
         return new NotificationTypeInfo(
@@ -173,11 +238,21 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         if (behaviorInterfaces.Count == 0)
             return null;
 
+        // Extract BehaviorOrderAttribute if present
+        int behaviorOrder = 0;
+        var orderAttr = classSymbol.GetAttributes()
+            .FirstOrDefault(a => a.AttributeClass?.Name == "BehaviorOrderAttribute");
+        if (orderAttr != null && orderAttr.ConstructorArguments.Length > 0)
+        {
+            behaviorOrder = (int)(orderAttr.ConstructorArguments[0].Value ?? 0);
+        }
+
         return new BehaviorInfo(
             ClassName: classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             Namespace: classSymbol.ContainingNamespace?.ToDisplayString() ?? "",
             BehaviorInterfaces: behaviorInterfaces,
-            IsOpenGeneric: isOpenGeneric);
+            IsOpenGeneric: isOpenGeneric,
+            Order: behaviorOrder);
     }
 
     private static bool IsValidatorCandidate(SyntaxNode node)
@@ -233,6 +308,45 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Collects the fully-qualified names of all base classes of a type (excluding object).
+    /// Used to order switch arms most-derived-first so type-pattern dispatch preserves
+    /// runtime-type specificity when message types inherit from each other.
+    /// </summary>
+    private static List<string> GetBaseTypeNames(ITypeSymbol type)
+    {
+        var result = new List<string>();
+        var current = type.BaseType;
+        while (current is not null && current.SpecialType != SpecialType.System_Object)
+        {
+            result.Add(current.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+            current = current.BaseType;
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Orders items so that derived message types precede their base types. Within the set of
+    /// dispatched types, an item's depth is the number of its base classes that are themselves
+    /// dispatched; sorting by depth descending guarantees derived-before-base, which both keeps
+    /// the emitted switch arms compilable (a base-type arm would subsume a later derived arm)
+    /// and matches the runtime-type semantics of the previous GetType()-keyed dispatch.
+    /// </summary>
+    private static List<T> SortMostDerivedFirst<T>(
+        List<T> items,
+        Func<T, string> typeName,
+        Func<T, List<string>?> baseTypes)
+    {
+        var dispatchedTypes = new HashSet<string>(items.Select(typeName));
+        return items
+            .Select((item, index) => (Item: item, Index: index,
+                Depth: baseTypes(item)?.Count(dispatchedTypes.Contains) ?? 0))
+            .OrderByDescending(x => x.Depth)
+            .ThenBy(x => x.Index)
+            .Select(x => x.Item)
+            .ToList();
     }
 
     /// <summary>
@@ -314,7 +428,8 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                         InterfaceType: iface.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                         RequestType: typeArgs[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                         ResponseType: typeArgs[1].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                        HasDataAnnotations: hasDataAnnotations));
+                        HasDataAnnotations: hasDataAnnotations,
+                        BaseTypes: GetBaseTypeNames(typeArgs[0])));
                 }
             }
             else if (originalDef == "MediatorLite.INotificationHandler<TNotification>")
@@ -325,7 +440,8 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                     notificationHandlerInterfaces.Add(new NotificationHandlerInterfaceInfo(
                         InterfaceType: iface.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                         NotificationType: typeArgs[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                        Order: handlerOrder));
+                        Order: handlerOrder,
+                        BaseTypes: GetBaseTypeNames(typeArgs[0])));
                 }
             }
         }
@@ -346,7 +462,8 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         ImmutableArray<HandlerInfo?> handlers,
         ImmutableArray<NotificationTypeInfo?> notifications,
         ImmutableArray<BehaviorInfo?> behaviors,
-        ImmutableArray<ValidatorInfo?> validators)
+        ImmutableArray<ValidatorInfo?> validators,
+        AssemblyDefaults assemblyDefaults)
     {
         var validHandlers = handlers.Where(h => h is not null).Cast<HandlerInfo>().ToList();
         var validNotifications = notifications.Where(n => n is not null).Cast<NotificationTypeInfo>().ToList();
@@ -375,7 +492,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         }
 
         GenerateRegistrationCode(context, validHandlers, expandedBehaviors, validValidators, requestTypesWithValidation);
-        GenerateSourceGeneratedMediator(context, validHandlers, validNotifications, validBehaviors, expandedBehaviors);
+        GenerateSourceGeneratedMediator(context, validHandlers, validNotifications, validBehaviors, expandedBehaviors, assemblyDefaults);
     }
 
     /// <summary>
@@ -440,7 +557,8 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                             BehaviorTypeName: closedBehaviorType,
                             RequestType: requestType,
                             ResponseType: responseType,
-                            InterfaceType: closedInterfaceType));
+                            InterfaceType: closedInterfaceType,
+                            Order: behavior.Order));
                     }
                 }
                 else if (!behaviorInterface.IsOpenGeneric)
@@ -449,7 +567,8 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                         BehaviorTypeName: behavior.ClassName,
                         RequestType: behaviorInterface.RequestType!,
                         ResponseType: behaviorInterface.ResponseType!,
-                        InterfaceType: behaviorInterface.InterfaceType));
+                        InterfaceType: behaviorInterface.InterfaceType,
+                        Order: behavior.Order));
                 }
             }
         }
@@ -571,8 +690,10 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("            AddGeneratedValidators(services);");
         sb.AppendLine("            AddGeneratedBehaviors(services);");
         sb.AppendLine();
-        sb.AppendLine("            // Register the source-generated mediator for zero-reflection dispatch");
-        sb.AppendLine("            services.AddSingleton<global::MediatorLite.ISourceGeneratedMediator, SourceGeneratedMediator>();");
+        sb.AppendLine("            // Register the source-generated mediator for zero-reflection dispatch.");
+        sb.AppendLine("            // Scoped: the mediator captures the resolving scope's IServiceProvider so");
+        sb.AppendLine("            // handlers and behaviors resolve with correct scoped lifetimes.");
+        sb.AppendLine("            services.AddScoped<global::MediatorLite.IMediator, SourceGeneratedMediator>();");
         sb.AppendLine();
         sb.AppendLine("            return services;");
         sb.AppendLine("        }");
@@ -612,7 +733,10 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         {
             foreach (var (handler, iface) in notificationHandlers)
             {
+                // Register by interface for standard DI resolution
                 sb.AppendLine($"            services.AddTransient<{iface.InterfaceType}, {handler.ClassName}>();");
+                // Also register concrete type for unrolled pipeline resolution
+                sb.AppendLine($"            services.AddTransient<{handler.ClassName}>();");
             }
         }
 
@@ -669,17 +793,18 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("        {");
 
         // Register ValidationBehavior FIRST for request types with validators
+        // Register by concrete type so unrolled pipeline can resolve each behavior individually
         if (requestTypesWithValidation.Count > 0)
         {
             sb.AppendLine("            // Validation behaviors (registered first to ensure validation runs before other behaviors)");
             foreach (var (requestType, responseType) in requestTypesWithValidation)
             {
-                sb.AppendLine($"            services.AddTransient<global::MediatorLite.IPipelineBehavior<{requestType}, {responseType}>, global::MediatorLite.Validation.ValidationBehavior<{requestType}, {responseType}>>();");
+                sb.AppendLine($"            services.AddTransient<global::MediatorLite.Validation.ValidationBehavior<{requestType}, {responseType}>>();");
             }
             sb.AppendLine();
         }
 
-        // Then register other (non-validation) behaviors
+        // Then register other (non-validation) behaviors by concrete type
         if (expandedBehaviors.Count > 0)
         {
             var nonValidationBehaviors = expandedBehaviors
@@ -690,7 +815,8 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             {
                 foreach (var behavior in nonValidationBehaviors)
                 {
-                    sb.AppendLine($"            services.AddTransient<{behavior.InterfaceType}, {behavior.BehaviorTypeName}>();");
+                    // Register by concrete type for individual resolution in unrolled pipeline
+                    sb.AppendLine($"            services.AddTransient<{behavior.BehaviorTypeName}>();");
                 }
             }
         }
@@ -723,20 +849,55 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// Generates the ISourceGeneratedMediator implementation with pattern matching dispatch.
+    /// Generates the SourceGeneratedMediator class, which implements IMediator directly:
+    /// a type-pattern switch over the discovered message types dispatching to fully-typed
+    /// unrolled ValueTask pipelines (no dictionaries, no boxing, no runtime wrapper).
     /// </summary>
     private static void GenerateSourceGeneratedMediator(
         SourceProductionContext context,
         List<HandlerInfo> handlers,
         List<NotificationTypeInfo> notifications,
         List<BehaviorInfo> behaviors,
-        List<ExpandedBehaviorInfo> expandedBehaviors)
+        List<ExpandedBehaviorInfo> expandedBehaviors,
+        AssemblyDefaults assemblyDefaults)
     {
         var requestHandlers = handlers.SelectMany(h =>
             h.RequestHandlers.Select(r => (Handler: h, Interface: r))).ToList();
 
         var notificationHandlers = handlers.SelectMany(h =>
             h.NotificationHandlers.Select(n => (Handler: h, Interface: n))).ToList();
+
+        // Group behaviors by request type for unrolled pipeline generation
+        var behaviorsByRequest = expandedBehaviors
+            .GroupBy(b => (b.RequestType, b.ResponseType))
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderBy(b => b.Order).ToList());
+
+        // Group notification handlers by notification type (handlers pre-sorted by order),
+        // then order the groups most-derived-first for the PublishAsync type-pattern switch.
+        var notificationGroups = notificationHandlers
+            .GroupBy(h => h.Interface.NotificationType)
+            .Select(g => (
+                NotificationType: g.Key,
+                Handlers: g.OrderBy(h => h.Interface.Order ?? 0).ToList()))
+            .ToList();
+        notificationGroups = SortMostDerivedFirst(
+            notificationGroups,
+            g => g.NotificationType,
+            g => g.Handlers[0].Interface.BaseTypes);
+
+        // One dispatch entry (switch arm + Send_* method) per request type. Duplicate handler
+        // registrations for the same request type collapse to a single entry — resolution via
+        // IRequestHandler<,> picks the last DI registration, matching previous behavior.
+        var dispatchEntries = requestHandlers
+            .GroupBy(rh => rh.Interface.RequestType)
+            .Select(g => g.First())
+            .ToList();
+        dispatchEntries = SortMostDerivedFirst(
+            dispatchEntries,
+            rh => rh.Interface.RequestType,
+            rh => rh.Interface.BaseTypes);
 
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated />");
@@ -746,365 +907,567 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("using System.Threading;");
         sb.AppendLine("using System.Threading.Tasks;");
         sb.AppendLine("using System.Collections.Generic;");
+        sb.AppendLine("using System.Runtime.CompilerServices;");
         sb.AppendLine("using Microsoft.Extensions.DependencyInjection;");
+        sb.AppendLine("using Microsoft.Extensions.Logging;");
         sb.AppendLine();
         sb.AppendLine("namespace MediatorLite.Generated");
         sb.AppendLine("{");
         sb.AppendLine("    /// <summary>");
-        sb.AppendLine("    /// Source-generated mediator implementation that provides zero-reflection dispatch");
-        sb.AppendLine("    /// for compile-time discovered handlers, behaviors, and notifications.");
+        sb.AppendLine("    /// Source-generated <see cref=\"global::MediatorLite.IMediator\"/> implementation.");
+        sb.AppendLine("    /// Dispatch is a type-pattern switch over the discovered message types with fully");
+        sb.AppendLine("    /// typed, compile-time unrolled pipelines — no dictionaries, no boxing, and no");
+        sb.AppendLine("    /// async state machine on synchronous zero-behavior paths.");
         sb.AppendLine("    /// </summary>");
-        sb.AppendLine("    public sealed class SourceGeneratedMediator : global::MediatorLite.ISourceGeneratedMediator");
+        sb.AppendLine("    public sealed class SourceGeneratedMediator : global::MediatorLite.IMediator");
         sb.AppendLine("    {");
-
-        // Generate handler order map
-        var notificationHandlersWithOrder = notificationHandlers.Where(h => h.Interface.Order.HasValue).ToList();
-        if (notificationHandlersWithOrder.Count > 0)
-        {
-            sb.AppendLine("        private static readonly Dictionary<string, int> _handlerOrderMap = new(StringComparer.Ordinal)");
-            sb.AppendLine("        {");
-            foreach (var (handler, iface) in notificationHandlersWithOrder)
-            {
-                var handlerName = handler.ClassName.Replace("global::", "");
-                sb.AppendLine($"            {{ \"{handlerName}\", {iface.Order!.Value} }},");
-            }
-            sb.AppendLine("        };");
-            sb.AppendLine();
-        }
-
-        // Generate notification options map
-        if (notifications.Count > 0)
-        {
-            sb.AppendLine("        private static readonly Dictionary<string, (global::MediatorLite.NotificationExecutionStrategy, global::MediatorLite.NotificationErrorStrategy)> _notificationOptionsMap = new(StringComparer.Ordinal)");
-            sb.AppendLine("        {");
-            foreach (var notification in notifications)
-            {
-                var notificationType = notification.TypeName.Replace("global::", "");
-                sb.AppendLine($"            {{ \"{notificationType}\", ((global::MediatorLite.NotificationExecutionStrategy){notification.ExecutionStrategy}, (global::MediatorLite.NotificationErrorStrategy){notification.ErrorStrategy}) }},");
-            }
-            sb.AppendLine("        };");
-            sb.AppendLine();
-        }
+        sb.AppendLine("        private readonly IServiceProvider _sp;");
+        sb.AppendLine();
+        sb.AppendLine("        /// <summary>Creates the mediator bound to the resolving scope's service provider.</summary>");
+        sb.AppendLine("        public SourceGeneratedMediator(IServiceProvider serviceProvider)");
+        sb.AppendLine("        {");
+        sb.AppendLine("            _sp = serviceProvider;");
+        sb.AppendLine("        }");
         sb.AppendLine();
 
-        // --- TrySendAsync ---
-        GenerateTrySendAsync(sb, requestHandlers);
-
-        // --- TryInvokeHandlerAsync ---
-        GenerateTryInvokeHandlerAsync(sb, requestHandlers);
-
-        // --- TryGetHandlerOrder ---
+        // === TYPED REQUEST DISPATCH ===
         sb.AppendLine("        /// <inheritdoc />");
-        sb.AppendLine("        public int? TryGetHandlerOrder(Type handlerType)");
+        sb.AppendLine("        public ValueTask<TResponse> SendAsync<TResponse>(");
+        sb.AppendLine("            global::MediatorLite.IRequest<TResponse> request,");
+        sb.AppendLine("            CancellationToken cancellationToken = default)");
         sb.AppendLine("        {");
-        if (notificationHandlersWithOrder.Count > 0)
+        sb.AppendLine("            switch (request)");
+        sb.AppendLine("            {");
+        foreach (var (handler, iface) in dispatchEntries)
         {
-            sb.AppendLine("            return _handlerOrderMap.TryGetValue(handlerType.FullName ?? string.Empty, out var order) ? order : null;");
+            var safeName = GetSafeTypeName(iface.RequestType);
+            sb.AppendLine($"                case {iface.RequestType} r_{safeName}:");
+            sb.AppendLine("                {");
+            sb.AppendLine($"                    var vt = Send_{safeName}(r_{safeName}, cancellationToken);");
+            sb.AppendLine($"                    if (typeof(TResponse) == typeof({iface.ResponseType}))");
+            sb.AppendLine("                    {");
+            sb.AppendLine("                        // SAFETY: guarded by the exact type-equality check above, this is an");
+            sb.AppendLine("                        // identity reinterpret (ValueTask<T> as ValueTask<T>). The guard is");
+            sb.AppendLine("                        // JIT-folded to a constant, so the cast itself is free.");
+            sb.AppendLine($"                        return Unsafe.As<ValueTask<{iface.ResponseType}>, ValueTask<TResponse>>(ref vt);");
+            sb.AppendLine("                    }");
+            sb.AppendLine($"                    return SlowCast<{iface.ResponseType}, TResponse>(vt);");
+            sb.AppendLine("                }");
         }
-        else
-        {
-            sb.AppendLine("            return null;");
-        }
+        sb.AppendLine("                case null:");
+        sb.AppendLine("                    throw new ArgumentNullException(nameof(request));");
+        sb.AppendLine("                default:");
+        sb.AppendLine("                    throw new InvalidOperationException(");
+        sb.AppendLine("                        $\"No handler registered for request type {request.GetType().FullName}. \" +");
+        sb.AppendLine("                        \"Ensure a handler implementing IRequestHandler<TRequest, TResponse> exists \" +");
+        sb.AppendLine("                        \"in a project the source generator runs on, and AddGeneratedHandlers() is called.\");");
+        sb.AppendLine("            }");
         sb.AppendLine("        }");
         sb.AppendLine();
+        sb.AppendLine("        // Only reachable when the caller dispatched through a covariant IRequest<TBase>");
+        sb.AppendLine("        // reference (TResponse is then a reference type): plain reference cast, no boxing.");
+        sb.AppendLine("        private static async ValueTask<TResponse> SlowCast<TConcrete, TResponse>(ValueTask<TConcrete> task)");
+        sb.AppendLine("            => (TResponse)(object)(await task.ConfigureAwait(false))!;");
+        sb.AppendLine();
 
-        // --- TryGetNotificationOptions ---
+        // === TYPED NOTIFICATION DISPATCH ===
         sb.AppendLine("        /// <inheritdoc />");
-        sb.AppendLine("        public (global::MediatorLite.NotificationExecutionStrategy ExecutionStrategy, global::MediatorLite.NotificationErrorStrategy ErrorStrategy)? TryGetNotificationOptions(Type notificationType)");
+        sb.AppendLine("        public ValueTask PublishAsync<TNotification>(");
+        sb.AppendLine("            TNotification notification,");
+        sb.AppendLine("            CancellationToken cancellationToken = default)");
+        sb.AppendLine("            where TNotification : global::MediatorLite.INotification");
         sb.AppendLine("        {");
-        if (notifications.Count > 0)
+        sb.AppendLine("            switch (notification)");
+        sb.AppendLine("            {");
+        foreach (var group in notificationGroups)
         {
-            sb.AppendLine("            return _notificationOptionsMap.TryGetValue(notificationType.FullName ?? string.Empty, out var options) ? options : null;");
+            var safeName = GetSafeTypeName(group.NotificationType);
+            sb.AppendLine($"                case {group.NotificationType} n_{safeName}:");
+            sb.AppendLine($"                    return Publish_{safeName}(n_{safeName}, cancellationToken);");
         }
-        else
-        {
-            sb.AppendLine("            return null;");
-        }
+        sb.AppendLine("                case null:");
+        sb.AppendLine("                    throw new ArgumentNullException(nameof(notification));");
+        sb.AppendLine("                default:");
+        sb.AppendLine("                    return default; // No handlers registered for this notification type.");
+        sb.AppendLine("            }");
         sb.AppendLine("        }");
         sb.AppendLine();
 
-        // --- TryGetCachedHandlers ---
-        GenerateTryGetCachedHandlers(sb, notificationHandlers);
+        // === UNROLLED REQUEST PIPELINES ===
+        sb.AppendLine("        // ═══════════════════════════════════════════════════════════════════════════════");
+        sb.AppendLine("        // UNROLLED REQUEST PIPELINES — Fully typed, zero-overhead dispatch");
+        sb.AppendLine("        // ═══════════════════════════════════════════════════════════════════════════════");
+        sb.AppendLine();
 
-        // --- TryResolveBehaviors ---
-        GenerateTryResolveBehaviors(sb, requestHandlers);
+        foreach (var (handler, iface) in dispatchEntries)
+        {
+            var safeName = GetSafeTypeName(iface.RequestType);
+            var requestType = iface.RequestType;
+            var responseType = iface.ResponseType!;
 
-        // --- InvokeHandler ---
-        GenerateInvokeHandler(sb, requestHandlers);
+            // Get behaviors for this request type, sorted by order
+            var key = (requestType, responseType);
+            var behaviorsForRequest = behaviorsByRequest.ContainsKey(key)
+                ? behaviorsByRequest[key]
+                : new List<ExpandedBehaviorInfo>();
 
-        // --- InvokeBehavior ---
-        GenerateInvokeBehavior(sb, expandedBehaviors);
+            GenerateUnrolledPipeline(
+                sb,
+                safeName,
+                requestType,
+                responseType,
+                behaviorsForRequest,
+                loggingEnabled: !assemblyDefaults.LoggingDisabled,
+                tracingEnabled: !assemblyDefaults.TracingDisabled);
+        }
 
-        // DispatchAs helper
-        sb.AppendLine("        private static async ValueTask<TResponse> DispatchAs<TResponse, TActual>(ValueTask<TActual> task)");
-        sb.AppendLine("        {");
-        sb.AppendLine("            var result = await task.ConfigureAwait(false);");
-        sb.AppendLine("            return (TResponse)(object)result!;");
-        sb.AppendLine("        }");
+        // === UNROLLED NOTIFICATION PUBLISHERS ===
+        sb.AppendLine("        // ═══════════════════════════════════════════════════════════════════════════════");
+        sb.AppendLine("        // UNROLLED NOTIFICATION PUBLISHERS — Handlers pre-sorted by order");
+        sb.AppendLine("        // ═══════════════════════════════════════════════════════════════════════════════");
+        sb.AppendLine();
+
+        var notificationsByType = notifications
+            .GroupBy(n => n.TypeName)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        foreach (var group in notificationGroups)
+        {
+            var notificationType = group.NotificationType;
+            var safeName = GetSafeTypeName(notificationType);
+            var handlersForNotification = group.Handlers;
+
+            notificationsByType.TryGetValue(notificationType, out var perTypeOptions);
+            var (executionStrategy, errorStrategy) = ResolveStrategies(perTypeOptions, assemblyDefaults);
+
+            GenerateUnrolledNotificationPublisher(
+                sb,
+                safeName,
+                notificationType,
+                handlersForNotification,
+                executionStrategy,
+                errorStrategy,
+                loggingEnabled: !assemblyDefaults.LoggingDisabled,
+                tracingEnabled: !assemblyDefaults.TracingDisabled);
+        }
+
         sb.AppendLine("    }");
         sb.AppendLine("}");
 
         context.AddSource("SourceGeneratedMediator.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
     }
 
-    private static void GenerateTrySendAsync(StringBuilder sb,
-        List<(HandlerInfo Handler, HandlerInterfaceInfo Interface)> requestHandlers)
+    /// <summary>
+    /// Generates a fully-typed unrolled send method for a specific request type, returning
+    /// <c>ValueTask&lt;TResponse&gt;</c> end-to-end (no boxing, no type-erased delegates).
+    /// When <paramref name="loggingEnabled"/> or <paramref name="tracingEnabled"/> is true,
+    /// the body is an async method wrapped in try/catch with inline logging/tracing. When both
+    /// are false, the pipeline ValueTask is returned directly with no async state machine in
+    /// the mediator — for zero-behavior requests this makes synchronous handler completions
+    /// fully allocation-free.
+    /// </summary>
+    private static void GenerateUnrolledPipeline(
+        StringBuilder sb,
+        string safeName,
+        string requestType,
+        string responseType,
+        List<ExpandedBehaviorInfo> behaviors,
+        bool loggingEnabled,
+        bool tracingEnabled)
     {
-        sb.AppendLine("        /// <inheritdoc />");
-        sb.AppendLine("        public ValueTask<TResponse>? TrySendAsync<TResponse>(");
-        sb.AppendLine("            IServiceProvider serviceProvider,");
-        sb.AppendLine("            global::MediatorLite.IRequest<TResponse> request,");
-        sb.AppendLine("            CancellationToken cancellationToken)");
-        sb.AppendLine("        {");
+        // Display names for log messages / tag values. `requestType` is already fully
+        // qualified (starts with "global::"); strip that prefix for the tag value so the
+        // emitted literal matches typeof(T).FullName-like output, and compute the simple
+        // name by taking the substring after the last '.'.
+        var fullRequest = StripGlobalPrefix(requestType);
+        var fullResponse = StripGlobalPrefix(responseType);
+        var simpleRequest = requestType.Substring(requestType.LastIndexOf('.') + 1);
 
-        if (requestHandlers.Count > 0)
+        // The nested behavior/handler invocation chain, built outside-in. With no behaviors
+        // this is just the handler call.
+        string BuildPipelineExpression()
         {
-            sb.AppendLine("            return request switch");
-            sb.AppendLine("            {");
-            foreach (var (handler, iface) in requestHandlers)
+            var expr = new StringBuilder();
+            for (int i = 0; i < behaviors.Count; i++)
             {
-                sb.AppendLine($"                {iface.RequestType} r => DispatchAs<TResponse, {iface.ResponseType}>(");
-                sb.AppendLine($"                    serviceProvider.GetRequiredService<{iface.InterfaceType}>().HandleAsync(r, cancellationToken)),");
+                expr.Append($"b{i + 1}.HandleAsync(request, () => ");
             }
-            sb.AppendLine("                _ => null,");
-            sb.AppendLine("            };");
-        }
-        else
-        {
-            sb.AppendLine("            return null;");
-        }
-
-        sb.AppendLine("        }");
-        sb.AppendLine();
-    }
-
-    private static void GenerateTryInvokeHandlerAsync(StringBuilder sb,
-        List<(HandlerInfo Handler, HandlerInterfaceInfo Interface)> requestHandlers)
-    {
-        sb.AppendLine("        /// <inheritdoc />");
-        sb.AppendLine("        public ValueTask<TResponse>? TryInvokeHandlerAsync<TResponse>(");
-        sb.AppendLine("            IServiceProvider serviceProvider,");
-        sb.AppendLine("            global::MediatorLite.IRequest<TResponse> request,");
-        sb.AppendLine("            CancellationToken cancellationToken)");
-        sb.AppendLine("        {");
-
-        if (requestHandlers.Count > 0)
-        {
-            sb.AppendLine("            return request switch");
-            sb.AppendLine("            {");
-            foreach (var (handler, iface) in requestHandlers)
+            expr.Append("handler.HandleAsync(request, ct)");
+            for (int i = behaviors.Count - 1; i >= 0; i--)
             {
-                sb.AppendLine($"                {iface.RequestType} r => DispatchAs<TResponse, {iface.ResponseType}>(");
-                sb.AppendLine($"                    serviceProvider.GetRequiredService<{iface.InterfaceType}>().HandleAsync(r, cancellationToken)),");
+                expr.Append(", ct)");
             }
-            sb.AppendLine("                _ => null,");
-            sb.AppendLine("            };");
-        }
-        else
-        {
-            sb.AppendLine("            return null;");
+            return expr.ToString();
         }
 
-        sb.AppendLine("        }");
-        sb.AppendLine();
-    }
-
-    private static void GenerateTryGetCachedHandlers(StringBuilder sb,
-        List<(HandlerInfo Handler, NotificationHandlerInterfaceInfo Interface)> notificationHandlers)
-    {
-        sb.AppendLine("        /// <inheritdoc />");
-        sb.AppendLine("        public IReadOnlyList<global::MediatorLite.INotificationHandler<TNotification>>? TryGetCachedHandlers<TNotification>(");
-        sb.AppendLine("            IServiceProvider serviceProvider)");
-        sb.AppendLine("            where TNotification : global::MediatorLite.INotification");
-        sb.AppendLine("        {");
-
-        var notificationTypesWithHandlers = notificationHandlers
-            .GroupBy(h => h.Interface.NotificationType)
-            .Where(g => g.Count() > 0)
-            .ToList();
-
-        if (notificationTypesWithHandlers.Count > 0)
+        void EmitResolutions(string indent)
         {
-            sb.AppendLine("            var notificationType = typeof(TNotification);");
-            sb.AppendLine("            try");
-            sb.AppendLine("            {");
-            sb.AppendLine("                return notificationType switch");
-            sb.AppendLine("                {");
-
-            foreach (var group in notificationTypesWithHandlers)
+            for (int i = 0; i < behaviors.Count; i++)
             {
-                var noticeType = group.Key;
-                var handlersList = group.Select(h => h.Handler).Distinct().ToList();
-                sb.AppendLine($"                    Type t when t == typeof({noticeType}) => new List<global::MediatorLite.INotificationHandler<TNotification>>");
-                sb.AppendLine("                    {");
-                foreach (var handler in handlersList)
-                {
-                    sb.AppendLine($"                        (global::MediatorLite.INotificationHandler<TNotification>)(object)serviceProvider.GetRequiredService<{handler.ClassName}>(),");
-                }
-                sb.AppendLine("                    }.AsReadOnly(),");
+                sb.AppendLine($"{indent}var b{i + 1} = _sp.GetRequiredService<{behaviors[i].BehaviorTypeName}>();");
             }
-
-            sb.AppendLine("                    _ => null,");
-            sb.AppendLine("                };");
-            sb.AppendLine("            }");
-            sb.AppendLine("            catch (InvalidOperationException)");
-            sb.AppendLine("            {");
-            sb.AppendLine("                return null;");
-            sb.AppendLine("            }");
-        }
-        else
-        {
-            sb.AppendLine("            return null;");
+            sb.AppendLine($"{indent}var handler = _sp.GetRequiredService<global::MediatorLite.IRequestHandler<{requestType}, {responseType}>>();");
         }
 
-        sb.AppendLine("        }");
-        sb.AppendLine();
-    }
+        bool needsDiagnostics = loggingEnabled || tracingEnabled;
 
-    private static void GenerateTryResolveBehaviors(StringBuilder sb,
-        List<(HandlerInfo Handler, HandlerInterfaceInfo Interface)> requestHandlers)
-    {
-        sb.AppendLine("        /// <inheritdoc />");
-        sb.AppendLine("        public List<object>? TryResolveBehaviors(");
-        sb.AppendLine("            IServiceProvider serviceProvider,");
-        sb.AppendLine("            Type requestType,");
-        sb.AppendLine("            Type responseType)");
-        sb.AppendLine("        {");
-
-        if (requestHandlers.Count > 0)
+        if (!needsDiagnostics)
         {
-            sb.AppendLine("            // Use typed resolution for known request/response pairs to avoid MakeGenericType");
-            sb.AppendLine("            return (requestType, responseType) switch");
-            sb.AppendLine("            {");
-
-            foreach (var (_, iface) in requestHandlers)
-            {
-                sb.AppendLine($"                (Type t, Type r) when t == typeof({iface.RequestType}) && r == typeof({iface.ResponseType}) =>");
-                sb.AppendLine($"                    ResolveBehaviorsFor_{GetSafeTypeName(iface.RequestType)}(serviceProvider),");
-            }
-
-            sb.AppendLine("                _ => null,");
-            sb.AppendLine("            };");
-        }
-        else
-        {
-            sb.AppendLine("            return null;");
-        }
-
-        sb.AppendLine("        }");
-        sb.AppendLine();
-
-        // Generate typed behavior resolution helper methods for each request type
-        if (requestHandlers.Count > 0)
-        {
-            foreach (var (_, iface) in requestHandlers)
-            {
-                var safeName = GetSafeTypeName(iface.RequestType);
-                sb.AppendLine($"        private static List<object> ResolveBehaviorsFor_{safeName}(IServiceProvider serviceProvider)");
-                sb.AppendLine("        {");
-                sb.AppendLine($"            var behaviors = new List<object>();");
-                sb.AppendLine($"            foreach (var behavior in serviceProvider.GetServices<global::MediatorLite.IPipelineBehavior<{iface.RequestType}, {iface.ResponseType}>>())");
-                sb.AppendLine("            {");
-                sb.AppendLine("                if (behavior != null)");
-                sb.AppendLine("                    behaviors.Add(behavior);");
-                sb.AppendLine("            }");
-                sb.AppendLine("            return behaviors;");
-                sb.AppendLine("        }");
-                sb.AppendLine();
-            }
-        }
-    }
-
-    private static void GenerateInvokeHandler(StringBuilder sb,
-        List<(HandlerInfo Handler, HandlerInterfaceInfo Interface)> requestHandlers)
-    {
-        sb.AppendLine("        /// <inheritdoc />");
-        sb.AppendLine("        public ValueTask<TResponse> InvokeHandler<TResponse>(");
-        sb.AppendLine("            Type requestType,");
-        sb.AppendLine("            object handler,");
-        sb.AppendLine("            object request,");
-        sb.AppendLine("            CancellationToken cancellationToken)");
-        sb.AppendLine("        {");
-
-        if (requestHandlers.Count > 0)
-        {
-            sb.AppendLine("            return (requestType, typeof(TResponse)) switch");
-            sb.AppendLine("            {");
-            foreach (var (_, iface) in requestHandlers)
-            {
-                sb.AppendLine($"                (Type t, Type r) when t == typeof({iface.RequestType}) && r == typeof({iface.ResponseType}) =>");
-                sb.AppendLine($"                    (ValueTask<TResponse>)(object)((({iface.InterfaceType})handler).HandleAsync(({iface.RequestType})request, cancellationToken)),");
-            }
+            // Fully-disabled fast path — return the pipeline ValueTask directly; no async
+            // state machine, no try/catch, no diagnostic locals.
+            sb.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
+            sb.AppendLine($"        private ValueTask<{responseType}> Send_{safeName}({requestType} request, CancellationToken ct)");
+            sb.AppendLine("        {");
+            EmitResolutions("            ");
+            sb.AppendLine($"            return {BuildPipelineExpression()};");
+            sb.AppendLine("        }");
             sb.AppendLine();
-            sb.AppendLine("                _ => throw new InvalidOperationException(");
-            sb.AppendLine("                    $\"No source-generated handler for request type {requestType.FullName}.\")");
-            sb.AppendLine("            };");
-        }
-        else
-        {
-            sb.AppendLine("            throw new InvalidOperationException(\"No handlers discovered at compile time.\");");
+            return;
         }
 
-        sb.AppendLine("        }");
-        sb.AppendLine();
-    }
-
-    private static void GenerateInvokeBehavior(StringBuilder sb,
-        List<ExpandedBehaviorInfo> expandedBehaviors)
-    {
-        sb.AppendLine("        /// <inheritdoc />");
-        sb.AppendLine("        public ValueTask<TResponse> InvokeBehavior<TResponse>(");
-        sb.AppendLine("            Type requestType,");
-        sb.AppendLine("            Type behaviorType,");
-        sb.AppendLine("            object behavior,");
-        sb.AppendLine("            object request,");
-        sb.AppendLine("            global::MediatorLite.RequestHandlerDelegate<TResponse> next,");
-        sb.AppendLine("            CancellationToken cancellationToken)");
+        sb.AppendLine($"        private async ValueTask<{responseType}> Send_{safeName}({requestType} request, CancellationToken ct)");
         sb.AppendLine("        {");
 
-        if (expandedBehaviors.Count > 0)
+        if (loggingEnabled)
         {
-            sb.AppendLine("            return (requestType, typeof(TResponse), behaviorType) switch");
-            sb.AppendLine("            {");
-
-            foreach (var behav in expandedBehaviors)
-            {
-                sb.AppendLine($"                (Type t, Type r, Type b)");
-                sb.AppendLine($"                    when t == typeof({behav.RequestType})");
-                sb.AppendLine($"                    && r == typeof({behav.ResponseType})");
-                sb.AppendLine($"                    && b == typeof({behav.BehaviorTypeName}) =>");
-                sb.AppendLine($"                    (ValueTask<TResponse>)(object)((({behav.InterfaceType})behavior).HandleAsync(");
-                sb.AppendLine($"                        ({behav.RequestType})request,");
-                sb.AppendLine($"                        (global::MediatorLite.RequestHandlerDelegate<{behav.ResponseType}>)(object)next,");
-                sb.AppendLine($"                        cancellationToken)),");
-                sb.AppendLine();
-            }
-
-            sb.AppendLine("                _ => throw new InvalidOperationException(");
-            sb.AppendLine("                    $\"No source-generated behavior invoker for {behaviorType.Name} on {requestType.Name}.\")");
-            sb.AppendLine("            };");
+            sb.AppendLine("            var __logger = _sp.GetRequiredService<global::Microsoft.Extensions.Logging.ILogger<global::MediatorLite.IMediator>>();");
+            sb.AppendLine($"            __logger.LogDebug(\"Sending request {{RequestType}}\", \"{simpleRequest}\");");
         }
-        else
+        if (tracingEnabled)
         {
-            sb.AppendLine("            throw new InvalidOperationException(\"No behaviors discovered at compile time.\");");
+            sb.AppendLine("            using var __activity = global::MediatorLite.Diagnostics.MediatorActivitySource.Source.StartActivity(");
+            sb.AppendLine($"                \"{ActivityNameSendRequest} {simpleRequest}\",");
+            sb.AppendLine("                global::System.Diagnostics.ActivityKind.Internal);");
+            sb.AppendLine($"            __activity?.SetTag(global::MediatorLite.Diagnostics.MediatorActivitySource.Tags.RequestType, \"{fullRequest}\");");
+            sb.AppendLine($"            __activity?.SetTag(global::MediatorLite.Diagnostics.MediatorActivitySource.Tags.ResponseType, \"{fullResponse}\");");
         }
-
+        sb.AppendLine();
+        sb.AppendLine("            try");
+        sb.AppendLine("            {");
+        EmitResolutions("                ");
+        sb.AppendLine($"                var result = await {BuildPipelineExpression()}.ConfigureAwait(false);");
+        if (loggingEnabled)
+        {
+            sb.AppendLine($"                __logger.LogDebug(\"Request {{RequestType}} handled successfully\", \"{simpleRequest}\");");
+        }
+        sb.AppendLine("                return result;");
+        sb.AppendLine("            }");
+        sb.AppendLine("            catch (global::System.Exception __ex)");
+        sb.AppendLine("            {");
+        if (tracingEnabled)
+        {
+            sb.AppendLine("                __activity?.SetTag(global::MediatorLite.Diagnostics.MediatorActivitySource.Tags.Error, true);");
+            sb.AppendLine("                __activity?.SetTag(global::MediatorLite.Diagnostics.MediatorActivitySource.Tags.ErrorMessage, __ex.Message);");
+        }
+        if (loggingEnabled)
+        {
+            sb.AppendLine($"                __logger.LogError(__ex, \"Error handling request {{RequestType}}\", \"{simpleRequest}\");");
+        }
+        sb.AppendLine("                throw;");
+        sb.AppendLine("            }");
         sb.AppendLine("        }");
         sb.AppendLine();
     }
 
     /// <summary>
-    /// Generates a safe method name from a fully qualified type name.
+    /// Generates an unrolled notification publisher method.
+    /// Strategies are fully resolved at compile time by <see cref="ResolveStrategies"/>,
+    /// so the emitted body has exactly one code path with no runtime branching on strategy.
+    /// When <paramref name="loggingEnabled"/> or <paramref name="tracingEnabled"/> is true,
+    /// the strategy body is wrapped in try/catch with inline diagnostics.
     /// </summary>
-    private static string GetSafeTypeName(string fullyQualifiedType)
+    /// <remarks>
+    /// NOTE: <see cref="GenerateSequentialNotificationExecution"/>, <see cref="GenerateParallelNotificationExecution"/>
+    /// and <see cref="GenerateStopOnFirstNotificationExecution"/> hardcode 12-space indentation.
+    /// When wrapped in try/catch the emitted body is slightly under-indented (cosmetic only — C# is
+    /// whitespace-insensitive). This is accepted rather than plumbing an indent parameter through
+    /// all three helpers.
+    /// </remarks>
+    private static void GenerateUnrolledNotificationPublisher(
+        StringBuilder sb,
+        string safeName,
+        string notificationType,
+        List<(HandlerInfo Handler, NotificationHandlerInterfaceInfo Interface)> handlers,
+        int executionStrategy,
+        int errorStrategy,
+        bool loggingEnabled,
+        bool tracingEnabled)
     {
-        return fullyQualifiedType
+        var fullNotification = StripGlobalPrefix(notificationType);
+        var simpleNotification = notificationType.Substring(notificationType.LastIndexOf('.') + 1);
+
+        void EmitStrategyBody()
+        {
+            if (handlers.Count == 0)
+            {
+                sb.AppendLine("            // No handlers registered");
+                sb.AppendLine("            await Task.CompletedTask;");
+            }
+            else if (executionStrategy == 1) // Parallel
+            {
+                GenerateParallelNotificationExecution(sb, notificationType, handlers, errorStrategy);
+            }
+            else if (executionStrategy == 2) // StopOnFirst
+            {
+                GenerateStopOnFirstNotificationExecution(sb, notificationType, handlers, errorStrategy);
+            }
+            else // Sequential (default)
+            {
+                GenerateSequentialNotificationExecution(sb, notificationType, handlers, errorStrategy);
+            }
+        }
+
+        bool needsDiagnostics = loggingEnabled || tracingEnabled;
+
+        // Single-handler fast path. With immediate error propagation (StopOnFirstError) every
+        // execution strategy degenerates to one invocation, so return the handler's ValueTask
+        // directly with no async state machine in the mediator.
+        if (!needsDiagnostics && handlers.Count == 1 && errorStrategy == 0)
+        {
+            sb.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
+            sb.AppendLine($"        private ValueTask Publish_{safeName}({notificationType} notification, CancellationToken ct)");
+            sb.AppendLine("        {");
+            sb.AppendLine("            ct.ThrowIfCancellationRequested();");
+            sb.AppendLine($"            var h1 = _sp.GetRequiredService<{handlers[0].Handler.ClassName}>();");
+            sb.AppendLine("            return h1.HandleAsync(notification, ct);");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            return;
+        }
+
+        sb.AppendLine($"        private async ValueTask Publish_{safeName}({notificationType} notification, CancellationToken ct)");
+        sb.AppendLine("        {");
+
+        if (needsDiagnostics)
+        {
+            if (loggingEnabled)
+            {
+                sb.AppendLine("            var __logger = _sp.GetRequiredService<global::Microsoft.Extensions.Logging.ILogger<global::MediatorLite.IMediator>>();");
+                sb.AppendLine($"            __logger.LogDebug(\"Publishing notification {{NotificationType}}\", \"{simpleNotification}\");");
+            }
+            if (tracingEnabled)
+            {
+                sb.AppendLine("            using var __activity = global::MediatorLite.Diagnostics.MediatorActivitySource.Source.StartActivity(");
+                sb.AppendLine($"                \"{ActivityNamePublishNotification} {simpleNotification}\",");
+                sb.AppendLine("                global::System.Diagnostics.ActivityKind.Internal);");
+                sb.AppendLine($"            __activity?.SetTag(global::MediatorLite.Diagnostics.MediatorActivitySource.Tags.NotificationType, \"{fullNotification}\");");
+            }
+            sb.AppendLine();
+            sb.AppendLine("            try");
+            sb.AppendLine("            {");
+            // Strategy helpers hardcode 12-space indent — accepted cosmetic under-indentation here.
+            EmitStrategyBody();
+            if (loggingEnabled)
+            {
+                sb.AppendLine($"                __logger.LogDebug(\"Notification {{NotificationType}} published successfully\", \"{simpleNotification}\");");
+            }
+            sb.AppendLine("            }");
+            sb.AppendLine("            catch (global::System.Exception __ex)");
+            sb.AppendLine("            {");
+            if (tracingEnabled)
+            {
+                sb.AppendLine("                __activity?.SetTag(global::MediatorLite.Diagnostics.MediatorActivitySource.Tags.Error, true);");
+                sb.AppendLine("                __activity?.SetTag(global::MediatorLite.Diagnostics.MediatorActivitySource.Tags.ErrorMessage, __ex.Message);");
+            }
+            if (loggingEnabled)
+            {
+                sb.AppendLine($"                __logger.LogError(__ex, \"Error publishing notification {{NotificationType}}\", \"{simpleNotification}\");");
+            }
+            sb.AppendLine("                throw;");
+            sb.AppendLine("            }");
+        }
+        else
+        {
+            // Fast path: emit strategy body directly
+            EmitStrategyBody();
+        }
+
+        sb.AppendLine("        }");
+        sb.AppendLine();
+    }
+
+    private static void GenerateSequentialNotificationExecution(
+        StringBuilder sb,
+        string notificationType,
+        List<(HandlerInfo Handler, NotificationHandlerInterfaceInfo Interface)> handlers,
+        int errorStrategy)
+    {
+        // Resolve handlers
+        for (int i = 0; i < handlers.Count; i++)
+        {
+            var handler = handlers[i];
+            sb.AppendLine($"            var h{i + 1} = _sp.GetRequiredService<{handler.Handler.ClassName}>();");
+        }
+        sb.AppendLine();
+
+        if (errorStrategy == 1) // ContinueAndAggregate
+        {
+            sb.AppendLine("            List<Exception>? exceptions = null;");
+            sb.AppendLine();
+
+            for (int i = 0; i < handlers.Count; i++)
+            {
+                sb.AppendLine("            try");
+                sb.AppendLine("            {");
+                sb.AppendLine("                ct.ThrowIfCancellationRequested();");
+                sb.AppendLine($"                await h{i + 1}.HandleAsync(notification, ct).ConfigureAwait(false);");
+                sb.AppendLine("            }");
+                sb.AppendLine("            catch (OperationCanceledException) { throw; }");
+                sb.AppendLine("            catch (Exception ex)");
+                sb.AppendLine("            {");
+                sb.AppendLine("                (exceptions ??= new List<Exception>()).Add(ex);");
+                sb.AppendLine("            }");
+                sb.AppendLine();
+            }
+
+            sb.AppendLine("            if (exceptions is { Count: > 0 })");
+            sb.AppendLine("            {");
+            sb.AppendLine($"                throw new AggregateException(\"One or more notification handlers threw exceptions.\", exceptions);");
+            sb.AppendLine("            }");
+        }
+        else // StopOnFirstError (default)
+        {
+            for (int i = 0; i < handlers.Count; i++)
+            {
+                sb.AppendLine("            ct.ThrowIfCancellationRequested();");
+                sb.AppendLine($"            await h{i + 1}.HandleAsync(notification, ct).ConfigureAwait(false);");
+            }
+        }
+    }
+
+    private static void GenerateParallelNotificationExecution(
+        StringBuilder sb,
+        string notificationType,
+        List<(HandlerInfo Handler, NotificationHandlerInterfaceInfo Interface)> handlers,
+        int errorStrategy)
+    {
+        // Resolve handlers
+        for (int i = 0; i < handlers.Count; i++)
+        {
+            var handler = handlers[i];
+            sb.AppendLine($"            var h{i + 1} = _sp.GetRequiredService<{handler.Handler.ClassName}>();");
+        }
+        sb.AppendLine();
+
+        // Start every handler before the first await so they run concurrently, capturing
+        // synchronous throws as faulted ValueTasks. No task array and no AsTask() conversions —
+        // synchronously completing handlers never allocate a Task at all.
+        for (int i = 0; i < handlers.Count; i++)
+        {
+            sb.AppendLine($"            ValueTask vt{i + 1};");
+            sb.AppendLine($"            try {{ vt{i + 1} = h{i + 1}.HandleAsync(notification, ct); }}");
+            sb.AppendLine($"            catch (global::System.Exception __ex{i}) {{ vt{i + 1} = ValueTask.FromException(__ex{i}); }}");
+        }
+        sb.AppendLine();
+
+        if (errorStrategy == 1) // ContinueAndAggregate
+        {
+            sb.AppendLine("            List<Exception>? exceptions = null;");
+            for (int i = 0; i < handlers.Count; i++)
+            {
+                sb.AppendLine($"            try {{ await vt{i + 1}.ConfigureAwait(false); }}");
+                sb.AppendLine("            catch (Exception ex) { (exceptions ??= new List<Exception>()).Add(ex); }");
+            }
+            sb.AppendLine();
+            sb.AppendLine("            if (exceptions is not null)");
+            sb.AppendLine("            {");
+            sb.AppendLine("                // Prioritize cancellation - rethrow OperationCanceledException directly");
+            sb.AppendLine("                ct.ThrowIfCancellationRequested();");
+            sb.AppendLine("                // For handler failures, throw an AggregateException with all exceptions");
+            sb.AppendLine("                throw new AggregateException(exceptions);");
+            sb.AppendLine("            }");
+        }
+        else // StopOnFirstError - every task is observed; the first failure (in handler order) is rethrown
+        {
+            sb.AppendLine("            Exception? firstException = null;");
+            for (int i = 0; i < handlers.Count; i++)
+            {
+                sb.AppendLine($"            try {{ await vt{i + 1}.ConfigureAwait(false); }}");
+                sb.AppendLine("            catch (Exception ex) { firstException ??= ex; }");
+            }
+            sb.AppendLine();
+            sb.AppendLine("            if (firstException is not null)");
+            sb.AppendLine("            {");
+            sb.AppendLine("                global::System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(firstException).Throw();");
+            sb.AppendLine("            }");
+        }
+    }
+
+    private static void GenerateStopOnFirstNotificationExecution(
+        StringBuilder sb,
+        string notificationType,
+        List<(HandlerInfo Handler, NotificationHandlerInterfaceInfo Interface)> handlers,
+        int errorStrategy)
+    {
+        if (errorStrategy == 0) // StopOnFirstError
+        {
+            // With immediate error propagation, StopOnFirst always runs exactly the first
+            // handler: it either succeeds (stop) or throws (stop). Later handlers are
+            // unreachable, so only the first is resolved.
+            sb.AppendLine("            ct.ThrowIfCancellationRequested();");
+            sb.AppendLine($"            var h1 = _sp.GetRequiredService<{handlers[0].Handler.ClassName}>();");
+            sb.AppendLine("            await h1.HandleAsync(notification, ct).ConfigureAwait(false);");
+            return;
+        }
+
+        // Resolve handlers
+        for (int i = 0; i < handlers.Count; i++)
+        {
+            var handler = handlers[i];
+            sb.AppendLine($"            var h{i + 1} = _sp.GetRequiredService<{handler.Handler.ClassName}>();");
+        }
+        sb.AppendLine();
+
+        if (errorStrategy == 1) // ContinueAndAggregate
+        {
+            sb.AppendLine("            List<Exception>? exceptions = null;");
+            sb.AppendLine();
+
+            for (int i = 0; i < handlers.Count; i++)
+            {
+                sb.AppendLine("            try");
+                sb.AppendLine("            {");
+                sb.AppendLine("                ct.ThrowIfCancellationRequested();");
+                sb.AppendLine($"                await h{i + 1}.HandleAsync(notification, ct).ConfigureAwait(false);");
+                sb.AppendLine("                return; // Success — stop here");
+                sb.AppendLine("            }");
+                sb.AppendLine("            catch (OperationCanceledException) { throw; }");
+                sb.AppendLine("            catch (Exception ex)");
+                sb.AppendLine("            {");
+                sb.AppendLine("                (exceptions ??= new List<Exception>()).Add(ex);");
+                sb.AppendLine("            }");
+                sb.AppendLine();
+            }
+
+            sb.AppendLine("            if (exceptions is { Count: > 0 })");
+            sb.AppendLine("            {");
+            sb.AppendLine($"                throw new AggregateException(\"All notification handlers threw exceptions.\", exceptions);");
+            sb.AppendLine("            }");
+        }
+    }
+
+    /// <summary>
+    /// Converts a fully qualified type name to a safe C# identifier.
+    /// </summary>
+    private static string GetSafeTypeName(string typeName)
+    {
+        return typeName
             .Replace("global::", "")
             .Replace(".", "_")
             .Replace("<", "_")
             .Replace(">", "_")
             .Replace(",", "_")
             .Replace(" ", "");
+    }
+
+    /// <summary>
+    /// Strips a leading "global::" prefix for use in emitted string literals (tag values,
+    /// log message arguments). The returned value is suitable to embed inside a C# string literal.
+    /// </summary>
+    private static string StripGlobalPrefix(string typeName)
+    {
+        const string prefix = "global::";
+        return typeName.StartsWith(prefix) ? typeName.Substring(prefix.Length) : typeName;
     }
 }
 
@@ -1118,23 +1481,32 @@ internal sealed record HandlerInterfaceInfo(
     string InterfaceType,
     string RequestType,
     string? ResponseType,
-    bool HasDataAnnotations = false);
+    bool HasDataAnnotations = false,
+    List<string>? BaseTypes = null);
 
 internal sealed record NotificationHandlerInterfaceInfo(
     string InterfaceType,
     string NotificationType,
-    int? Order);
+    int? Order,
+    List<string>? BaseTypes = null);
 
 internal sealed record NotificationTypeInfo(
     string TypeName,
-    int ExecutionStrategy,
-    int ErrorStrategy);
+    int? ExecutionStrategy,
+    int? ErrorStrategy);
+
+internal readonly record struct AssemblyDefaults(
+    int? ExecutionStrategy,
+    int? ErrorStrategy,
+    bool LoggingDisabled,
+    bool TracingDisabled);
 
 internal sealed record BehaviorInfo(
     string ClassName,
     string Namespace,
     List<BehaviorInterfaceInfo> BehaviorInterfaces,
-    bool IsOpenGeneric);
+    bool IsOpenGeneric,
+    int Order = 0);
 
 internal sealed record BehaviorInterfaceInfo(
     string InterfaceType,
@@ -1146,7 +1518,8 @@ internal sealed record ExpandedBehaviorInfo(
     string BehaviorTypeName,
     string RequestType,
     string ResponseType,
-    string InterfaceType);
+    string InterfaceType,
+    int Order = 0);
 
 internal sealed record ValidatorInfo(
     string ClassName,

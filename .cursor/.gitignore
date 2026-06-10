@@ -1,0 +1,9 @@
+# Runtime SQLite artefacts — never commit these.
+db/session.sqlite
+db/session.sqlite-journal
+db/session.sqlite-wal
+db/session.sqlite-shm
+db/snapshots/
+
+# dotnet-script cache
+.cache/

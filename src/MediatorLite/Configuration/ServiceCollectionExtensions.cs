@@ -1,6 +1,6 @@
-using MediatorLite.Configuration;
 using MediatorLite.Internal;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace MediatorLite;
 
@@ -10,76 +10,39 @@ namespace MediatorLite;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Adds MediatorLite runtime services (mediator instance and options) to the service collection.
-    /// Use this together with the source-generated AddGeneratedHandlers() method.
+    /// Adds a diagnostic fallback mediator to the service collection. The source-generated
+    /// <c>AddGeneratedHandlers()</c> method registers the real <see cref="IMediator"/>
+    /// implementation directly, so calling this method is optional; it exists to turn a
+    /// missing source generator into a clear runtime error instead of a resolution failure.
     /// </summary>
     /// <param name="services">The <see cref="IServiceCollection"/> to add services to.</param>
-    /// <param name="configure">An optional action to configure <see cref="MediatorOptions"/>.</param>
     /// <returns>The <see cref="IServiceCollection"/> for chaining.</returns>
+    /// <remarks>
+    /// <para>
+    /// Built-in logging and tracing are on by default. To opt out at compile time, apply
+    /// <c>[assembly: DisableMediatorLogging]</c> or <c>[assembly: DisableMediatorTracing]</c>
+    /// in the consuming assembly.
+    /// </para>
+    /// <para>
+    /// Log level is controlled via <c>Microsoft.Extensions.Logging</c> filter configuration.
+    /// Notification execution and error strategies are compile-time only — use
+    /// <c>[NotificationExecution]</c>/<c>[NotificationError]</c> per type or
+    /// <c>[assembly: DefaultNotificationExecution]</c>/<c>[assembly: DefaultNotificationError]</c>.
+    /// </para>
+    /// </remarks>
     /// <example>
     /// <code>
     /// services
-    ///     .AddGeneratedHandlers()     // Source-generated: registers handlers, notifications, behaviors
-    ///     .AddMediatorLite(options =>
-    ///     {
-    ///         options.EnableBuiltInLogging = false;
-    ///         options.NotificationExecutionStrategy = NotificationExecutionStrategy.Parallel;
-    ///     });
+    ///     .AddGeneratedHandlers()
+    ///     .AddMediatorLite();
     /// </code>
     /// </example>
-    public static IServiceCollection AddMediatorLite(
-        this IServiceCollection services,
-        Action<MediatorOptions>? configure = null)
+    public static IServiceCollection AddMediatorLite(this IServiceCollection services)
     {
-        var options = new MediatorOptions();
-        configure?.Invoke(options);
-
-        // Register options as singleton
-        services.AddSingleton(options);
-
-        // Register mediator
-        services.Add(new ServiceDescriptor(
-            typeof(IMediator),
-            typeof(Mediator),
-            options.MediatorLifetime));
-
-        // Register behaviors added via options (open generics registered as IPipelineBehavior<,>)
-        foreach (var behaviorType in options.BehaviorTypes)
-        {
-            var behaviorServiceTypes = PipelineBehaviorTypeResolver.GetServiceTypesForRegistration(behaviorType);
-
-            foreach (var behaviorServiceType in behaviorServiceTypes)
-            {
-                services.Add(new ServiceDescriptor(
-                    behaviorServiceType,
-                    behaviorType,
-                    options.HandlerLifetime));
-            }
-        }
-
-        return services;
-    }
-
-    /// <summary>
-    /// Adds a pipeline behavior to the service collection.
-    /// </summary>
-    /// <typeparam name="TBehavior">The behavior type.</typeparam>
-    /// <param name="services">The <see cref="IServiceCollection"/> to add the behavior to.</param>
-    /// <param name="lifetime">The service lifetime for the behavior.</param>
-    /// <returns>The <see cref="IServiceCollection"/> for chaining.</returns>
-    public static IServiceCollection AddMediatorBehavior<TBehavior>(
-        this IServiceCollection services,
-        ServiceLifetime lifetime = ServiceLifetime.Transient)
-        where TBehavior : class
-    {
-        var behaviorType = typeof(TBehavior);
-
-        var behaviorServiceTypes = PipelineBehaviorTypeResolver.GetServiceTypesForRegistration(behaviorType);
-        foreach (var behaviorServiceType in behaviorServiceTypes)
-        {
-            services.Add(new ServiceDescriptor(behaviorServiceType, behaviorType, lifetime));
-        }
-
+        // TryAdd keeps this order-independent with AddGeneratedHandlers(): the generated
+        // registration uses plain AddScoped, and the container resolves the last IMediator
+        // descriptor, so the generated mediator wins regardless of call order.
+        services.TryAddScoped<IMediator, ThrowingMediator>();
         return services;
     }
 }

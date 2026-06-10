@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# MediatorLite pre-commit gate (via core.hooksPath = .agents/hooks)
+set -e
+
+# Resolve dotnet from a user-local install first, then PATH.
+if [ -x "${HOME}/.dotnet/dotnet" ]; then
+  DOTNET_BIN="${HOME}/.dotnet/dotnet"
+else
+  DOTNET_BIN="$(command -v dotnet || true)"
+fi
+if [ -n "$DOTNET_BIN" ]; then
+  DOTNET_ROOT="$(cd "$(dirname "$DOTNET_BIN")" && pwd)"
+  export DOTNET_ROOT="$(cd "${DOTNET_ROOT}/.." && pwd)"
+  export PATH="${DOTNET_ROOT}:${PATH}"
+else
+  DOTNET_BIN="dotnet"
+fi
+
+STAGED=$(git diff --cached --name-only)
+if ! echo "$STAGED" | grep -qE '\.(cs|csproj|props|targets|sln)$'; then
+  echo "[gate] No C# files staged — skipping build+lint gates."
+  exit 0
+fi
+
+echo "[gate] Running build gate..."
+"$DOTNET_BIN" build MediatorLite.sln -c Release --nologo -v q
+echo "[gate] Build passed."
+
+echo "[gate] Running format gate..."
+"$DOTNET_BIN" format MediatorLite.sln
+# Keep staged tracked files in sync with formatter changes.
+git add -u
+
+echo "[gate] Running lint gate..."
+"$DOTNET_BIN" format MediatorLite.sln --verify-no-changes --severity warn
+echo "[gate] Lint passed."

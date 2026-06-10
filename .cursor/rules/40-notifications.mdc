@@ -1,0 +1,105 @@
+---
+description: Notification strategy resolution is compile-time only (execution, error, ordering)
+globs: src/**/*.cs, samples/**/*.cs, tests/**/*.cs
+alwaysApply: false
+---
+
+# Notification Strategy Rules
+
+Notifications are fan-out — `PublishAsync` dispatches one `INotification` to
+every matching `INotificationHandler<T>`. Strategy resolution happens **at
+compile time only**, inside the source generator. There is no runtime options
+API.
+
+## Rule 1 — Resolution precedence
+
+The generator picks a strategy per notification type using this precedence,
+from highest to lowest:
+
+1. Per-notification `[NotificationExecution]` / `[NotificationError]`
+2. Assembly `[assembly: DefaultNotificationExecution]` /
+   `[assembly: DefaultNotificationError]`
+3. Library defaults: `Sequential` (execution) / `StopOnFirstError` (error)
+
+The result is **inlined** into the generated `Publish_*` method as a single
+branch-free path. Do not try to change strategies at runtime; there is
+nowhere to plug in.
+
+The attributes are compile-time only and documented as such:
+
+```109:116:src/MediatorLite.Abstractions/Abstractions/Attributes.cs
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+public sealed class NotificationExecutionAttribute(NotificationExecutionStrategy strategy) : Attribute
+{
+    /// <summary>
+    /// Gets the execution strategy for this notification type.
+    /// </summary>
+    public NotificationExecutionStrategy Strategy { get; } = strategy;
+}
+```
+
+## Rule 2 — `NotificationOptionsAttribute` is deleted
+
+The old `NotificationOptionsAttribute` and any runtime `NotificationOptions` /
+`PublishOptions` class have been removed. Do not reintroduce them. If you
+find one in a PR, delete it and reach for the compile-time attributes
+instead.
+
+## Rule 3 — Strategy enum values
+
+```6:48:src/MediatorLite.Abstractions/Abstractions/Attributes.cs
+public enum NotificationExecutionStrategy
+{
+    Sequential = 0,
+    Parallel = 1,
+    StopOnFirst = 2
+}
+```
+
+- `Sequential` — one handler at a time, in order. Default.
+- `Parallel` — `Task.WhenAll`-style fan-out.
+- `StopOnFirst` — call handlers in order; stop on the first successful
+  completion. Pair with `ContinueAndAggregate` for "fallback" semantics.
+
+## Rule 4 — Ordering via `[NotificationHandlerOrder]`
+
+Handlers are pre-sorted at compile time. Lower values run first; absent
+attribute implies order 0. This applies in `Sequential` and `StopOnFirst`
+execution modes; in `Parallel` it controls the order handlers are enumerated
+before `Task.WhenAll`.
+
+```140:180:tests/MediatorLite.Tests/SourceGeneration/TestTypes.cs
+public class UserCreatedEventHandler1 : INotificationHandler<UserCreatedEvent>
+{
+    ...
+}
+
+[NotificationHandlerOrder(1)]
+public class UserCreatedEventHandler2 : INotificationHandler<UserCreatedEvent>
+{
+    ...
+}
+
+[NotificationHandlerOrder(2)]
+public class UserCreatedEventHandler3 : INotificationHandler<UserCreatedEvent>
+{
+    ...
+}
+```
+
+## Rule 5 — Declaration pattern
+
+Declare the strategy on the notification record alongside the ordering on
+handlers. Both attributes travel with the type:
+
+```33:38:tests/MediatorLite.Tests/SourceGeneration/TestTypes.cs
+[NotificationExecution(NotificationExecutionStrategy.Parallel)]
+[NotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
+public record ParallelEvent(string Message) : INotification;
+
+[NotificationExecution(NotificationExecutionStrategy.StopOnFirst)]
+public record StopOnFirstEvent(string Message) : INotification;
+```
+
+Any runtime-only strategy override in a new PR is wrong — fail review and
+point the author at this rule.

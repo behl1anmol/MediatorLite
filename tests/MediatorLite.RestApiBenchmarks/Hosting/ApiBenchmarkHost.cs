@@ -79,12 +79,7 @@ public static class ApiBenchmarkHostFactory
         if (mediatorImplementation == MediatorImplementation.MediatorLite)
         {
             builder.Services.AddGeneratedHandlers();
-            builder.Services.AddMediatorLite(options =>
-            {
-                options.EnableBuiltInLogging = false;
-                options.EnableTracing = false;
-                options.NotificationExecutionStrategy = ML.NotificationExecutionStrategy.Sequential;
-            });
+            builder.Services.AddMediatorLite();
         }
         else
         {

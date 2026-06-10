@@ -22,6 +22,14 @@ public class MediatorBenchmarks
 
     #region MediatorLite Types
 
+    // Behaviors are discovered assembly-wide at compile time, and open-generic behaviors are
+    // expanded to every request type — which would unfairly add pipeline depth to the
+    // zero-behavior scenario. Each scenario therefore gets its own request type, with closed
+    // behaviors targeting exactly that type so behavior counts match the MediatR setups:
+    //   MediatorLiteQuery       → 0 behaviors (MediatorBenchmarks)
+    //   MediatorLiteSingleQuery → 1 behavior  (PipelineBenchmarks)
+    //   MediatorLiteMultiQuery  → 3 behaviors (MultipleBehaviorsBenchmarks)
+
     public record MediatorLiteQuery(int Id) : MediatorLite.IRequest<MediatorLiteResult>;
     public record MediatorLiteResult(int Id, string Name);
 
@@ -33,24 +41,53 @@ public class MediatorBenchmarks
         }
     }
 
-    public class MediatorLiteLoggingBehavior<TRequest, TResponse> : MediatorLite.IPipelineBehavior<TRequest, TResponse>
-        where TRequest : MediatorLite.IRequest<TResponse>
+    public record MediatorLiteSingleQuery(int Id) : MediatorLite.IRequest<MediatorLiteResult>;
+
+    public class MediatorLiteSingleQueryHandler : MediatorLite.IRequestHandler<MediatorLiteSingleQuery, MediatorLiteResult>
     {
-        public async ValueTask<TResponse> HandleAsync(
-            TRequest request,
-            MediatorLite.RequestHandlerDelegate<TResponse> next,
+        public ValueTask<MediatorLiteResult> HandleAsync(MediatorLiteSingleQuery request, CancellationToken cancellationToken = default)
+        {
+            return ValueTask.FromResult(new MediatorLiteResult(request.Id, "Test"));
+        }
+    }
+
+    public class MediatorLiteSingleLoggingBehavior : MediatorLite.IPipelineBehavior<MediatorLiteSingleQuery, MediatorLiteResult>
+    {
+        public async ValueTask<MediatorLiteResult> HandleAsync(
+            MediatorLiteSingleQuery request,
+            MediatorLite.RequestHandlerDelegate<MediatorLiteResult> next,
             CancellationToken cancellationToken = default)
         {
             return await next();
         }
     }
 
-    public class MediatorLiteValidationBehavior<TRequest, TResponse> : MediatorLite.IPipelineBehavior<TRequest, TResponse>
-        where TRequest : MediatorLite.IRequest<TResponse>
+    public record MediatorLiteMultiQuery(int Id) : MediatorLite.IRequest<MediatorLiteResult>;
+
+    public class MediatorLiteMultiQueryHandler : MediatorLite.IRequestHandler<MediatorLiteMultiQuery, MediatorLiteResult>
     {
-        public async ValueTask<TResponse> HandleAsync(
-            TRequest request,
-            MediatorLite.RequestHandlerDelegate<TResponse> next,
+        public ValueTask<MediatorLiteResult> HandleAsync(MediatorLiteMultiQuery request, CancellationToken cancellationToken = default)
+        {
+            return ValueTask.FromResult(new MediatorLiteResult(request.Id, "Test"));
+        }
+    }
+
+    public class MediatorLiteLoggingBehavior : MediatorLite.IPipelineBehavior<MediatorLiteMultiQuery, MediatorLiteResult>
+    {
+        public async ValueTask<MediatorLiteResult> HandleAsync(
+            MediatorLiteMultiQuery request,
+            MediatorLite.RequestHandlerDelegate<MediatorLiteResult> next,
+            CancellationToken cancellationToken = default)
+        {
+            return await next();
+        }
+    }
+
+    public class MediatorLiteValidationBehavior : MediatorLite.IPipelineBehavior<MediatorLiteMultiQuery, MediatorLiteResult>
+    {
+        public async ValueTask<MediatorLiteResult> HandleAsync(
+            MediatorLiteMultiQuery request,
+            MediatorLite.RequestHandlerDelegate<MediatorLiteResult> next,
             CancellationToken cancellationToken = default)
         {
             // Simulated validation - no actual work but adds to pipeline depth
@@ -58,12 +95,11 @@ public class MediatorBenchmarks
         }
     }
 
-    public class MediatorLiteMetricsBehavior<TRequest, TResponse> : MediatorLite.IPipelineBehavior<TRequest, TResponse>
-        where TRequest : MediatorLite.IRequest<TResponse>
+    public class MediatorLiteMetricsBehavior : MediatorLite.IPipelineBehavior<MediatorLiteMultiQuery, MediatorLiteResult>
     {
-        public async ValueTask<TResponse> HandleAsync(
-            TRequest request,
-            MediatorLite.RequestHandlerDelegate<TResponse> next,
+        public async ValueTask<MediatorLiteResult> HandleAsync(
+            MediatorLiteMultiQuery request,
+            MediatorLite.RequestHandlerDelegate<MediatorLiteResult> next,
             CancellationToken cancellationToken = default)
         {
             // Simulated metrics collection
@@ -71,7 +107,7 @@ public class MediatorBenchmarks
         }
     }
 
-    // Notification types
+    // Notification types - Sequential (library default, no attribute)
     public record MediatorLiteNotification(int Id) : MediatorLite.INotification;
 
     public class MediatorLiteNotificationHandler1 : MediatorLite.INotificationHandler<MediatorLiteNotification>
@@ -93,6 +129,34 @@ public class MediatorBenchmarks
     public class MediatorLiteNotificationHandler3 : MediatorLite.INotificationHandler<MediatorLiteNotification>
     {
         public ValueTask HandleAsync(MediatorLiteNotification notification, CancellationToken cancellationToken = default)
+        {
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    // Notification types - Parallel (compile-time attribute)
+    [MediatorLite.NotificationExecution(MediatorLite.NotificationExecutionStrategy.Parallel)]
+    public record MediatorLiteNotificationParallel(int Id) : MediatorLite.INotification;
+
+    public class MediatorLiteNotificationParallelHandler1 : MediatorLite.INotificationHandler<MediatorLiteNotificationParallel>
+    {
+        public ValueTask HandleAsync(MediatorLiteNotificationParallel notification, CancellationToken cancellationToken = default)
+        {
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    public class MediatorLiteNotificationParallelHandler2 : MediatorLite.INotificationHandler<MediatorLiteNotificationParallel>
+    {
+        public ValueTask HandleAsync(MediatorLiteNotificationParallel notification, CancellationToken cancellationToken = default)
+        {
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    public class MediatorLiteNotificationParallelHandler3 : MediatorLite.INotificationHandler<MediatorLiteNotificationParallel>
+    {
+        public ValueTask HandleAsync(MediatorLiteNotificationParallel notification, CancellationToken cancellationToken = default)
         {
             return ValueTask.CompletedTask;
         }
@@ -181,15 +245,11 @@ public class MediatorBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        // Setup MediatorLite with source-gen dispatch (no behaviors for simple request)
+        // Setup MediatorLite with v2 source-gen dispatch
+        // AddGeneratedHandlers() auto-registers all discovered handlers, behaviors, and SourceGeneratedMediator
         var mediatorLiteServices = new ServiceCollection();
-        mediatorLiteServices.AddSingleton<MediatorLite.ISourceGeneratedMediator, SourceGeneratedMediator>();
-        mediatorLiteServices.AddTransient<MediatorLite.IRequestHandler<MediatorLiteQuery, MediatorLiteResult>, MediatorLiteHandler>();
-        mediatorLiteServices.AddMediatorLite(options =>
-        {
-            options.EnableBuiltInLogging = false;
-            options.EnableTracing = false;
-        });
+        mediatorLiteServices.AddGeneratedHandlers();
+        mediatorLiteServices.AddMediatorLite();
         mediatorLiteServices.AddSingleton<ILoggerFactory, NullLoggerFactory>();
         mediatorLiteServices.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         _mediatorLiteProvider = mediatorLiteServices.BuildServiceProvider();
@@ -238,16 +298,10 @@ public class PipelineBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        // Setup MediatorLite with source-gen dispatch + single behavior
+        // Setup MediatorLite with v2 source-gen dispatch (behaviors auto-registered)
         var mediatorLiteServices = new ServiceCollection();
-        mediatorLiteServices.AddSingleton<MediatorLite.ISourceGeneratedMediator, SourceGeneratedMediator>();
-        mediatorLiteServices.AddTransient<MediatorLite.IRequestHandler<MediatorBenchmarks.MediatorLiteQuery, MediatorBenchmarks.MediatorLiteResult>, MediatorBenchmarks.MediatorLiteHandler>();
-        mediatorLiteServices.AddTransient(typeof(MediatorLite.IPipelineBehavior<,>), typeof(MediatorBenchmarks.MediatorLiteLoggingBehavior<,>));
-        mediatorLiteServices.AddMediatorLite(options =>
-        {
-            options.EnableBuiltInLogging = false;
-            options.EnableTracing = false;
-        });
+        mediatorLiteServices.AddGeneratedHandlers();
+        mediatorLiteServices.AddMediatorLite();
         mediatorLiteServices.AddSingleton<ILoggerFactory, NullLoggerFactory>();
         mediatorLiteServices.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         _mediatorLiteProvider = mediatorLiteServices.BuildServiceProvider();
@@ -273,7 +327,7 @@ public class PipelineBenchmarks
     [Benchmark]
     public async Task<MediatorBenchmarks.MediatorLiteResult> MediatorLite_WithBehavior()
     {
-        return await _mediatorLite.SendAsync(new MediatorBenchmarks.MediatorLiteQuery(1));
+        return await _mediatorLite.SendAsync(new MediatorBenchmarks.MediatorLiteSingleQuery(1));
     }
 
     [GlobalCleanup]
@@ -297,18 +351,10 @@ public class MultipleBehaviorsBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        // Setup MediatorLite with source-gen dispatch + 3 behaviors
+        // Setup MediatorLite with v2 source-gen dispatch (all behaviors auto-registered)
         var mediatorLiteServices = new ServiceCollection();
-        mediatorLiteServices.AddSingleton<MediatorLite.ISourceGeneratedMediator, SourceGeneratedMediator>();
-        mediatorLiteServices.AddTransient<MediatorLite.IRequestHandler<MediatorBenchmarks.MediatorLiteQuery, MediatorBenchmarks.MediatorLiteResult>, MediatorBenchmarks.MediatorLiteHandler>();
-        mediatorLiteServices.AddTransient(typeof(MediatorLite.IPipelineBehavior<,>), typeof(MediatorBenchmarks.MediatorLiteLoggingBehavior<,>));
-        mediatorLiteServices.AddTransient(typeof(MediatorLite.IPipelineBehavior<,>), typeof(MediatorBenchmarks.MediatorLiteValidationBehavior<,>));
-        mediatorLiteServices.AddTransient(typeof(MediatorLite.IPipelineBehavior<,>), typeof(MediatorBenchmarks.MediatorLiteMetricsBehavior<,>));
-        mediatorLiteServices.AddMediatorLite(options =>
-        {
-            options.EnableBuiltInLogging = false;
-            options.EnableTracing = false;
-        });
+        mediatorLiteServices.AddGeneratedHandlers();
+        mediatorLiteServices.AddMediatorLite();
         mediatorLiteServices.AddSingleton<ILoggerFactory, NullLoggerFactory>();
         mediatorLiteServices.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         _mediatorLiteProvider = mediatorLiteServices.BuildServiceProvider();
@@ -336,7 +382,7 @@ public class MultipleBehaviorsBenchmarks
     [Benchmark]
     public async Task<MediatorBenchmarks.MediatorLiteResult> MediatorLite_WithMultipleBehaviors()
     {
-        return await _mediatorLite.SendAsync(new MediatorBenchmarks.MediatorLiteQuery(1));
+        return await _mediatorLite.SendAsync(new MediatorBenchmarks.MediatorLiteMultiQuery(1));
     }
 
     [GlobalCleanup]
@@ -352,49 +398,24 @@ public class MultipleBehaviorsBenchmarks
 [SimpleJob(warmupCount: 3, iterationCount: 10)]
 public class NotificationBenchmarks
 {
-    private IServiceProvider _mediatorLiteSequentialProvider = null!;
-    private IServiceProvider _mediatorLiteParallelProvider = null!;
+    private IServiceProvider _mediatorLiteProvider = null!;
     private IServiceProvider _mediatrProvider = null!;
-    private MediatorLite.IMediator _mediatorLiteSequential = null!;
-    private MediatorLite.IMediator _mediatorLiteParallel = null!;
+    private MediatorLite.IMediator _mediatorLite = null!;
     private MediatR.IMediator _mediatr = null!;
 
     [GlobalSetup]
     public void Setup()
     {
-        // Setup MediatorLite with source-gen dispatch + sequential notifications
-        var mediatorLiteSequentialServices = new ServiceCollection();
-        mediatorLiteSequentialServices.AddSingleton<MediatorLite.ISourceGeneratedMediator, SourceGeneratedMediator>();
-        mediatorLiteSequentialServices.AddTransient<MediatorLite.INotificationHandler<MediatorBenchmarks.MediatorLiteNotification>, MediatorBenchmarks.MediatorLiteNotificationHandler1>();
-        mediatorLiteSequentialServices.AddTransient<MediatorLite.INotificationHandler<MediatorBenchmarks.MediatorLiteNotification>, MediatorBenchmarks.MediatorLiteNotificationHandler2>();
-        mediatorLiteSequentialServices.AddTransient<MediatorLite.INotificationHandler<MediatorBenchmarks.MediatorLiteNotification>, MediatorBenchmarks.MediatorLiteNotificationHandler3>();
-        mediatorLiteSequentialServices.AddMediatorLite(options =>
-        {
-            options.EnableBuiltInLogging = false;
-            options.EnableTracing = false;
-            options.NotificationExecutionStrategy = NotificationExecutionStrategy.Sequential;
-        });
-        mediatorLiteSequentialServices.AddSingleton<ILoggerFactory, NullLoggerFactory>();
-        mediatorLiteSequentialServices.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
-        _mediatorLiteSequentialProvider = mediatorLiteSequentialServices.BuildServiceProvider();
-        _mediatorLiteSequential = _mediatorLiteSequentialProvider.GetRequiredService<MediatorLite.IMediator>();
-
-        // Setup MediatorLite with source-gen dispatch + parallel notifications
-        var mediatorLiteParallelServices = new ServiceCollection();
-        mediatorLiteParallelServices.AddSingleton<MediatorLite.ISourceGeneratedMediator, SourceGeneratedMediator>();
-        mediatorLiteParallelServices.AddTransient<MediatorLite.INotificationHandler<MediatorBenchmarks.MediatorLiteNotification>, MediatorBenchmarks.MediatorLiteNotificationHandler1>();
-        mediatorLiteParallelServices.AddTransient<MediatorLite.INotificationHandler<MediatorBenchmarks.MediatorLiteNotification>, MediatorBenchmarks.MediatorLiteNotificationHandler2>();
-        mediatorLiteParallelServices.AddTransient<MediatorLite.INotificationHandler<MediatorBenchmarks.MediatorLiteNotification>, MediatorBenchmarks.MediatorLiteNotificationHandler3>();
-        mediatorLiteParallelServices.AddMediatorLite(options =>
-        {
-            options.EnableBuiltInLogging = false;
-            options.EnableTracing = false;
-            options.NotificationExecutionStrategy = NotificationExecutionStrategy.Parallel;
-        });
-        mediatorLiteParallelServices.AddSingleton<ILoggerFactory, NullLoggerFactory>();
-        mediatorLiteParallelServices.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
-        _mediatorLiteParallelProvider = mediatorLiteParallelServices.BuildServiceProvider();
-        _mediatorLiteParallel = _mediatorLiteParallelProvider.GetRequiredService<MediatorLite.IMediator>();
+        // Single MediatorLite provider — strategies are compile-time per notification type:
+        //   MediatorLiteNotification         → Sequential (library default, no attribute)
+        //   MediatorLiteNotificationParallel → Parallel ([NotificationExecution(Parallel)])
+        var mediatorLiteServices = new ServiceCollection();
+        mediatorLiteServices.AddGeneratedHandlers();
+        mediatorLiteServices.AddMediatorLite();
+        mediatorLiteServices.AddSingleton<ILoggerFactory, NullLoggerFactory>();
+        mediatorLiteServices.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
+        _mediatorLiteProvider = mediatorLiteServices.BuildServiceProvider();
+        _mediatorLite = _mediatorLiteProvider.GetRequiredService<MediatorLite.IMediator>();
 
         // Setup MediatR
         var mediatrServices = new ServiceCollection();
@@ -415,20 +436,19 @@ public class NotificationBenchmarks
     [Benchmark]
     public async Task MediatorLite_Sequential_Notification()
     {
-        await _mediatorLiteSequential.PublishAsync(new MediatorBenchmarks.MediatorLiteNotification(1));
+        await _mediatorLite.PublishAsync(new MediatorBenchmarks.MediatorLiteNotification(1));
     }
 
     [Benchmark]
     public async Task MediatorLite_Parallel_Notification()
     {
-        await _mediatorLiteParallel.PublishAsync(new MediatorBenchmarks.MediatorLiteNotification(1));
+        await _mediatorLite.PublishAsync(new MediatorBenchmarks.MediatorLiteNotificationParallel(1));
     }
 
     [GlobalCleanup]
     public void Cleanup()
     {
-        (_mediatorLiteSequentialProvider as IDisposable)?.Dispose();
-        (_mediatorLiteParallelProvider as IDisposable)?.Dispose();
+        (_mediatorLiteProvider as IDisposable)?.Dispose();
         (_mediatrProvider as IDisposable)?.Dispose();
     }
 }

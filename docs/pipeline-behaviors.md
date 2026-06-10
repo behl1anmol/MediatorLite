@@ -2,6 +2,20 @@
 
 Pipeline behaviors allow you to add cross-cutting concerns to your request handling pipeline.
 
+## v2 Changes
+
+In v2, behavior execution order is controlled by the **`[BehaviorOrder]` attribute** at compile time:
+
+```csharp
+[BehaviorOrder(1)]  // Executes first
+public class LoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse> { }
+
+[BehaviorOrder(2)]  // Executes second
+public class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse> { }
+```
+
+> ⚠️ **v2 Change:** DI registration order no longer determines behavior execution order. Use `[BehaviorOrder]` instead.
+
 ## Open vs Closed Behaviors
 
 **Open behavior** = an open generic type definition (e.g., `LoggingBehavior<,>`) that can be applied to any request/response pair. It is resolved by DI for each concrete request at runtime.
@@ -66,18 +80,18 @@ public sealed class CreateOrderLoggingBehavior
 
 ## Registering Behaviors
 
-### Source-Generated Registration (Recommended)
+### Source-Generated Registration (Required for v2)
 
-**When using source-generated registration, behaviors are automatically discovered and registered. Do NOT use `MediatorOptions.AddOpenBehavior()` - it's not needed.**
+**When using source-generated registration, behaviors are automatically discovered and registered — no manual `AddOpenBehavior(...)` call is required or supported.**
 
-If your behaviors are in the same project as the source generator, `AddGeneratedHandlers()` will discover and register them automatically:
+If your behaviors are in the same project as the source generator, `AddGeneratedHandlers()` will discover and register them automatically with ordering from `[BehaviorOrder]`:
 
 ```csharp
 using MediatorLite.Generated;
 
 services
-    .AddGeneratedHandlers()   // Discovers and registers ALL behaviors automatically
-    .AddMediatorLite();       // No need to call options.AddOpenBehavior()
+    .AddGeneratedHandlers()   // Discovers and registers ALL behaviors with [BehaviorOrder] ordering
+    .AddMediatorLite();       // Takes no arguments; mediator is always registered as Transient
 ```
 
 To register only behaviors from the source generator:
@@ -88,73 +102,50 @@ services
     .AddMediatorLite();
 ```
 
-**Important:** The source generator discovers both open generic behaviors (e.g., `LoggingBehavior<,>`) and closed behaviors (e.g., `CreateOrderValidationBehavior`). They are registered directly in DI and will be resolved automatically by the mediator.
+**Important:** The source generator discovers both open generic behaviors (e.g., `LoggingBehavior<,>`) and closed behaviors (e.g., `CreateOrderValidationBehavior`). They are registered directly in DI and ordered by `[BehaviorOrder]`.
 
-### Manual Registration (Without Source Generation)
+### Manual Registration (Not Supported)
 
-When NOT using source-generated registration, you have two options:
+> ⚠️ **Not supported in v2:** There is no reflection fallback, so manually registered behaviors are never dispatched without `AddGeneratedHandlers()`. Worse, hand-registering behaviors **alongside** source generation double-registers them — the generator already discovered and registered every open-generic and closed behavior. Never call `services.AddTransient(typeof(IPipelineBehavior<,>), ...)` in a source-generated consumer.
 
-#### Option 1: Via MediatorOptions (Recommended for manual registration)
+**Key Rule:** `AddGeneratedHandlers()` is the only registration path in v2; behavior ordering is controlled exclusively by `[BehaviorOrder]`.
 
-Register open generic behaviors through `MediatorOptions`. This automatically adds them to DI:
+## Execution Order (v2)
 
-```csharp
-services.AddMediatorLite(options =>
-{
-    options.AddOpenBehavior(typeof(LoggingBehavior<,>));
-    options.AddOpenBehavior(typeof(ValidationBehavior<,>));
-});
-```
-
-Register closed behaviors:
-
-```csharp
-services.AddMediatorLite(options =>
-{
-    options.AddBehavior<CreateOrderAuthorizationBehavior>();
-});
-```
-
-#### Option 2: Direct DI Registration
-
-You can also register behaviors directly with the DI container:
-
-```csharp
-// Open generic - applies to all requests
-services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
-
-// Closed type - applies to specific request only
-services.AddTransient<IPipelineBehavior<CreateOrder, OrderResult>, CreateOrderLoggingBehavior>();
-
-services.AddMediatorLite();
-```
-
-### Summary: Source-Gen vs Manual Registration
-
-| Method | When to Use | Behavior Registration |
-|--------|-------------|----------------------|
-| **Source-Generated** | Recommended for all projects | `AddGeneratedHandlers()` - behaviors auto-discovered, **DO NOT** use `options.AddOpenBehavior()` |
-| **Manual via Options** | When NOT using source-gen | `options.AddOpenBehavior()` or `options.AddBehavior<T>()` |
-| **Manual via DI** | When NOT using source-gen | `services.AddTransient(typeof(IPipelineBehavior<,>), typeof(Behavior<,>))` |
-
-**Key Rule:** If you call `AddGeneratedHandlers()` or `AddGeneratedBehaviors()`, the source generator handles all behavior registration. Do not mix source-gen with `MediatorOptions.AddOpenBehavior()` for the same behavior - it will be registered twice.
-
-## Execution Order
-
-Behaviors execute in registration order (first registered = first executed):
+In v2, behaviors execute in `[BehaviorOrder]` attribute order (lowest number first):
 
 ```
-Request -> LoggingBehavior -> ValidationBehavior -> Handler -> ValidationBehavior -> LoggingBehavior -> Response
+Request -> [BehaviorOrder(1)] LoggingBehavior -> [BehaviorOrder(2)] ValidationBehavior -> Handler -> ValidationBehavior -> LoggingBehavior -> Response
 ```
 
 ### Using BehaviorOrderAttribute
 
 ```csharp
-[BehaviorOrder(1)] // Executes first
-public class LoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse> { }
+[BehaviorOrder(1)]  // Executes first
+public class LoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
+    where TRequest : IRequest<TResponse>
+{
+    // ...
+}
 
-[BehaviorOrder(2)] // Executes second
-public class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse> { }
+[BehaviorOrder(2)]  // Executes second
+public class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
+    where TRequest : IRequest<TResponse>
+{
+    // ...
+}
+
+[BehaviorOrder(100)]  // Executes last (just before handler)
+public class TransactionBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
+    where TRequest : IRequest<TResponse>
+{
+    // ...
+}
+```
+
+Behaviors without `[BehaviorOrder]` default to order `0`.
+
+> **Tip:** Use gaps in ordering (1, 10, 100) to allow inserting new behaviors without renumbering.
 ```
 
 ## Common Behavior Patterns
