@@ -33,7 +33,7 @@ Each role has (or will have) a dedicated agent file under `.github/agents/*.agen
 |------|------------------------|--------------------------|
 | **orchestrator** | Own the session, break the request into work, choose delegation mode, consolidate outputs, maintain lessons/memories. Plays the "architect" seat. | [.github/agents/dotnet-self-learning-architect.agent.md](.github/agents/dotnet-self-learning-architect.agent.md) |
 | **scrum-master** | Maintain the `sprint_backlog`, prioritise, unblock, confirm Definition of Done before closing items. | (dedicated file pending) |
-| **backend-developer** | Implement changes in `src/MediatorLite/**`, `src/MediatorLite.Abstractions/**`, `src/MediatorLite.SourceGeneration/**`. Must keep generated code and `ISourceGeneratedMediator` aligned. | (dedicated file pending) |
+| **backend-developer** | Implement changes in `src/MediatorLite/**`, `src/MediatorLite.Abstractions/**`, `src/MediatorLite.SourceGeneration/**`. Must keep the generated `SourceGeneratedMediator` (implements `IMediator`) aligned with the abstractions. | (dedicated file pending) |
 | **frontend-developer** | Sample apps and any non-library UI/console surface (e.g. `samples/MediatorLite.Sample.SourceGen`). | (dedicated file pending) |
 | **tester** | xUnit + FluentAssertions coverage under `tests/MediatorLite.Tests`, benchmarks under `tests/MediatorLite.Benchmarks` and `tests/MediatorLite.RestApiBenchmarks`. Owns `dotnet test MediatorLite.sln`. | (dedicated file pending) |
 | **devops** | Build, CI, NuGet packaging, `Directory.Build.props`, `AGENTS.md` / `.github/copilot-instructions.md` sync. | (dedicated file pending) |
@@ -271,7 +271,7 @@ if (!ContextDb.HasFreshReview(diffHash, TimeSpan.FromHours(2)))
 {
     // spawn code-reviewer subagent, then log its findings:
     ContextDb.LogReview(
-        target:       "src/MediatorLite/Internal/Mediator.cs",
+        target:       "src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs",
         severity:     "High",
         finding:      "SendAsync drops cancellation on sync-completed handlers",
         suggestedFix: "Observe token before fast-path return",

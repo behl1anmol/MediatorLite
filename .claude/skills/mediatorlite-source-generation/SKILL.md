@@ -1,7 +1,7 @@
 ---
 name: mediatorlite-source-generation
 description: Reference for the MediatorLite.SourceGeneration project -- HandlerDiscoveryGenerator (IIncrementalGenerator) with four discovery pipelines, emission of MediatorLite.Generated.MediatorLiteRegistration + SourceGeneratedMediator, compile-time resolution of notification strategies, unrolled pipelines, and inline logging/tracing with [assembly: DisableMediatorLogging] / [assembly: DisableMediatorTracing] opt-out. Use when modifying code generation, tuning emitted dispatch, adding new generator pipelines, or debugging generated output.
-triggers: source generator, HandlerDiscoveryGenerator, IIncrementalGenerator, MediatorLiteRegistration, AddGeneratedHandlers, generated dispatch, notification strategy resolution, inline logging emission, SourceGeneratedMediator, Pipeline_, Publish_, DisableMediatorLogging, DisableMediatorTracing, unrolled pipeline, AssemblyDefaults, ResolveStrategies
+triggers: source generator, HandlerDiscoveryGenerator, IIncrementalGenerator, MediatorLiteRegistration, AddGeneratedHandlers, generated dispatch, typed switch dispatch, notification strategy resolution, inline logging emission, SourceGeneratedMediator, Send_, Publish_, SlowCast, DisableMediatorLogging, DisableMediatorTracing, unrolled pipeline, AssemblyDefaults, ResolveStrategies
 ---
 
 # MediatorLite.SourceGeneration
@@ -308,7 +308,7 @@ Determines which requests need validation (from `HasDataAnnotations` or a discov
 
 The generated class lives in `MediatorLite.Generated` and exposes one all-in-one method plus four granular methods, each returning `IServiceCollection`:
 
-```643:657:src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs
+```684:700:src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs
         sb.AppendLine(
             "        public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection AddGeneratedHandlers(");
         sb.AppendLine("            this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
@@ -318,13 +318,17 @@ The generated class lives in `MediatorLite.Generated` and exposes one all-in-one
         sb.AppendLine("            AddGeneratedValidators(services);");
         sb.AppendLine("            AddGeneratedBehaviors(services);");
         sb.AppendLine();
-        sb.AppendLine("            // Register the source-generated mediator for zero-reflection dispatch");
-        sb.AppendLine("            services.AddSingleton<global::MediatorLite.ISourceGeneratedMediator, SourceGeneratedMediator>();");
+        sb.AppendLine("            // Register the source-generated mediator for zero-reflection dispatch.");
+        sb.AppendLine("            // Scoped: the mediator captures the resolving scope's IServiceProvider so");
+        sb.AppendLine("            // handlers and behaviors resolve with correct scoped lifetimes.");
+        sb.AppendLine("            services.AddScoped<global::MediatorLite.IMediator, SourceGeneratedMediator>();");
         sb.AppendLine();
         sb.AppendLine("            return services;");
         sb.AppendLine("        }");
         sb.AppendLine();
 ```
+
+`SourceGeneratedMediator` is registered as the `IMediator` directly via plain `AddScoped` (not `AddSingleton<ISourceGeneratedMediator, ...>`). Because `AddMediatorLite()` only `TryAdd`s the `ThrowingMediator` fallback and the container resolves the last `IMediator` descriptor, the generated mediator wins regardless of call order.
 
 Diagnostic counts (useful for sanity checks in tests and startup logs):
 
@@ -360,61 +364,56 @@ When **no** handlers are discovered, `GenerateEmptyRegistration` emits a stub wi
                          {
 ```
 
-### Emitted `SourceGeneratedMediator` — dispatch tables + unrolled pipelines
+### Emitted `SourceGeneratedMediator` — typed switch + unrolled pipelines
 
-`SourceGeneratedMediator` is registered as **singleton** (line 653 above); it contains two static `Dictionary<Type, RequestDispatcher>` / `Dictionary<Type, NotificationPublisher>` fields that map runtime types to static lambdas invoking the unrolled per-request methods:
+`SourceGeneratedMediator` implements `global::MediatorLite.IMediator` **directly** and is registered **scoped** (it captures the resolving scope's `IServiceProvider` in a single `_sp` field). There are **no** `Dictionary<Type, ...>` dispatch tables, no `RequestDispatcher`/`NotificationPublisher` delegates, and no `GetDispatcher`/`GetPublisher` methods — those were deleted. Dispatch is a compile-time C# **type-pattern switch** over the discovered concrete types (arms emitted most-derived-first):
 
-```859:884:src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs
-        sb.AppendLine("    public sealed class SourceGeneratedMediator : global::MediatorLite.ISourceGeneratedMediator");
+```921:962:src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs
+        sb.AppendLine("    public sealed class SourceGeneratedMediator : global::MediatorLite.IMediator");
         sb.AppendLine("    {");
-
-        // === DISPATCH DICTIONARY ===
-        sb.AppendLine("        // O(1) request dispatch table");
-        sb.AppendLine("        private static readonly Dictionary<Type, global::MediatorLite.RequestDispatcher> _dispatchers = new()");
+        sb.AppendLine("        private readonly IServiceProvider _sp;");
+        // ... ctor stores _sp ...
+        sb.AppendLine("        public ValueTask<TResponse> SendAsync<TResponse>(");
+        sb.AppendLine("            global::MediatorLite.IRequest<TResponse> request,");
+        sb.AppendLine("            CancellationToken cancellationToken = default)");
         sb.AppendLine("        {");
-        foreach (var (handler, iface) in requestHandlers)
+        sb.AppendLine("            switch (request)");
+        sb.AppendLine("            {");
+        foreach (var (handler, iface) in dispatchEntries)
         {
             var safeName = GetSafeTypeName(iface.RequestType);
-            sb.AppendLine($"            [typeof({iface.RequestType})] = static (sp, req, ct) => Pipeline_{safeName}(sp, ({iface.RequestType})req, ct),");
+            sb.AppendLine($"                case {iface.RequestType} r_{safeName}:");
+            sb.AppendLine("                {");
+            sb.AppendLine($"                    var vt = Send_{safeName}(r_{safeName}, cancellationToken);");
+            sb.AppendLine($"                    if (typeof(TResponse) == typeof({iface.ResponseType}))");
+            sb.AppendLine($"                        return Unsafe.As<ValueTask<{iface.ResponseType}>, ValueTask<TResponse>>(ref vt);");
+            sb.AppendLine($"                    return SlowCast<{iface.ResponseType}, TResponse>(vt);");
+            sb.AppendLine("                }");
+        }
+        // case null: throw ArgumentNullException; default: throw InvalidOperationException
+```
+
+Each arm calls a fully typed `Send_<SafeRequestName>` instance method returning `ValueTask<TConcrete>`, then converts the exact result to `ValueTask<TResponse>` via an identity-guarded `Unsafe.As` (the `typeof` guard JIT-folds to a constant). Covariant `IRequest<out T>` dispatch falls back to the `SlowCast` reference cast. **No boxing, no `Task<object>`.**
+
+Each request gets a private `Send_<SafeRequestName>` method using `_sp`. When diagnostics are disabled (no logging/tracing emitted) the body **returns the pipeline `ValueTask` directly** — no async state machine, no try/catch — and is marked `[MethodImpl(AggressiveInlining)]`. A zero-behavior request then returns the handler's `ValueTask` straight through; with behaviors the generator builds a **nested delegate chain** outside-in. When diagnostics are enabled the method becomes `async ValueTask<...>` and wraps the chain with the inline `LogDebug` / `Activity` emission.
+
+```1113:1124:src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs
+        if (!needsDiagnostics)
+        {
+            // Fully-disabled fast path — return the pipeline ValueTask directly; no async
+            // state machine, no try/catch, no diagnostic locals.
+            sb.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
+            sb.AppendLine($"        private ValueTask<{responseType}> Send_{safeName}({requestType} request, CancellationToken ct)");
+            sb.AppendLine("        {");
+            EmitResolutions("            ");
+            sb.AppendLine($"            return {BuildPipelineExpression()};");
+            sb.AppendLine("        }");
+            sb.AppendLine();
+            return;
         }
 ```
 
-Each request gets a private static `Pipeline_<SafeRequestName>` method. With zero behaviors the emitted body is a direct `handler.HandleAsync(...)` call; with behaviors the generator emits a **nested delegate chain** from outside-in:
-
-```986:1025:src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs
-        void EmitPipelineBody(string indent)
-        {
-            if (behaviors.Count == 0)
-            {
-                // Zero-behavior fast path — direct handler call
-                sb.AppendLine($"{indent}var handler = sp.GetRequiredService<global::MediatorLite.IRequestHandler<{requestType}, {responseType}>>();");
-                sb.AppendLine($"{indent}var result = await handler.HandleAsync(request, ct).ConfigureAwait(false);");
-            }
-            else
-            {
-                // Resolve all behaviors by concrete type and handler
-                for (int i = 0; i < behaviors.Count; i++)
-                {
-                    var behavior = behaviors[i];
-                    sb.AppendLine($"{indent}var b{i + 1} = sp.GetRequiredService<{behavior.BehaviorTypeName}>();");
-                }
-                sb.AppendLine($"{indent}var handler = sp.GetRequiredService<global::MediatorLite.IRequestHandler<{requestType}, {responseType}>>();");
-                sb.AppendLine();
-
-                // Build the nested delegate chain from outside in
-                sb.Append($"{indent}var result = await ");
-                for (int i = 0; i < behaviors.Count; i++)
-                {
-                    sb.Append($"b{i + 1}.HandleAsync(request, () => ");
-                }
-                sb.Append("handler.HandleAsync(request, ct)");
-                for (int i = behaviors.Count - 1; i >= 0; i--)
-                {
-                    sb.Append(", ct)");
-                }
-                sb.AppendLine(".ConfigureAwait(false);");
-            }
-```
+Where `BuildPipelineExpression()` yields `handler.HandleAsync(request, ct)` for zero behaviors, or `b1.HandleAsync(request, () => b2.HandleAsync(request, () => handler.HandleAsync(request, ct), ct), ct)` for the nested chain.
 
 ### Inline logging + tracing emission
 
@@ -429,51 +428,28 @@ When observability is enabled (default), the pipeline body is wrapped in `try / 
     private const string ActivityNamePublishNotification = "MediatorLite.Publish";
 ```
 
-The observability emission is a branch inside `GenerateUnrolledPipeline`:
+When diagnostics are enabled the `Send_<Type>` method is emitted as `async ValueTask<...>` and the pipeline expression is wrapped in `try / catch (Exception __ex)` with inline `LogDebug` / `Activity` calls resolved through `_sp`:
 
-```1032:1073:src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs
-        bool needsDiagnostics = loggingEnabled || tracingEnabled;
-
-        if (needsDiagnostics)
+```1127:1167:src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs
+        sb.AppendLine($"        private async ValueTask<{responseType}> Send_{safeName}({requestType} request, CancellationToken ct)");
+        sb.AppendLine("        {");
+        if (loggingEnabled)
         {
-            if (loggingEnabled)
-            {
-                sb.AppendLine("            var __logger = sp.GetRequiredService<global::Microsoft.Extensions.Logging.ILogger<global::MediatorLite.IMediator>>();");
-                sb.AppendLine($"            __logger.LogDebug(\"Sending request {{RequestType}}\", \"{simpleRequest}\");");
-            }
-            if (tracingEnabled)
-            {
-                sb.AppendLine("            using var __activity = global::MediatorLite.Diagnostics.MediatorActivitySource.Source.StartActivity(");
-                sb.AppendLine($"                \"{ActivityNameSendRequest} {simpleRequest}\",");
-                sb.AppendLine("                global::System.Diagnostics.ActivityKind.Internal);");
-                sb.AppendLine($"            __activity?.SetTag(global::MediatorLite.Diagnostics.MediatorActivitySource.Tags.RequestType, \"{fullRequest}\");");
-                sb.AppendLine($"            __activity?.SetTag(global::MediatorLite.Diagnostics.MediatorActivitySource.Tags.ResponseType, \"{fullResponse}\");");
-            }
-            sb.AppendLine();
-            sb.AppendLine("            try");
-            sb.AppendLine("            {");
-            EmitPipelineBody("                ");
-            sb.AppendLine("            }");
-            sb.AppendLine("            catch (global::System.Exception __ex)");
-            sb.AppendLine("            {");
-            if (tracingEnabled)
-            {
-                sb.AppendLine("                __activity?.SetTag(global::MediatorLite.Diagnostics.MediatorActivitySource.Tags.Error, true);");
-                sb.AppendLine("                __activity?.SetTag(global::MediatorLite.Diagnostics.MediatorActivitySource.Tags.ErrorMessage, __ex.Message);");
-            }
-            if (loggingEnabled)
-            {
-                sb.AppendLine($"                __logger.LogError(__ex, \"Error handling request {{RequestType}}\", \"{simpleRequest}\");");
-            }
-            sb.AppendLine("                throw;");
-            sb.AppendLine("            }");
+            sb.AppendLine("            var __logger = _sp.GetRequiredService<global::Microsoft.Extensions.Logging.ILogger<global::MediatorLite.IMediator>>();");
+            sb.AppendLine($"            __logger.LogDebug(\"Sending request {{RequestType}}\", \"{simpleRequest}\");");
         }
-        else
-        {
-            // Fully-disabled fast path — no try/catch, no locals
-            EmitPipelineBody("            ");
-        }
+        // ... tracing StartActivity + SetTag emission ...
+        sb.AppendLine("            try");
+        sb.AppendLine("            {");
+        EmitResolutions("                ");
+        sb.AppendLine($"                var result = await {BuildPipelineExpression()}.ConfigureAwait(false);");
+        // ... success LogDebug, return result ...
+        sb.AppendLine("            }");
+        sb.AppendLine("            catch (global::System.Exception __ex)");
+        // ... SetTag error + LogError + throw ...
 ```
+
+The diagnostics-disabled path is the `[MethodImpl(AggressiveInlining)]` direct-return fast path shown above — no `async`, no try/catch, no diagnostic locals.
 
 ### Notification publisher emission
 
@@ -584,15 +560,15 @@ Request types whose `HasDataAnnotations` flag is set (any property has a `[Valid
 Two generated files per compilation with handlers:
 
 - **`MediatorLiteRegistration.g.cs`** — `namespace MediatorLite.Generated { static class MediatorLiteRegistration { AddGeneratedHandlers, AddGeneratedRequestHandlers, AddGeneratedNotificationHandlers, AddGeneratedValidators, AddGeneratedBehaviors, RequestHandlerCount, NotificationHandlerCount, BehaviorCount, ValidatorCount } }`
-- **`SourceGeneratedMediator.g.cs`** — `namespace MediatorLite.Generated { sealed class SourceGeneratedMediator : ISourceGeneratedMediator { _dispatchers, _publishers, GetDispatcher, GetPublisher, Pipeline_<Type>..., Publish_<Type>... } }`
+- **`SourceGeneratedMediator.g.cs`** — `namespace MediatorLite.Generated { sealed class SourceGeneratedMediator : global::MediatorLite.IMediator { _sp ctor, SendAsync switch, PublishAsync switch, SlowCast, Send_<Type>..., Publish_<Type>... } }`
 
 ## Patterns & invariants
 
 **Do:**
 - Keep any new constant that the generator emits in sync with the runtime equivalent (the generator cannot reference `MediatorLite.dll`; see the comment above `ActivityNameSendRequest`).
-- Emit `static` lambdas for dispatch table entries to avoid closure allocations.
-- Emit `[MethodImpl(MethodImplOptions.AggressiveInlining)]` on `GetDispatcher`/`GetPublisher`.
-- Register handlers, behaviors, and validators with `AddTransient`. `SourceGeneratedMediator` itself is registered `AddSingleton` because its state is static `Dictionary`s.
+- Emit the dispatch arms most-derived-first so derived types match before their bases.
+- Emit `[MethodImpl(MethodImplOptions.AggressiveInlining)]` on the diagnostics-disabled fast-path `Send_<Type>` method (the one that returns the pipeline `ValueTask` directly without an async state machine).
+- Register handlers, behaviors, and validators with `AddTransient`. `SourceGeneratedMediator` itself is registered `AddScoped<IMediator, SourceGeneratedMediator>` because it captures the resolving scope's `IServiceProvider`.
 - Register each behavior by its **concrete type** (not only by `IPipelineBehavior<,>`) so the unrolled pipeline can `GetRequiredService<T>()` it individually.
 - Resolve strategies via `ResolveStrategies` (precedence: per-type → assembly → library default `0`).
 
@@ -630,7 +606,7 @@ Two generated files per compilation with handlers:
    1. Confirm the class is `public` + non-`abstract` + implements the open interface definition (fully qualified).
    2. Confirm the consumer project adds the analyzer reference with `OutputItemType="Analyzer" ReferenceOutputAssembly="false"`.
    3. Confirm the handler is not decorated with `[MediatorGeneration(Skip = true)]`.
-   4. Check `obj/.../SourceGeneratedMediator.g.cs` for the `Pipeline_<Type>` method.
+   4. Check `obj/.../SourceGeneratedMediator.g.cs` for the request's `case` arm in the `SendAsync` switch and its `Send_<Type>` method.
 
 ## Pitfalls & gotchas
 
@@ -647,7 +623,7 @@ Two generated files per compilation with handlers:
 ## Related skills & rules
 
 - **mediatorlite-abstractions** — source of the interfaces (`IRequestHandler<,>`, `INotificationHandler<>`, `IPipelineBehavior<,>`, `IValidator<T>`, `INotification`) and attributes (`BehaviorOrderAttribute`, `NotificationExecutionAttribute`, `NotificationErrorAttribute`, `DefaultNotificationExecutionAttribute`, `DefaultNotificationErrorAttribute`, `DisableMediatorLoggingAttribute`, `DisableMediatorTracingAttribute`, `MediatorGenerationAttribute`) that this generator reads.
-- **mediatorlite-core** — consumes the generated `ISourceGeneratedMediator`; `ValidationBehavior` and `DataAnnotationsValidator` are runtime types this generator references by fully-qualified name.
+- **mediatorlite-core** — hosts the `ThrowingMediator` diagnostic fallback (the real `IMediator` is the generated `SourceGeneratedMediator`); `ValidationBehavior` and `DataAnnotationsValidator` are runtime types this generator references by fully-qualified name.
 - **mediatorlite-tests** — `tests/MediatorLite.Tests/SourceGeneration/*` tests verify the generated dispatch, pipeline composition, notification strategies, and `*Count` properties.
 - **mediatorlite-sample-sourcegen** — canonical consumer wiring demonstrating `AddGeneratedHandlers` + `AddMediatorLite`.
 - [AGENTS.md](AGENTS.md): "Source-generation entry point is `HandlerDiscoveryGenerator.cs`; generated diagnostics surface as `MediatorLite.Generated.MediatorLiteRegistration`".

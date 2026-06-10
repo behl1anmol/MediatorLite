@@ -203,7 +203,7 @@ All helpers live on `public static class ContextDb` in [.claude/lib/ContextDb.cs
 
 ```csx
 #load ".claude/lib/ContextDb.csx"
-var sid = ContextDb.EnsureSession(userRequest: "Refactor NotificationPublisher");
+var sid = ContextDb.EnsureSession(userRequest: "Refactor SourceGeneratedMediator");
 Console.WriteLine($"session = {sid}");
 ```
 
@@ -262,9 +262,9 @@ ContextDb.LogDecision(
 var id = ContextDb.LogMistake(
     agent:      "backend-developer",
     category:   "build",
-    summary:    "Warnings-as-errors tripped on nullable ref return in Mediator.cs",
-    rootCause:  "Missed non-null assertion on the resolved dispatcher.",
-    fix:        "Added `!` after GetRequiredService<ISourceGeneratedMediator>().",
+    summary:    "Warnings-as-errors tripped on nullable ref return in SourceGeneratedMediator",
+    rootCause:  "Missed non-null assertion on the resolved handler.",
+    fix:        "Added `!` after GetRequiredService<IRequestHandler<,>>().",
     lessonFile: ".github/Lessons/2026-04-18-nullable-dispatcher.md");
 Console.WriteLine($"mistake row id = {id}");
 ```
@@ -274,7 +274,7 @@ Console.WriteLine($"mistake row id = {id}");
 ```csx
 #load ".claude/lib/ContextDb.csx"
 ContextDb.LogReview(
-    target:       "src/MediatorLite/Internal/Mediator.cs",
+    target:       "src/MediatorLite/Internal/ThrowingMediator.cs",
     severity:     "Medium",
     finding:      "PublishAsync swallows OperationCanceledException on sequential path.",
     suggestedFix: "Rethrow when cancellationToken.IsCancellationRequested",

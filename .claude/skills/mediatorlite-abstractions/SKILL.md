@@ -1,7 +1,7 @@
 ---
 name: mediatorlite-abstractions
-description: Reference for the MediatorLite.Abstractions project -- IMediator, IRequest, IRequestHandler, INotification, INotificationHandler, IPipelineBehavior, ISourceGeneratedMediator, Unit, IValidator, validation models, and every attribute in Attributes.cs (NotificationHandlerOrder, NotificationExecution, NotificationError, DefaultNotificationExecution, DefaultNotificationError, BehaviorOrder, MediatorGeneration [obsolete], DisableMediatorLogging, DisableMediatorTracing). Use when editing contracts, adding new abstractions, or understanding the public surface consumers implement.
-triggers: IMediator, IRequest, IRequestHandler, INotification, INotificationHandler, IPipelineBehavior, ISourceGeneratedMediator, Unit, mediator abstractions, notification attributes, behavior order, NotificationExecutionAttribute, NotificationErrorAttribute, DisableMediatorLogging, DisableMediatorTracing, ValidationException, IValidator, RequestDispatcher, NotificationPublisher, boxing tradeoff
+description: Reference for the MediatorLite.Abstractions project -- IMediator (ValueTask dispatch), IRequest, IRequestHandler, INotification, INotificationHandler, IPipelineBehavior, Unit, IValidator, validation models, and every attribute in Attributes.cs (NotificationHandlerOrder, NotificationExecution, NotificationError, DefaultNotificationExecution, DefaultNotificationError, BehaviorOrder, MediatorGeneration [obsolete], DisableMediatorLogging, DisableMediatorTracing). Use when editing contracts, adding new abstractions, or understanding the public surface consumers implement.
+triggers: IMediator, IRequest, IRequestHandler, INotification, INotificationHandler, IPipelineBehavior, Unit, mediator abstractions, notification attributes, behavior order, NotificationExecutionAttribute, NotificationErrorAttribute, DisableMediatorLogging, DisableMediatorTracing, ValidationException, IValidator, ValueTask dispatch, SourceGeneratedMediator, typed switch dispatch
 ---
 
 # MediatorLite.Abstractions
@@ -14,9 +14,8 @@ triggers: IMediator, IRequest, IRequestHandler, INotification, INotificationHand
 
 - Adding or modifying a core contract (`IMediator`, `IRequest<T>`, `IRequestHandler<,>`, `INotification`, `INotificationHandler<>`, `IPipelineBehavior<,>`).
 - Adding, deprecating, or tuning a compile-time attribute consumed by `HandlerDiscoveryGenerator`.
-- Touching the `ISourceGeneratedMediator` contract or the `RequestDispatcher` / `NotificationPublisher` delegate signatures.
+- Understanding how the generated `SourceGeneratedMediator` implements `IMediator` directly via a compile-time typed switch.
 - Evolving the `Unit` struct, the validation surface (`IValidator<T>`, `ValidationResult`, `ValidationError`, `ValidationException`), or strategy enums.
-- Reviewing the boxing tradeoff on the request dispatch path.
 
 ## Project location & entry points
 
@@ -28,7 +27,6 @@ triggers: IMediator, IRequest, IRequestHandler, INotification, INotificationHand
   - [INotification.cs](src/MediatorLite.Abstractions/Abstractions/INotification.cs)
   - [INotificationHandler.cs](src/MediatorLite.Abstractions/Abstractions/INotificationHandler.cs)
   - [IPipelineBehavior.cs](src/MediatorLite.Abstractions/Abstractions/IPipelineBehavior.cs)
-  - [ISourceGeneratedMediator.cs](src/MediatorLite.Abstractions/Abstractions/ISourceGeneratedMediator.cs)
   - [Unit.cs](src/MediatorLite.Abstractions/Abstractions/Unit.cs)
   - [Attributes.cs](src/MediatorLite.Abstractions/Abstractions/Attributes.cs)
 - Validation folder: [src/MediatorLite.Abstractions/Validation/](src/MediatorLite.Abstractions/Validation)
@@ -42,31 +40,24 @@ triggers: IMediator, IRequest, IRequestHandler, INotification, INotificationHand
 
 ### `IMediator` — the public mediator contract
 
-The public mediator surface exposes `Task`/`Task<T>` (not `ValueTask`) for ergonomics with `Task.WhenAll`. Handlers and behaviors internally use `ValueTask`.
+The public mediator surface is `ValueTask`-based end-to-end (`ValueTask<TResponse>` for `SendAsync`, `ValueTask` for `PublishAsync`) so a synchronously completing handler with no behaviors allocates nothing. A `ValueTask` must be consumed exactly once — `await` it directly; for `Task.WhenAll`, fan-out, or storing the result, convert it first with `.AsTask()`. The generated `SourceGeneratedMediator` (namespace `MediatorLite.Generated`) implements this interface directly.
 
-```42:75:src/MediatorLite.Abstractions/Abstractions/IMediator.cs
+```44:77:src/MediatorLite.Abstractions/Abstractions/IMediator.cs
 public interface IMediator
 {
     /// <summary>
     /// Sends a request to a single handler and returns the response.
     /// </summary>
-    /// <typeparam name="TResponse">The type of response expected from the handler.</typeparam>
-    /// <param name="request">The request to send.</param>
-    /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <returns>A <see cref="Task{TResponse}"/> representing the response from the handler.</returns>
+    /// <returns>A <see cref="ValueTask{TResponse}"/> representing the response from the handler.</returns>
     /// <exception cref="InvalidOperationException">Thrown when no handler is registered for the request type.</exception>
-    /// <remarks>
-    /// Returns <see cref="Task{TResponse}"/> for consumer ergonomics, enabling parallel patterns.
-    /// Handlers internally use <see cref="ValueTask{TResponse}"/> for synchronous completion optimization.
-    /// </remarks>
-    Task<TResponse> SendAsync<TResponse>(
+    ValueTask<TResponse> SendAsync<TResponse>(
         IRequest<TResponse> request,
         CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Publishes a notification to all registered handlers.
     /// </summary>
-    Task PublishAsync<TNotification>(
+    ValueTask PublishAsync<TNotification>(
         TNotification notification,
         CancellationToken cancellationToken = default)
         where TNotification : INotification;
@@ -172,64 +163,44 @@ public interface IPipelineBehavior<in TRequest, TResponse>
 
 A behavior **short-circuits** the pipeline by not calling `next()`. Order is controlled with `[BehaviorOrder(int)]` — lower values run first.
 
-### `ISourceGeneratedMediator` — compile-time dispatch contract
+### Dispatch is the generated `SourceGeneratedMediator` — no separate contract
 
-The runtime `Mediator` delegates to this interface. The source generator emits a `SourceGeneratedMediator : ISourceGeneratedMediator` that contains pre-built `Dictionary<Type, RequestDispatcher>` and `Dictionary<Type, NotificationPublisher>` tables.
+There is **no** `ISourceGeneratedMediator` interface, `RequestDispatcher` / `NotificationPublisher` delegate, or `Dictionary<Type, ...>` dispatch table in v2 — they were all deleted. The source generator emits a single `SourceGeneratedMediator : global::MediatorLite.IMediator` (namespace `MediatorLite.Generated`) that implements `IMediator` **directly**.
 
-```26:46:src/MediatorLite.Abstractions/Abstractions/ISourceGeneratedMediator.cs
-public delegate Task<object> RequestDispatcher(
-    IServiceProvider serviceProvider,
-    object request,
-    CancellationToken cancellationToken);
+Dispatch is a compile-time C# **type-pattern switch** over the concrete request/notification types (arms emitted most-derived-first), each arm calling a fully typed per-request method:
 
-/// <summary>
-/// Delegate for publishing a notification to all handlers.
-/// </summary>
-public delegate Task NotificationPublisher(
-    IServiceProvider serviceProvider,
-    object notification,
-    CancellationToken cancellationToken);
-```
-
-```63:96:src/MediatorLite.Abstractions/Abstractions/ISourceGeneratedMediator.cs
-public interface ISourceGeneratedMediator
+```csharp
+// Emitted shape (namespace MediatorLite.Generated)
+public sealed class SourceGeneratedMediator : global::MediatorLite.IMediator
 {
-    /// <summary>
-    /// Gets the dispatch delegate for a request type.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    RequestDispatcher? GetDispatcher(Type requestType);
+    private readonly IServiceProvider _sp;
+    public SourceGeneratedMediator(IServiceProvider serviceProvider) => _sp = serviceProvider;
 
-    /// <summary>
-    /// Gets the publish delegate for a notification type.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    NotificationPublisher? GetPublisher(Type notificationType);
+    public ValueTask<TResponse> SendAsync<TResponse>(IRequest<TResponse> request, CancellationToken ct = default)
+    {
+        switch (request)
+        {
+            case MyQuery r:
+            {
+                var vt = Send_MyQuery(r, ct);            // ValueTask<MyResult>
+                if (typeof(TResponse) == typeof(MyResult))
+                    return Unsafe.As<ValueTask<MyResult>, ValueTask<TResponse>>(ref vt);
+                return SlowCast<MyResult, TResponse>(vt); // covariant IRequest<out T> fallback
+            }
+            case null: throw new ArgumentNullException(nameof(request));
+            default:   throw new InvalidOperationException(/* no handler */);
+        }
+    }
+    // ...PublishAsync switch, Send_<Type>/Publish_<Type> methods using _sp...
 }
 ```
 
-#### Boxing tradeoff on `RequestDispatcher`
+Key properties of the generated dispatch:
 
-`RequestDispatcher` returns `Task<object>` rather than a generic `Task<TResponse>`. This causes **heap boxing for value-type responses** (`int`, `bool`, `Guid`, custom structs, `Unit`). The design is documented in-source:
-
-```12:29:src/MediatorLite.Abstractions/Abstractions/ISourceGeneratedMediator.cs
-/// <remarks>
-/// <para>
-/// <b>Boxing tradeoff:</b> This delegate returns <c>Task&lt;object&gt;</c> which causes boxing
-/// for value type responses (e.g., <c>int</c>, <c>bool</c>, <c>Guid</c>, custom structs).
-/// Each value type response incurs a heap allocation when boxed to <c>object</c>.
-/// </para>
-/// <para>
-/// This is a deliberate design tradeoff for compile-time simplicity: a single delegate signature
-/// allows the source generator to produce a unified dispatch table (<c>Dictionary&lt;Type, RequestDispatcher&gt;</c>)
-/// without requiring generic delegate instantiation per request type. The boxing cost is typically
-/// negligible compared to I/O-bound handler work, but may be measurable in high-throughput,
-/// CPU-bound scenarios with value type responses.
-/// </para>
-/// </remarks>
-```
-
-`NotificationPublisher` returns `Task` (non-generic), so publishing does **not** allocate for the return path.
+- **No boxing.** The exact-type `ValueTask<TConcrete>` result is converted to `ValueTask<TResponse>` via an identity-guarded `System.Runtime.CompilerServices.Unsafe.As` (the `typeof` guard JIT-folds to a constant, so the reinterpret is free). Value-type responses stay typed — there is no `Task<object>`. v1 boxed every value-type response through `Task<object>`; **v2 eliminated that entirely.**
+- **`SlowCast` fallback.** Covariant `IRequest<out T>` dispatch (where `TResponse` is a wider reference type than the concrete response) falls back to a `SlowCast` reference cast — still no value-type boxing.
+- **Per-request methods are `Send_<SafeType>`** (instance methods returning `ValueTask<TResponse>`, using the `_sp` `IServiceProvider` field). A zero-behavior request with diagnostics disabled returns the handler's `ValueTask` directly — **no async state machine**.
+- **Publishers are `Publish_<SafeType>`** returning `ValueTask`. The notification switch matches the **runtime type**, so base/interface-typed publishes dispatch correctly (v1's `typeof(TNotification)` dictionary lookup silently no-oped for those).
 
 ### `Unit`
 
@@ -487,7 +458,7 @@ public sealed class DisableMediatorLoggingAttribute : Attribute { }
 public sealed class DisableMediatorTracingAttribute : Attribute { }
 ```
 
-When either attribute is applied at assembly level, the generator omits the corresponding `ILogger<IMediator>.LogDebug(...)` calls or `ActivitySource.StartActivity(...)` calls from every emitted `Pipeline_*` / `Publish_*` method. These are **compile-time switches**; there is no runtime toggle.
+When either attribute is applied at assembly level, the generator omits the corresponding `ILogger<IMediator>.LogDebug(...)` calls or `ActivitySource.StartActivity(...)` calls from every emitted `Send_*` / `Publish_*` method. These are **compile-time switches**; there is no runtime toggle.
 
 ## Patterns & invariants
 
@@ -503,7 +474,7 @@ When either attribute is applied at assembly level, the generator omits the corr
 - Don't keep the `MediatorGenerationAttribute` — it is obsolete.
 - Don't change `IMediator`'s public signature without also updating the generator emission in [HandlerDiscoveryGenerator.cs](src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs).
 - Don't add runtime logic to `MediatorLite.Abstractions`. It must stay dependency-free; behaviors and validation runtime live in [src/MediatorLite/](src/MediatorLite).
-- Don't rely on reflection fallback — v2 removed it; the runtime `Mediator` requires a registered `ISourceGeneratedMediator`.
+- Don't expect a reflection fallback — there has never been one in v2. Without `AddGeneratedHandlers()` the only `IMediator` in the container is the `ThrowingMediator` diagnostic fallback, which throws on every dispatch.
 
 ## Common tasks
 
@@ -530,18 +501,18 @@ When either attribute is applied at assembly level, the generator omits the corr
 
 ## Pitfalls & gotchas
 
-- **Boxing on value-type responses**: `Task<object>` boxes every `int` / `bool` / `Guid` / `Unit` returned from a handler. Usually negligible vs. I/O, but matters for tight CPU-bound benchmarks. See [docs/benchmarks.md](docs/benchmarks.md).
+- **No response boxing**: responses stay typed (`ValueTask<TResponse>`) end-to-end through the generated typed switch; there is no `Task<object>` and no value-type boxing. (v1 boxed; v2 does not.) See [docs/benchmarks.md](docs/benchmarks.md).
 - **`IRequest : IRequest<Unit>` double-dispatch**: When you implement `IRequestHandler<TRequest>` (void overload), the explicit interface method **must not** be overridden — the auto-generated `IRequestHandler<TRequest, Unit>.HandleAsync` calls your void overload and returns `Unit.Value`.
 - **`[MediatorGeneration(Skip = true)]` silently skips everything**: the generator drops the handler/behavior/validator from **all** outputs, not just DI registration. Don't use it.
 - **Assembly-level opt-out attributes affect the whole compilation unit**, not just a specific file. If your library is consumed downstream, the consumer may want logging back on — consider exposing a compile-time configuration alternative.
 - **`[NotificationExecution]` / `[NotificationError]` on a handler has no effect** — they target the notification class. The generator's `GetNotificationInfo` only reads them off `INotification` implementations.
 - **`DefaultNotificationExecutionAttribute` must match the notification assembly**. The generator reads `compilation.Assembly.GetAttributes()`, so the default must live in the **same assembly as the notification types** (or any assembly participating in the same compilation).
-- **`ArgumentOutOfRangeException` style**: `ArgumentNullException.ThrowIfNull(request)` on `SendAsync` triggers before the dispatcher is looked up; `null` notifications throw `ArgumentNullException` too (see runtime `Mediator.cs`).
+- **Null guarding**: the generated `SendAsync` / `PublishAsync` switches have a `case null:` arm that throws `ArgumentNullException` before any handler resolution (see the generated `SourceGeneratedMediator.g.cs`).
 
 ## Related skills & rules
 
-- **mediatorlite-core** — how `Mediator.cs`, `ServiceCollectionExtensions`, `NullSourceGeneratedMediator`, and validation runtime consume these abstractions.
-- **mediatorlite-source-generation** — how `HandlerDiscoveryGenerator` reads every attribute and interface defined here and emits code in the `MediatorLite.Generated` namespace.
+- **mediatorlite-core** — how `ServiceCollectionExtensions`, the `ThrowingMediator` diagnostic fallback, and validation runtime consume these abstractions (the `IMediator` implementation itself is generated, not hand-written).
+- **mediatorlite-source-generation** — how `HandlerDiscoveryGenerator` reads every attribute and interface defined here and emits the `SourceGeneratedMediator` (implementing `IMediator`) in the `MediatorLite.Generated` namespace.
 - **mediatorlite-tests** — `tests/MediatorLite.Tests/UnitTests/AttributeTests.cs` and `UnitTests/ValidationTests.cs` give direct coverage of the types in this project.
-- Workspace rule: [AGENTS.md](AGENTS.md) — always use `IRequest<Unit>` for commands and keep changes aligned with `ISourceGeneratedMediator`.
+- Workspace rule: [AGENTS.md](AGENTS.md) — always use `IRequest<Unit>` for commands and keep changes aligned with the generated `SourceGeneratedMediator`.
 - Relevant docs: [docs/notifications.md](docs/notifications.md), [docs/validation.md](docs/validation.md), [docs/pipeline-behaviors.md](docs/pipeline-behaviors.md), [docs/observability.md](docs/observability.md).
