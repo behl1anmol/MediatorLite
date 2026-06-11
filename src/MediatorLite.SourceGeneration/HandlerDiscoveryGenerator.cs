@@ -466,12 +466,15 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         // FluentValidation validators were discovered but the MediatorLite.FluentValidation
         // package (which carries FluentValidationBehavior<,>) is not referenced. Emitting the
         // behavior would fail to compile with a cryptic error, and silently skipping it would
-        // let validation stop running unnoticed. Surface a clear build error instead.
+        // let validation stop running unnoticed. Report a clear build error (MEDL1001) and skip
+        // only the validation wiring — the rest of the dispatch still generates and compiles, so
+        // the developer sees exactly one actionable error rather than a cascade of missing-type
+        // errors. MEDL1001 is error-severity, so validation can never silently fail to run.
         if (requestTypesWithValidation.Count > 0
             && compilation.GetTypeByMetadataName("MediatorLite.FluentValidation.FluentValidationBehavior`2") is null)
         {
             context.ReportDiagnostic(Diagnostic.Create(MissingFluentValidationPackage, Location.None));
-            return;
+            requestTypesWithValidation = new List<(string RequestType, string ResponseType)>();
         }
 
         // Add FluentValidationBehavior entries as the outermost pipeline arm.
