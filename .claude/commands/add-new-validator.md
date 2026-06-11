@@ -2,133 +2,100 @@
 
 ## Intent
 
-Attach validation to a request type. MediatorLite supports two orthogonal, auto-registered validation paths: **`System.ComponentModel.DataAnnotations`** attributes (for simple field-level rules) and **`IValidator<T>`** implementations (for business rules or rules that need DI). Both are discovered by the source generator; the generator emits `ValidationBehavior<,>` first in the pipeline for any validated request type.
+Attach validation to a request type using **FluentValidation**. You write an
+`AbstractValidator<TRequest>`; the source generator discovers it and emits
+`FluentValidationBehavior<TRequest, TResponse>` as the **outermost** behavior for that request
+type. Registration is source-generated — never `AddValidatorsFromAssembly`.
 
 ## When to use
 
-- Field-level constraints: `[Required]`, `[StringLength]`, `[Range]`, `[EmailAddress]`, `[RegularExpression]` — use **DataAnnotations**.
-- Cross-field rules, database lookups, async checks, or anything needing DI — use **`IValidator<T>`**.
-- Both at once: the generator runs DataAnnotations first, then custom validators, on the same request.
+- Any field-level or cross-field rule, async/DB-backed check, or business rule — all expressed
+  as FluentValidation `RuleFor(...)` rules in an `AbstractValidator<T>`.
+
+> The old in-house `IValidator<T>` / `DataAnnotationsValidator<T>` / `ValidationResult` model
+> was removed. Do not use DataAnnotations for validation or implement
+> `MediatorLite.Validation.IValidator<T>` (it no longer exists).
 
 ## Agent ownership
 
 - **Primary:** `backend-developer`.
-- **Review gate:** `code-reviewer` (make sure validation is the right layer; business-rule logic should not leak into handlers).
+- **Review gate:** `code-reviewer` (validation is the right layer; rules shouldn't leak into handlers).
 - **Tester:** extends [tests/MediatorLite.Tests/SourceGeneration/ValidationTests.cs](tests/MediatorLite.Tests/SourceGeneration/ValidationTests.cs).
 
 ## Inputs / Preconditions
 
-- The request is an `IRequest<T>` or `IRequest` already wired via source generation (see [add-new-request-handler.md](add-new-request-handler.md)).
-- You know where `ValidationBehavior<,>` lives: `src/MediatorLite/Validation/Validation.cs` (auto-registered by the generator for validated types).
-- You understand the pipeline ordering guarantee: validation runs **first**, regardless of `[BehaviorOrder]` on other behaviors.
+- The request is an `IRequest<T>` / `IRequest` already wired via source generation.
+- The consuming project references the **`MediatorLite.FluentValidation`** package (and the
+  `FluentValidation` package transitively). Missing it ⇒ generator error **`MEDL1001`**.
+- You understand the ordering guarantee: validation runs **outermost**, before any
+  `[BehaviorOrder]` behavior and the handler.
 
 ## Numbered steps
 
-1. **Decision tree — pick one or both paths**:
+1. **Write the validator** as an `AbstractValidator<TRequest>` in the assembly that calls
+   `AddGeneratedHandlers()`:
 
-   | Rule shape                                        | Path                          |
-   |---------------------------------------------------|-------------------------------|
-   | Single-property, no DI, declarative               | `[DataAnnotations]` on record |
-   | Needs repository / async DB call                  | `IValidator<T>`               |
-   | Cross-property logic (e.g. StartDate < EndDate)   | `IValidator<T>`               |
-   | Enum range, string length, non-empty, email fmt   | `[DataAnnotations]`           |
-   | Restricted value lists loaded from config         | `IValidator<T>` (DI the config) |
+   ```csharp
+   using FluentValidation;
 
-2. **DataAnnotations path** — decorate the request record. The generator auto-registers `DataAnnotationsValidator<T>` for any request with at least one annotation:
-
-   ```422:430:tests/MediatorLite.Tests/SourceGeneration/TestTypes.cs
-   public sealed record ValidatedCommand : IRequest<string>
+   public sealed class CreateProductCommandValidator : AbstractValidator<CreateProductCommand>
    {
-       [Required(ErrorMessage = "Name is required")]
-       [StringLength(50, MinimumLength = 2, ErrorMessage = "Name must be between 2 and 50 characters")]
-       public required string Name { get; init; }
+       public CreateProductCommandValidator()
+       {
+           RuleFor(x => x.Name).NotEmpty().Length(3, 100);
+           RuleFor(x => x.Price).InclusiveBetween(0.01m, 10000m);
+           RuleFor(x => x.Category).Must(BeAllowed).WithMessage("Category is not allowed");
+       }
 
-       [Range(1, 100, ErrorMessage = "Value must be between 1 and 100")]
-       public int Value { get; init; }
+       private static bool BeAllowed(string category) => /* ... */ true;
    }
    ```
 
-   No code changes beyond the record are needed — the generator wires the validator.
+   Inject dependencies (e.g. `DbContext`, `IOptions<T>`) via the constructor for async rules
+   (`MustAsync(...)`). Validators resolve from the request scope, so scoped deps are fine.
 
-3. **`IValidator<T>` path** — implement a `sealed class` in the consumer project. The contract is part of the `MediatorLite.Validation` namespace:
+2. **No registration code.** `AddGeneratedHandlers()` discovers the validator and wires
+   `FluentValidationBehavior`. Do **not** add `services.AddTransient<IValidator<X>, Impl>()` or
+   `AddValidatorsFromAssembly(...)`.
 
-   ```450:467:tests/MediatorLite.Tests/SourceGeneration/TestTypes.cs
-   public class ValidatedCommandCustomValidator : IValidator<ValidatedCommand>
-   {
-       public static bool WasExecuted { get; set; }
-       public static void Reset() => WasExecuted = false;
-
-       public ValueTask<MediatorValidationResult> ValidateAsync(ValidatedCommand request, CancellationToken cancellationToken = default)
-       {
-           WasExecuted = true;
-
-           if (request.Name.Contains("blocked"))
-           {
-               return ValueTask.FromResult(MediatorValidationResult.Failure(
-                   new ValidationError("Name", "Name cannot contain 'blocked'")));
-           }
-
-           return ValueTask.FromResult(MediatorValidationResult.Success);
-       }
-   }
-   ```
-
-   Inject whatever services you need via the constructor (`DbContext`, `IOptions<T>`, etc). The REST API benchmark app shows a DB-backed validator pattern:
-
-   ```7:14:tests/MediatorLite.RestApiBenchmarks/Application/Common/CreateOrderCommandValidator.cs
-   public sealed class CreateOrderCommandValidator : IAppValidator<CreateOrderCommand>
-   {
-       private readonly AppDbContext _dbContext;
-
-       public CreateOrderCommandValidator(AppDbContext dbContext)
-       {
-           _dbContext = dbContext;
-       }
-   ```
-
-   (Note: that file uses a project-local `IAppValidator` — the MediatorLite library provides `IValidator<T>` in `MediatorLite.Validation`. Use `IValidator<T>` for MediatorLite's auto-registration.)
-
-4. **Combine both** (optional). A single request can carry DataAnnotations **and** one or more `IValidator<T>` implementations. Generated order: DataAnnotations → custom validators → behaviors → handler. Both paths must pass for the handler to run.
-
-5. **Write the tests** under [tests/MediatorLite.Tests/SourceGeneration/ValidationTests.cs](tests/MediatorLite.Tests/SourceGeneration/ValidationTests.cs). Cover:
+3. **Write tests** under [ValidationTests.cs](tests/MediatorLite.Tests/SourceGeneration/ValidationTests.cs):
    - A valid request succeeds and the handler executed.
-   - An invalid request throws `ValidationException` containing the expected `PropertyName` and `ErrorMessage`.
-   - For combined paths: DataAnnotations failure prevents the custom validator from running (fail-fast) — mirror the pattern in the existing `ValidationTests`.
+   - An invalid request throws `MediatorLite.Validation.ValidationException` with the expected
+     `PropertyName`/`ErrorMessage` (FluentValidation failures are mapped to `ValidationError`).
+   - Optionally assert validation is outermost (an invalid request short-circuits other
+     behaviors). For isolated behavior tests see
+     [FluentValidationBehaviorTests.cs](tests/MediatorLite.Tests/UnitTests/FluentValidationBehaviorTests.cs).
 
-6. **Verify the generator picked it up**. `MediatorLiteRegistration.ValidatorCount` increases by one per new `IValidator<T>` **and** by one per request that gains DataAnnotations for the first time:
+4. **Verify discovery.** `MediatorLiteRegistration.ValidatorCount` increases by one per new
+   validator **whose request type has a handler in this compilation** (validators for unhandled
+   types are ignored).
 
-   ```786:800:src/MediatorLite.SourceGeneration/HandlerDiscoveryGenerator.cs
-           var totalValidatorCount = validators.Count + requestTypesWithDataAnnotations.Count;
-           var nonValidationBehaviorCount = expandedBehaviors
-   ```
+5. **Build & test**:
 
-7. **Build & test**:
-
-   ```powershell
-   dotnet test MediatorLite.sln -c Release --filter FullyQualifiedName~Validation
+   ```bash
+   dotnet test MediatorLite.sln --filter FullyQualifiedName~Validation
    ```
 
    Expected exit code: `0`.
 
 ## Validation / Acceptance
 
-- An invalid request throws `MediatorLite.Validation.ValidationException` before the handler runs (verify via a handler-executed flag).
-- Valid requests execute the handler exactly once; the validator also executes exactly once per path.
+- An invalid request throws `MediatorLite.Validation.ValidationException` before the handler runs.
+- Valid requests execute the handler exactly once.
 - `MediatorLiteRegistration.ValidatorCount` increased by the expected delta.
-- No manual `services.AddTransient<IValidator<X>, Impl>()` lines were added — discovery is generator-driven.
-- DataAnnotations are on the request record itself, not on a DTO wrapper.
+- No manual validator/behavior registration and no `AddValidatorsFromAssembly`.
+- The `MediatorLite.FluentValidation` package is referenced (no `MEDL1001`).
 
 ## Handoff / Exit criteria
 
-- Hand back to the orchestrator: path of the new validator, test file updates, and the delta in `ValidatorCount`.
-- If the validator hits I/O (DB, network), call that out in the handoff — `code-reviewer` will check cancellation-token propagation and retry semantics.
+- Hand back: path of the new validator, test updates, and the `ValidatorCount` delta.
+- If the validator hits I/O, call it out — `code-reviewer` checks cancellation-token propagation.
 
 ## Related rules, skills, instructions
 
-- Rules: [.claude/rules/00-project-conventions.mdc](.claude/rules/00-project-conventions.mdc), [.claude/rules/20-source-generator.mdc](.claude/rules/20-source-generator.mdc).
-- Source: `src/MediatorLite/Validation/Validation.cs`.
-- Sample: [samples/MediatorLite.Sample.SourceGen/Program.cs](samples/MediatorLite.Sample.SourceGen/Program.cs) (demos both paths end-to-end).
-- Tests: [tests/MediatorLite.Tests/SourceGeneration/ValidationTests.cs](tests/MediatorLite.Tests/SourceGeneration/ValidationTests.cs), [tests/MediatorLite.Tests/SourceGeneration/TestTypes.cs](tests/MediatorLite.Tests/SourceGeneration/TestTypes.cs).
-- Benchmark example: [tests/MediatorLite.RestApiBenchmarks/Application/Common/CreateOrderCommandValidator.cs](tests/MediatorLite.RestApiBenchmarks/Application/Common/CreateOrderCommandValidator.cs).
-- Agent: [.claude/agents/orchestrator.md](.claude/agents/orchestrator.md).
+- Rule: [.claude/rules/50-validation.md](.claude/rules/50-validation.md).
+- Skill: [.claude/skills/mediatorlite-validation/SKILL.md](.claude/skills/mediatorlite-validation/SKILL.md).
+- Source: [src/MediatorLite.FluentValidation/FluentValidationBehavior.cs](src/MediatorLite.FluentValidation/FluentValidationBehavior.cs).
+- Sample: [samples/MediatorLite.Sample.SourceGen/Validators/CreateProductCommandValidator.cs](samples/MediatorLite.Sample.SourceGen/Validators/CreateProductCommandValidator.cs).
+- End-user reference: [docs/validation.md](docs/validation.md).
 - Related instructions: [add-new-request-handler.md](add-new-request-handler.md), [add-new-pipeline-behavior.md](add-new-pipeline-behavior.md).

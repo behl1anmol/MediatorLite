@@ -6,6 +6,11 @@ triggers: MediatorLite tests, xUnit, FluentAssertions, TestTypes, source-gen tes
 
 # MediatorLite.Tests
 
+> **⚠️ Validation note.** Validation fixtures now use **FluentValidation** `AbstractValidator<T>`
+> (e.g. `ValidatedCommandCustomValidator`); the in-house `IValidator<T>`/DataAnnotations fixtures
+> were removed. See `UnitTests/FluentValidationBehaviorTests.cs` and
+> [mediatorlite-validation](../mediatorlite-validation/SKILL.md).
+
 ## Purpose
 
 `MediatorLite.Tests` is the sole xUnit test project for the library. It has two concerns: (1) exercising the full source-generated dispatch pipeline end-to-end (`SourceGeneration/`) and (2) validating pure value-type surface (`UnitTests/`). The project **must** have the source generator as an analyzer — every test type declared in `TestTypes.cs` is discovered at compile time and populates `MediatorLiteRegistration`. The sanity tests on `*Count` properties are both assertions and guardrails: they fail instantly if the generator regresses.

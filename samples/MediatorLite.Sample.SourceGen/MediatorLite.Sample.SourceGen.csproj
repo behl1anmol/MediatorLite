@@ -11,7 +11,10 @@
   <ItemGroup>
     <!-- Reference the core library -->
     <ProjectReference Include="..\..\src\MediatorLite\MediatorLite.csproj" />
-    
+
+    <!-- FluentValidation integration (brings in FluentValidation + FluentValidationBehavior) -->
+    <ProjectReference Include="..\..\src\MediatorLite.FluentValidation\MediatorLite.FluentValidation.csproj" />
+
     <!-- Reference the source generator as Analyzer -->
     <ProjectReference Include="..\..\src\MediatorLite.SourceGeneration\MediatorLite.SourceGeneration.csproj"
                       OutputItemType="Analyzer"

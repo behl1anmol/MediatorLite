@@ -6,6 +6,11 @@ triggers: IMediator, IRequest, IRequestHandler, INotification, INotificationHand
 
 # MediatorLite.Abstractions
 
+> **⚠️ Partially STALE.** The in-house `IValidator<T>` and `ValidationResult` were **removed**;
+> validation is now FluentValidation-based. Only `ValidationException` and `ValidationError`
+> remain in the abstractions as the error contract. See [mediatorlite-validation](../mediatorlite-validation/SKILL.md)
+> and [docs/validation.md](../../../docs/validation.md).
+
 ## Purpose
 
 `MediatorLite.Abstractions` is the public contract layer of MediatorLite. It contains every interface, attribute, delegate, and validation model that consumers implement or that the source generator and runtime depend on. The project deliberately has **no runtime code, no DI dependencies, and no reflection** — only attributes, interfaces, and small value types. This means the abstractions can be referenced from analyzers, source generators, and consumer libraries without pulling in `Microsoft.Extensions.*`.

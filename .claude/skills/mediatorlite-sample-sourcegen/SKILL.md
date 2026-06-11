@@ -6,6 +6,11 @@ triggers: MediatorLite sample, source-gen consumer, AddGeneratedHandlers usage, 
 
 # MediatorLite.Sample.SourceGen
 
+> **⚠️ Validation note.** The sample's validation is now a single **FluentValidation**
+> `AbstractValidator<CreateProductCommand>` (the old "dual-layer DataAnnotations + custom
+> IValidator" model was removed). The sample references the `MediatorLite.FluentValidation`
+> package. See [mediatorlite-validation](../mediatorlite-validation/SKILL.md).
+
 ## Purpose
 
 `MediatorLite.Sample.SourceGen` is the reference consumer project that demonstrates the canonical end-to-end setup of MediatorLite: compile-time handler discovery, open + closed pipeline behaviors, automatic DataAnnotations validation merged with a custom `IValidator<T>`, and a multi-handler notification with `NotificationHandlerOrder`. The `Program.cs` prints `MediatorLiteRegistration.*Count` diagnostics at startup, then walks through six scenarios (query, search, place-order-with-notifications, valid create, DataAnnotations failure, business-rule failure). Use it as the copy-paste template for new projects.
