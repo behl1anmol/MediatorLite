@@ -1,7 +1,7 @@
 ---
 name: mediatorlite-benchmarks
-description: Reference for the MediatorLite.Benchmarks project -- BenchmarkDotNet setup (MemoryDiagnoser, SimpleJob warmupCount=3 iterationCount=10), four benchmark classes (MediatorBenchmarks / PipelineBenchmarks / MultipleBehaviorsBenchmarks / NotificationBenchmarks), MediatorLite vs MediatR comparison methodology, AssemblyInfo.cs observability opt-out, how to run, and docs/benchmarks.md result interpretation.
-triggers: BenchmarkDotNet, MediatorBenchmarks, MediatR comparison, memory diagnoser, throughput, mediator benchmarks, PipelineBenchmarks, MultipleBehaviorsBenchmarks, NotificationBenchmarks, benchmark comparison, ValueTask vs Task, boxing benchmark, docs/benchmarks.md
+description: Reference for the MediatorLite.Benchmarks project -- BenchmarkDotNet setup (MemoryDiagnoser, SimpleJob warmupCount=3 iterationCount=10), five benchmark classes (MediatorBenchmarks / PipelineBenchmarks / MultipleBehaviorsBenchmarks / NotificationBenchmarks / ValidationBenchmarks), MediatorLite vs MediatR comparison methodology (incl. source-gen FluentValidation vs MediatR + AddValidatorsFromAssembly), AssemblyInfo.cs observability opt-out, how to run, and docs/benchmarks.md result interpretation.
+triggers: BenchmarkDotNet, MediatorBenchmarks, MediatR comparison, memory diagnoser, throughput, mediator benchmarks, PipelineBenchmarks, MultipleBehaviorsBenchmarks, NotificationBenchmarks, ValidationBenchmarks, FluentValidation benchmark, benchmark comparison, ValueTask vs Task, boxing benchmark, docs/benchmarks.md
 ---
 
 # MediatorLite.Benchmarks
@@ -21,7 +21,7 @@ triggers: BenchmarkDotNet, MediatorBenchmarks, MediatR comparison, memory diagno
 ## Project location & entry points
 
 - [MediatorLite.Benchmarks.csproj](tests/MediatorLite.Benchmarks/MediatorLite.Benchmarks.csproj) — `OutputType=Exe`, references `BenchmarkDotNet 0.15.8`, `MediatR 12.2.0`, `MediatorLite.Abstractions` + `MediatorLite` via project refs, and the source generator as `OutputItemType="Analyzer"`.
-- [MediatorBenchmarks.cs](tests/MediatorLite.Benchmarks/MediatorBenchmarks.cs) — top-level `BenchmarkRunner.Run<>` calls and all four benchmark classes + shared types.
+- [MediatorBenchmarks.cs](tests/MediatorLite.Benchmarks/MediatorBenchmarks.cs) — top-level `BenchmarkRunner.Run<>` calls and all five benchmark classes + shared types.
 - [AssemblyInfo.cs](tests/MediatorLite.Benchmarks/AssemblyInfo.cs) — the observability kill-switch.
 - [docs/benchmarks.md](docs/benchmarks.md) — published results (updated via CI).
 
@@ -29,14 +29,15 @@ triggers: BenchmarkDotNet, MediatorBenchmarks, MediatR comparison, memory diagno
 
 ### Entry point — top-level `BenchmarkRunner.Run<>()` calls
 
-```9:12:tests/MediatorLite.Benchmarks/MediatorBenchmarks.cs
+```9:13:tests/MediatorLite.Benchmarks/MediatorBenchmarks.cs
 BenchmarkRunner.Run<MediatorBenchmarks>();
 BenchmarkRunner.Run<PipelineBenchmarks>();
 BenchmarkRunner.Run<NotificationBenchmarks>();
 BenchmarkRunner.Run<MultipleBehaviorsBenchmarks>();
+BenchmarkRunner.Run<ValidationBenchmarks>();
 ```
 
-All four classes are decorated identically:
+All five classes are decorated identically:
 
 ```14:16:tests/MediatorLite.Benchmarks/MediatorBenchmarks.cs
 [MemoryDiagnoser]
@@ -153,6 +154,22 @@ The three open generic behaviors under test (logging / validation / metrics) are
 ### `MultipleBehaviorsBenchmarks` — three behaviors (logging + validation + metrics)
 
 The three stacked behaviors simulate a realistic production stack. For MediatorLite, the generator auto-discovers and orders them; for MediatR they are added via three `cfg.AddOpenBehavior(...)` calls.
+
+### `ValidationBenchmarks` — real FluentValidation in the pipeline
+
+The only class exercising **real** validation (the `MediatorLiteValidationBehavior` in
+`MultipleBehaviorsBenchmarks` is a simulated no-op — it just adds pipeline depth). Both sides run
+a valid request through equivalent FluentValidation `AbstractValidator<T>` rules (happy path):
+
+- **MediatorLite** wires the validator + `FluentValidationBehavior<,>` via the source generator —
+  no assembly scan.
+- **MediatR** uses a hand-written `MediatRFluentValidationBehavior<,>` + the idiomatic
+  `AddValidatorsFromAssemblyContaining<>(ServiceLifetime.Transient)` runtime scan.
+
+Each implementation uses its own request type (`MediatorLiteValidatedQuery` /
+`MediatRValidatedQuery`), so the generator wires validation only for the MediatorLite type
+(`ValidatorCount => 1`). Requires the `MediatorLite.FluentValidation` and
+`FluentValidation.DependencyInjectionExtensions` references.
 
 ### `NotificationBenchmarks` — Sequential vs Parallel publish
 

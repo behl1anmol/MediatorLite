@@ -11,11 +11,15 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.0" />
     <PackageReference Include="Microsoft.VisualStudio.DiagnosticsHub.BenchmarkDotNetDiagnosers" Version="18.3.36812.1" />
+    <!-- MediatR + FluentValidation baseline uses the idiomatic runtime assembly scan. -->
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\MediatorLite.SourceGeneration\MediatorLite.SourceGeneration.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\MediatorLite\MediatorLite.csproj" />
+    <!-- MediatorLite FluentValidation integration (FluentValidationBehavior, source-gen wired). -->
+    <ProjectReference Include="..\..\src\MediatorLite.FluentValidation\MediatorLite.FluentValidation.csproj" />
   </ItemGroup>
 
 </Project>

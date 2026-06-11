@@ -1,5 +1,6 @@
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Running;
+using FluentValidation;
 using MediatorLite;
 using MediatorLite.Generated;
 using Microsoft.Extensions.DependencyInjection;
@@ -10,6 +11,7 @@ BenchmarkRunner.Run<MediatorBenchmarks>();
 BenchmarkRunner.Run<PipelineBenchmarks>();
 BenchmarkRunner.Run<NotificationBenchmarks>();
 BenchmarkRunner.Run<MultipleBehaviorsBenchmarks>();
+BenchmarkRunner.Run<ValidationBenchmarks>();
 
 [MemoryDiagnoser]
 [SimpleJob(warmupCount: 3, iterationCount: 10)]
@@ -383,6 +385,148 @@ public class MultipleBehaviorsBenchmarks
     public async Task<MediatorBenchmarks.MediatorLiteResult> MediatorLite_WithMultipleBehaviors()
     {
         return await _mediatorLite.SendAsync(new MediatorBenchmarks.MediatorLiteMultiQuery(1));
+    }
+
+    [GlobalCleanup]
+    public void Cleanup()
+    {
+        (_mediatorLiteProvider as IDisposable)?.Dispose();
+        (_mediatrProvider as IDisposable)?.Dispose();
+    }
+}
+
+// Benchmark with REAL FluentValidation in the pipeline.
+// MediatorLite wires FluentValidationBehavior via the source generator (no assembly scan);
+// MediatR uses the idiomatic hand-written validation behavior + AddValidatorsFromAssembly scan.
+// Both run the same valid request through equivalent FluentValidation rules (happy path).
+[MemoryDiagnoser]
+[SimpleJob(warmupCount: 3, iterationCount: 10)]
+public class ValidationBenchmarks
+{
+    private IServiceProvider _mediatorLiteProvider = null!;
+    private IServiceProvider _mediatrProvider = null!;
+    private MediatorLite.IMediator _mediatorLite = null!;
+    private MediatR.IMediator _mediatr = null!;
+
+    #region MediatorLite validated types
+
+    public record MediatorLiteValidatedQuery(int Id, string Name)
+        : MediatorLite.IRequest<MediatorBenchmarks.MediatorLiteResult>;
+
+    public class MediatorLiteValidatedQueryHandler
+        : MediatorLite.IRequestHandler<MediatorLiteValidatedQuery, MediatorBenchmarks.MediatorLiteResult>
+    {
+        public ValueTask<MediatorBenchmarks.MediatorLiteResult> HandleAsync(
+            MediatorLiteValidatedQuery request, CancellationToken cancellationToken = default)
+        {
+            return ValueTask.FromResult(new MediatorBenchmarks.MediatorLiteResult(request.Id, request.Name));
+        }
+    }
+
+    public sealed class MediatorLiteValidatedQueryValidator
+        : FluentValidation.AbstractValidator<MediatorLiteValidatedQuery>
+    {
+        public MediatorLiteValidatedQueryValidator()
+        {
+            RuleFor(x => x.Id).GreaterThan(0);
+            RuleFor(x => x.Name).NotEmpty().MaximumLength(100);
+        }
+    }
+
+    #endregion
+
+    #region MediatR validated types
+
+    public record MediatRValidatedQuery(int Id, string Name)
+        : MediatR.IRequest<MediatorBenchmarks.MediatRResult>;
+
+    public class MediatRValidatedQueryHandler
+        : MediatR.IRequestHandler<MediatRValidatedQuery, MediatorBenchmarks.MediatRResult>
+    {
+        public Task<MediatorBenchmarks.MediatRResult> Handle(
+            MediatRValidatedQuery request, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new MediatorBenchmarks.MediatRResult(request.Id, request.Name));
+        }
+    }
+
+    public sealed class MediatRValidatedQueryValidator
+        : FluentValidation.AbstractValidator<MediatRValidatedQuery>
+    {
+        public MediatRValidatedQueryValidator()
+        {
+            RuleFor(x => x.Id).GreaterThan(0);
+            RuleFor(x => x.Name).NotEmpty().MaximumLength(100);
+        }
+    }
+
+    // Canonical MediatR + FluentValidation pipeline behavior (resolves validators from DI,
+    // throws FluentValidation.ValidationException on failure).
+    public class MediatRFluentValidationBehavior<TRequest, TResponse>
+        : MediatR.IPipelineBehavior<TRequest, TResponse>
+        where TRequest : notnull
+    {
+        private readonly IEnumerable<FluentValidation.IValidator<TRequest>> _validators;
+
+        public MediatRFluentValidationBehavior(IEnumerable<FluentValidation.IValidator<TRequest>> validators)
+        {
+            _validators = validators;
+        }
+
+        public async Task<TResponse> Handle(
+            TRequest request,
+            MediatR.RequestHandlerDelegate<TResponse> next,
+            CancellationToken cancellationToken)
+        {
+            foreach (var validator in _validators)
+            {
+                var result = await validator.ValidateAsync(request, cancellationToken);
+                if (!result.IsValid)
+                {
+                    throw new FluentValidation.ValidationException(result.Errors);
+                }
+            }
+
+            return await next();
+        }
+    }
+
+    #endregion
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        // MediatorLite: source generator wires the FluentValidation validator + FluentValidationBehavior.
+        var mediatorLiteServices = new ServiceCollection();
+        mediatorLiteServices.AddGeneratedHandlers();
+        mediatorLiteServices.AddMediatorLite();
+        mediatorLiteServices.AddSingleton<ILoggerFactory, NullLoggerFactory>();
+        mediatorLiteServices.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
+        _mediatorLiteProvider = mediatorLiteServices.BuildServiceProvider();
+        _mediatorLite = _mediatorLiteProvider.GetRequiredService<MediatorLite.IMediator>();
+
+        // MediatR: hand-written validation behavior + idiomatic runtime assembly scan for validators.
+        var mediatrServices = new ServiceCollection();
+        mediatrServices.AddMediatR(cfg =>
+        {
+            cfg.RegisterServicesFromAssemblyContaining<MediatorBenchmarks>();
+            cfg.AddOpenBehavior(typeof(MediatRFluentValidationBehavior<,>));
+        });
+        mediatrServices.AddValidatorsFromAssemblyContaining<MediatorBenchmarks>(ServiceLifetime.Transient);
+        _mediatrProvider = mediatrServices.BuildServiceProvider();
+        _mediatr = _mediatrProvider.GetRequiredService<MediatR.IMediator>();
+    }
+
+    [Benchmark(Baseline = true)]
+    public async Task<MediatorBenchmarks.MediatRResult> MediatR_WithValidation()
+    {
+        return await _mediatr.Send(new MediatRValidatedQuery(1, "Test"));
+    }
+
+    [Benchmark]
+    public async Task<MediatorBenchmarks.MediatorLiteResult> MediatorLite_WithValidation()
+    {
+        return await _mediatorLite.SendAsync(new MediatorLiteValidatedQuery(1, "Test"));
     }
 
     [GlobalCleanup]
