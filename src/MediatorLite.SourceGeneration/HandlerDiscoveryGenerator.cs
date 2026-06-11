@@ -792,19 +792,21 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("            this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
         sb.AppendLine("        {");
 
-        // Register ValidationBehavior FIRST for request types with validators
-        // Register by concrete type so unrolled pipeline can resolve each behavior individually
+        // Register ValidationBehavior FIRST for request types with validators.
+        // Concrete type for unrolled pipeline resolution; closed interface so consumers
+        // (and parity checks) can enumerate a request's behaviors via GetServices.
         if (requestTypesWithValidation.Count > 0)
         {
             sb.AppendLine("            // Validation behaviors (registered first to ensure validation runs before other behaviors)");
             foreach (var (requestType, responseType) in requestTypesWithValidation)
             {
                 sb.AppendLine($"            services.AddTransient<global::MediatorLite.Validation.ValidationBehavior<{requestType}, {responseType}>>();");
+                sb.AppendLine($"            services.AddTransient<global::MediatorLite.IPipelineBehavior<{requestType}, {responseType}>, global::MediatorLite.Validation.ValidationBehavior<{requestType}, {responseType}>>();");
             }
             sb.AppendLine();
         }
 
-        // Then register other (non-validation) behaviors by concrete type
+        // Then register other (non-validation) behaviors
         if (expandedBehaviors.Count > 0)
         {
             var nonValidationBehaviors = expandedBehaviors
@@ -815,8 +817,10 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             {
                 foreach (var behavior in nonValidationBehaviors)
                 {
-                    // Register by concrete type for individual resolution in unrolled pipeline
+                    // Concrete type for individual resolution in the unrolled pipeline;
+                    // closed interface for consumer/parity enumeration via GetServices.
                     sb.AppendLine($"            services.AddTransient<{behavior.BehaviorTypeName}>();");
+                    sb.AppendLine($"            services.AddTransient<{behavior.InterfaceType}, {behavior.BehaviorTypeName}>();");
                 }
             }
         }
