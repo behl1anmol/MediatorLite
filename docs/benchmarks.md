@@ -5,16 +5,16 @@ nav_order: 8
 
 # Benchmarks
 
-Performance comparisons between MediatorLite and [MediatR](https://github.com/jbogard/MediatR) across five scenarios: simple request dispatch, single pipeline behavior, multiple pipeline behaviors, notification publishing, and FluentValidation in the pipeline.
+Performance comparisons between MediatorLite and [MediatR](https://github.com/jbogard/MediatR) across four scenarios: simple request dispatch, single pipeline behavior, multiple pipeline behaviors, and notification publishing.
 
-> Last updated: 2026-06-10 — automated via CI.
+> Last updated: 2026-06-12 — automated via CI.
 {: .note }
 
 ## Environment
 
 ```
 BenchmarkDotNet v0.15.8, Linux Ubuntu 24.04.4 LTS (Noble Numbat)
-AMD EPYC 7763 2.45GHz, 1 CPU, 4 logical and 2 physical cores
+AMD EPYC 9V74 2.60GHz, 1 CPU, 4 logical and 2 physical cores
 .NET SDK 10.0.301
   [Host]     : .NET 10.0.9 (10.0.9, 10.0.926.27113), X64 RyuJIT x86-64-v3
   Job-YFEFPZ : .NET 10.0.9 (10.0.9, 10.0.926.27113), X64 RyuJIT x86-64-v3
@@ -28,10 +28,10 @@ IterationCount=10  WarmupCount=3
 
 Baseline scenario: a single request dispatched to a single handler with no pipeline behaviors.
 
-| Method                     | Mean      | Error    | StdDev   | Ratio | Gen0   | Allocated | Alloc Ratio |
-|--------------------------- |----------:|---------:|---------:|------:|-------:|----------:|------------:|
-| MediatR_SimpleRequest      | 113.34 ns | 0.802 ns | 0.420 ns |  1.00 | 0.0196 |     328 B |        1.00 |
-| MediatorLite_SimpleRequest |  54.50 ns | 0.536 ns | 0.355 ns |  0.48 | 0.0091 |     152 B |        0.46 |
+| Method                     | Mean      | Error    | StdDev   | Ratio | RatioSD | Gen0   | Allocated | Alloc Ratio |
+|--------------------------- |----------:|---------:|---------:|------:|--------:|-------:|----------:|------------:|
+| MediatR_SimpleRequest      | 102.05 ns | 2.655 ns | 1.756 ns |  1.00 |    0.02 | 0.0196 |     328 B |        1.00 |
+| MediatorLite_SimpleRequest |  52.27 ns | 0.539 ns | 0.282 ns |  0.51 |    0.01 | 0.0091 |     152 B |        0.46 |
 
 ---
 
@@ -39,10 +39,10 @@ Baseline scenario: a single request dispatched to a single handler with no pipel
 
 Request dispatched through one open pipeline behavior (simulating a logging or tracing layer).
 
-| Method                    | Mean     | Error   | StdDev  | Ratio | RatioSD | Gen0   | Allocated | Alloc Ratio |
-|-------------------------- |---------:|--------:|--------:|------:|--------:|-------:|----------:|------------:|
-| MediatR_WithBehavior      | 210.9 ns | 4.07 ns | 2.69 ns |  1.00 |    0.02 | 0.0381 |     640 B |        1.00 |
-| MediatorLite_WithBehavior | 108.3 ns | 0.93 ns | 0.55 ns |  0.51 |    0.01 | 0.0167 |     280 B |        0.44 |
+| Method                    | Mean     | Error   | StdDev  | Ratio | Gen0   | Allocated | Alloc Ratio |
+|-------------------------- |---------:|--------:|--------:|------:|-------:|----------:|------------:|
+| MediatR_WithBehavior      | 235.2 ns | 3.74 ns | 2.22 ns |  1.00 | 0.0381 |     640 B |        1.00 |
+| MediatorLite_WithBehavior | 108.1 ns | 3.48 ns | 2.30 ns |  0.46 | 0.0167 |     280 B |        0.44 |
 
 ---
 
@@ -50,10 +50,10 @@ Request dispatched through one open pipeline behavior (simulating a logging or t
 
 Request dispatched through three behaviors (logging, validation, metrics) — a typical production pipeline.
 
-| Method                             | Mean     | Error   | StdDev  | Ratio | Gen0   | Allocated | Alloc Ratio |
-|----------------------------------- |---------:|--------:|--------:|------:|-------:|----------:|------------:|
-| MediatR_WithMultipleBehaviors      | 350.1 ns | 1.27 ns | 0.75 ns |  1.00 | 0.0639 |    1072 B |        1.00 |
-| MediatorLite_WithMultipleBehaviors | 269.4 ns | 1.75 ns | 1.16 ns |  0.77 | 0.0291 |     488 B |        0.46 |
+| Method                             | Mean     | Error    | StdDev   | Ratio | RatioSD | Gen0   | Allocated | Alloc Ratio |
+|----------------------------------- |---------:|---------:|---------:|------:|--------:|-------:|----------:|------------:|
+| MediatR_WithMultipleBehaviors      | 367.1 ns | 33.13 ns | 21.91 ns |  1.00 |    0.08 | 0.0639 |    1072 B |        1.00 |
+| MediatorLite_WithMultipleBehaviors | 176.2 ns |  1.74 ns |  1.04 ns |  0.48 |    0.03 | 0.0291 |     488 B |        0.46 |
 
 ---
 
@@ -61,45 +61,17 @@ Request dispatched through three behaviors (logging, validation, metrics) — a 
 
 A notification published to three handlers, comparing MediatR against MediatorLite's `Sequential` and `Parallel` execution strategies.
 
-| Method                               | Mean     | Error   | StdDev  | Ratio | Gen0   | Allocated | Alloc Ratio |
-|------------------------------------- |---------:|--------:|--------:|------:|-------:|----------:|------------:|
-| MediatR_Notification                 | 217.4 ns | 0.89 ns | 0.53 ns |  1.00 | 0.0367 |     616 B |        1.00 |
-| MediatorLite_Sequential_Notification | 136.4 ns | 0.26 ns | 0.14 ns |  0.63 | 0.0057 |      96 B |        0.16 |
-| MediatorLite_Parallel_Notification   | 136.4 ns | 0.56 ns | 0.37 ns |  0.63 | 0.0057 |      96 B |        0.16 |
-
----
-
-## Validation (FluentValidation)
-
-Real FluentValidation in the pipeline on a valid (happy-path) request. **MediatorLite** wires
-the validator and `FluentValidationBehavior` via the source generator (no assembly scan);
-**MediatR** uses a hand-written validation behavior plus `AddValidatorsFromAssembly` (the
-idiomatic runtime reflection scan). Each side uses its own request type with equivalent rules.
-
-The table is generated by CI alongside the others (the `ValidationBenchmarks` class). A key
-nuance to read it correctly: FluentValidation's own rule-chain execution (building the
-`ValidationContext`, running the rules) is the **dominant** cost per request — on the order of
-microseconds — which is identical on both sides. The mediator-dispatch difference that produces
-the ~2× gap in the other scenarios is therefore a small fraction of the validated-request budget,
-so the latency ratio narrows (MediatorLite stays modestly ahead and allocates slightly less). The
-larger MediatorLite advantage here is at **startup**: validators are registered at compile time,
-avoiding MediatR's `AddValidatorsFromAssembly` reflection scan entirely.
-
-| Method                      | Mean | Ratio | Allocated | Alloc Ratio |
-|---------------------------- |-----:|------:|----------:|------------:|
-| MediatR_WithValidation      |    — |  1.00 |         — |        1.00 |
-| MediatorLite_WithValidation |    — | <1.00 |         — |       <1.00 |
-
-> Numbers are filled in by the CI benchmark run on the canonical hardware (see Environment).
-{: .note }
+| Method                               | Mean      | Error    | StdDev   | Ratio | RatioSD | Gen0   | Allocated | Alloc Ratio |
+|------------------------------------- |----------:|---------:|---------:|------:|--------:|-------:|----------:|------------:|
+| MediatR_Notification                 | 239.02 ns | 4.806 ns | 3.179 ns |  1.00 |    0.02 | 0.0367 |     616 B |        1.00 |
+| MediatorLite_Sequential_Notification |  72.23 ns | 1.510 ns | 0.999 ns |  0.30 |    0.01 | 0.0057 |      96 B |        0.16 |
+| MediatorLite_Parallel_Notification   |  73.65 ns | 0.349 ns | 0.208 ns |  0.31 |    0.00 | 0.0057 |      96 B |        0.16 |
 
 ---
 
 ## Key Takeaways
 
 MediatorLite consistently allocates less memory across every scenario. The notification sequential mode is especially notable — near-identical latency to MediatR but less than half the allocations. The `ValueTask`-based pipeline and source-generated dispatch path trade raw per-call speed for a predictable, low-allocation footprint.
-
-For validation, the picture is honest: once a real FluentValidation validator runs, its own cost dominates the request, so the per-call latency gap narrows — MediatorLite stays ahead but by a smaller margin. MediatorLite's structural win there is avoiding MediatR's runtime `AddValidatorsFromAssembly` reflection scan: validator registration is resolved at compile time.
 
 ---
 
