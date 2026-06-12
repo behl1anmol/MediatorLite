@@ -6,14 +6,12 @@ on:
     paths:
       - 'src/**'
       - 'tests/MediatorLite.Benchmarks/**'
-      - 'tests/MediatorLite.RestApiBenchmarks/**'
       - '.github/workflows/benchmarks.yml'
   pull_request:
     branches: [ main ]
     paths:
       - 'src/**'
       - 'tests/MediatorLite.Benchmarks/**'
-      - 'tests/MediatorLite.RestApiBenchmarks/**'
   workflow_dispatch:  # Allow manual trigger
 
 # Required permissions for commenting on PRs and pushing benchmark data
@@ -53,11 +51,6 @@ jobs:
         cd tests/MediatorLite.Benchmarks
         dotnet run --configuration Release --no-build -- --filter='*' --exporters json markdown --memory
 
-    - name: Run REST API Benchmarks
-      run: |
-        cd tests/MediatorLite.RestApiBenchmarks
-        dotnet run --configuration Release --no-build -- --filter='*' --exporters json markdown --memory
-
     - name: Upload benchmark results
       uses: actions/upload-artifact@v6
       if: always()
@@ -66,8 +59,6 @@ jobs:
         path: |
           tests/MediatorLite.Benchmarks/BenchmarkDotNet.Artifacts/results/*.json
           tests/MediatorLite.Benchmarks/BenchmarkDotNet.Artifacts/results/*.md
-          tests/MediatorLite.RestApiBenchmarks/BenchmarkDotNet.Artifacts/results/*.json
-          tests/MediatorLite.RestApiBenchmarks/BenchmarkDotNet.Artifacts/results/*.md
 
     - name: Combine benchmark results
       if: github.event_name != 'pull_request'
@@ -138,8 +129,7 @@ jobs:
         script: |
           const fs = require('fs');
           const resultDirs = [
-            './tests/MediatorLite.Benchmarks/BenchmarkDotNet.Artifacts/results',
-            './tests/MediatorLite.RestApiBenchmarks/BenchmarkDotNet.Artifacts/results'
+            './tests/MediatorLite.Benchmarks/BenchmarkDotNet.Artifacts/results'
           ];
 
           try {
