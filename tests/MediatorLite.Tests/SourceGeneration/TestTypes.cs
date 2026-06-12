@@ -1,10 +1,6 @@
-using MediatorLite.Validation.Models;
+using FluentValidation;
 
 namespace MediatorLite.Tests.SourceGeneration;
-
-using System.ComponentModel.DataAnnotations;
-using MediatorLite.Validation;
-using MediatorValidationResult = MediatorLite.Validation.Models.ValidationResult;
 
 #region Request/Response Types
 
@@ -416,16 +412,12 @@ public class ShortCircuitLoggerBehavior : IPipelineBehavior<ShortCircuitQuery, U
 #region Validation Types
 
 /// <summary>
-/// Request with DataAnnotation attributes for testing source-generated validation.
-/// Source generator should auto-register DataAnnotationsValidator for this type.
+/// Request validated by a FluentValidation validator and discovered by the source generator.
 /// </summary>
 public sealed record ValidatedCommand : IRequest<string>
 {
-    [Required(ErrorMessage = "Name is required")]
-    [StringLength(50, MinimumLength = 2, ErrorMessage = "Name must be between 2 and 50 characters")]
     public required string Name { get; init; }
 
-    [Range(1, 100, ErrorMessage = "Value must be between 1 and 100")]
     public int Value { get; init; }
 }
 
@@ -445,24 +437,32 @@ public class ValidatedCommandHandler : IRequestHandler<ValidatedCommand, string>
 }
 
 /// <summary>
-/// Custom validator for ValidatedCommand - discovered by source generator.
+/// FluentValidation validator for ValidatedCommand - discovered by the source generator
+/// and run as the outermost pipeline behavior. Tracks whether it executed.
 /// </summary>
-public class ValidatedCommandCustomValidator : IValidator<ValidatedCommand>
+public class ValidatedCommandCustomValidator : global::FluentValidation.AbstractValidator<ValidatedCommand>
 {
     public static bool WasExecuted { get; set; }
     public static void Reset() => WasExecuted = false;
 
-    public ValueTask<MediatorValidationResult> ValidateAsync(ValidatedCommand request, CancellationToken cancellationToken = default)
+    public ValidatedCommandCustomValidator()
+    {
+        RuleFor(x => x.Name)
+            .NotEmpty().WithMessage("Name is required")
+            .Length(2, 50).WithMessage("Name must be between 2 and 50 characters")
+            .Must(name => name is null || !name.Contains("blocked"))
+                .WithMessage("Name cannot contain 'blocked'");
+
+        RuleFor(x => x.Value)
+            .InclusiveBetween(1, 100).WithMessage("Value must be between 1 and 100");
+    }
+
+    public override global::System.Threading.Tasks.Task<global::FluentValidation.Results.ValidationResult> ValidateAsync(
+        global::FluentValidation.ValidationContext<ValidatedCommand> context,
+        CancellationToken cancellation = default)
     {
         WasExecuted = true;
-
-        if (request.Name.Contains("blocked"))
-        {
-            return ValueTask.FromResult(MediatorValidationResult.Failure(
-                new ValidationError("Name", "Name cannot contain 'blocked'")));
-        }
-
-        return ValueTask.FromResult(MediatorValidationResult.Success);
+        return base.ValidateAsync(context, cancellation);
     }
 }
 

@@ -25,6 +25,21 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
     private const string ActivityNameSendRequest = "MediatorLite.Send";
     private const string ActivityNamePublishNotification = "MediatorLite.Publish";
 
+    /// <summary>
+    /// Reported when FluentValidation validators are discovered for handled request types
+    /// but the MediatorLite.FluentValidation package (which provides the
+    /// <c>FluentValidationBehavior&lt;,&gt;</c> used by the generated pipeline) is not referenced.
+    /// </summary>
+    private static readonly DiagnosticDescriptor MissingFluentValidationPackage = new(
+        id: "MEDL1001",
+        title: "MediatorLite.FluentValidation package is not referenced",
+        messageFormat: "FluentValidation validators were found but the MediatorLite.FluentValidation "
+            + "package is not referenced. Add a reference to MediatorLite.FluentValidation so the "
+            + "generated validation pipeline can resolve FluentValidationBehavior<,>.",
+        category: "MediatorLite.Validation",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         // Find all class declarations that might be handlers
@@ -271,7 +286,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         if (classSymbol is null || classSymbol.IsAbstract)
             return null;
 
-        // Skip open generic validators (e.g., DataAnnotationsValidator<T> from the library)
+        // Skip open generic validators (e.g., a user's own generic AbstractValidator<T>)
         if (classSymbol.IsGenericType)
             return null;
 
@@ -287,24 +302,28 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             if (!iface.IsGenericType)
                 continue;
 
-            var originalDef = iface.OriginalDefinition.ToDisplayString();
-
-            if (originalDef == "MediatorLite.Validation.IValidator<TRequest>")
+            // Match FluentValidation.IValidator<T> by namespace + name so discovery does
+            // not depend on the interface's type-parameter name. Concrete validators
+            // surface this interface via AbstractValidator<T>. The non-generic
+            // FluentValidation.IValidator is skipped by the IsGenericType guard above.
+            if (iface.Name != "IValidator"
+                || iface.TypeArguments.Length != 1
+                || iface.ContainingNamespace?.ToDisplayString() != "FluentValidation")
             {
-                var typeArgs = iface.TypeArguments;
-                if (typeArgs.Length == 1)
-                {
-                    // Only discover validators for concrete (non-generic) request types
-                    if (typeArgs[0].TypeKind == TypeKind.TypeParameter)
-                        continue;
-
-                    return new ValidatorInfo(
-                        ClassName: classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                        Namespace: classSymbol.ContainingNamespace?.ToDisplayString() ?? "",
-                        InterfaceType: iface.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                        RequestType: typeArgs[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
-                }
+                continue;
             }
+
+            var typeArgs = iface.TypeArguments;
+
+            // Only discover validators for concrete (non-generic) request types.
+            if (typeArgs[0].TypeKind == TypeKind.TypeParameter)
+                continue;
+
+            return new ValidatorInfo(
+                ClassName: classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                Namespace: classSymbol.ContainingNamespace?.ToDisplayString() ?? "",
+                InterfaceType: iface.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                RequestType: typeArgs[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
         }
 
         return null;
@@ -349,40 +368,6 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             .ToList();
     }
 
-    /// <summary>
-    /// Checks whether a type has any properties decorated with DataAnnotation validation attributes.
-    /// </summary>
-    private static bool HasDataAnnotationAttributes(ITypeSymbol typeSymbol)
-    {
-        foreach (var member in typeSymbol.GetMembers())
-        {
-            if (member is IPropertySymbol property)
-            {
-                foreach (var attr in property.GetAttributes())
-                {
-                    if (IsValidationAttribute(attr.AttributeClass))
-                        return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    /// <summary>
-    /// Checks whether an attribute type inherits from System.ComponentModel.DataAnnotations.ValidationAttribute.
-    /// </summary>
-    private static bool IsValidationAttribute(INamedTypeSymbol? attributeType)
-    {
-        var current = attributeType;
-        while (current != null)
-        {
-            if (current.ToDisplayString() == "System.ComponentModel.DataAnnotations.ValidationAttribute")
-                return true;
-            current = current.BaseType;
-        }
-        return false;
-    }
-
     private static HandlerInfo? GetHandlerInfo(GeneratorSyntaxContext context, CancellationToken ct)
     {
         var classDecl = (ClassDeclarationSyntax)context.Node;
@@ -422,13 +407,10 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 var typeArgs = iface.TypeArguments;
                 if (typeArgs.Length == 2)
                 {
-                    bool hasDataAnnotations = HasDataAnnotationAttributes(typeArgs[0]);
-
                     requestHandlerInterfaces.Add(new HandlerInterfaceInfo(
                         InterfaceType: iface.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                         RequestType: typeArgs[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                         ResponseType: typeArgs[1].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                        HasDataAnnotations: hasDataAnnotations,
                         BaseTypes: GetBaseTypeNames(typeArgs[0])));
                 }
             }
@@ -481,11 +463,25 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         // Determine which request types need validation
         var requestTypesWithValidation = DetermineValidationTargets(validHandlers, validValidators);
 
-        // Add ValidationBehavior entries for InvokeBehavior dispatch
+        // FluentValidation validators were discovered but the MediatorLite.FluentValidation
+        // package (which carries FluentValidationBehavior<,>) is not referenced. Emitting the
+        // behavior would fail to compile with a cryptic error, and silently skipping it would
+        // let validation stop running unnoticed. Report a clear build error (MEDL1001) and skip
+        // only the validation wiring — the rest of the dispatch still generates and compiles, so
+        // the developer sees exactly one actionable error rather than a cascade of missing-type
+        // errors. MEDL1001 is error-severity, so validation can never silently fail to run.
+        if (requestTypesWithValidation.Count > 0
+            && compilation.GetTypeByMetadataName("MediatorLite.FluentValidation.FluentValidationBehavior`2") is null)
+        {
+            context.ReportDiagnostic(Diagnostic.Create(MissingFluentValidationPackage, Location.None));
+            requestTypesWithValidation = new List<(string RequestType, string ResponseType)>();
+        }
+
+        // Add FluentValidationBehavior entries as the outermost pipeline arm.
         foreach (var (requestType, responseType) in requestTypesWithValidation)
         {
             expandedBehaviors.Add(new ExpandedBehaviorInfo(
-                BehaviorTypeName: $"global::MediatorLite.Validation.ValidationBehavior<{requestType}, {responseType}>",
+                BehaviorTypeName: $"global::MediatorLite.FluentValidation.FluentValidationBehavior<{requestType}, {responseType}>",
                 RequestType: requestType,
                 ResponseType: responseType,
                 InterfaceType: $"global::MediatorLite.IPipelineBehavior<{requestType}, {responseType}>"));
@@ -496,7 +492,8 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// Determines which request types need validation based on discovered validators and DataAnnotation attributes.
+    /// Determines which request types need validation based on the discovered
+    /// FluentValidation validators.
     /// </summary>
     private static List<(string RequestType, string ResponseType)> DetermineValidationTargets(
         List<HandlerInfo> handlers,
@@ -506,13 +503,13 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         var requestTypesWithValidators = new HashSet<string>(validators.Select(v => v.RequestType));
 
         var requestResponsePairs = handlers
-            .SelectMany(h => h.RequestHandlers.Select(r => (r.RequestType, ResponseType: r.ResponseType!, r.HasDataAnnotations)))
+            .SelectMany(h => h.RequestHandlers.Select(r => (r.RequestType, ResponseType: r.ResponseType!)))
             .Distinct()
             .ToList();
 
-        foreach (var (requestType, responseType, hasDataAnnotations) in requestResponsePairs)
+        foreach (var (requestType, responseType) in requestResponsePairs)
         {
-            if (hasDataAnnotations || requestTypesWithValidators.Contains(requestType))
+            if (requestTypesWithValidators.Contains(requestType))
             {
                 result.Add((requestType, responseType));
             }
@@ -746,36 +743,26 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
 
         // --- Validator registration ---
         sb.AppendLine("        /// <summary>");
-        sb.AppendLine("        /// Adds only source-generated validators to the service collection.");
-        sb.AppendLine("        /// Registers custom validators and DataAnnotationsValidator for annotated request types.");
+        sb.AppendLine("        /// Adds only source-generated FluentValidation validators to the service collection.");
         sb.AppendLine("        /// </summary>");
         sb.AppendLine(
             "        public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection AddGeneratedValidators(");
         sb.AppendLine("            this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
         sb.AppendLine("        {");
 
-        // Register discovered custom validators
-        if (validators.Count > 0)
-        {
-            foreach (var validator in validators)
-            {
-                sb.AppendLine($"            services.AddTransient<{validator.InterfaceType}, {validator.ClassName}>();");
-            }
-        }
-
-        // Register DataAnnotationsValidator for request types with DataAnnotation attributes
-        var requestTypesWithDataAnnotations = requestHandlers
-            .Where(rh => rh.Interface.HasDataAnnotations)
-            .Select(rh => rh.Interface.RequestType)
-            .Distinct()
+        // Register discovered FluentValidation validators against their FluentValidation.IValidator<T>
+        // service type so FluentValidationBehavior<T,_> can resolve them. No assembly scanning.
+        // Only validators whose request type has a generated pipeline (i.e. a handler in this
+        // compilation) are registered: a validator for an unhandled request type is never resolved,
+        // so registering it would be dead wiring (and could reference inaccessible types).
+        var validatedRequestTypes = new HashSet<string>(requestTypesWithValidation.Select(t => t.RequestType));
+        var validatorsToRegister = validators
+            .Where(v => validatedRequestTypes.Contains(v.RequestType))
             .ToList();
 
-        if (requestTypesWithDataAnnotations.Count > 0)
+        foreach (var validator in validatorsToRegister)
         {
-            foreach (var requestType in requestTypesWithDataAnnotations)
-            {
-                sb.AppendLine($"            services.AddTransient<global::MediatorLite.Validation.IValidator<{requestType}>, global::MediatorLite.Validation.DataAnnotationsValidator<{requestType}>>();");
-            }
+            sb.AppendLine($"            services.AddTransient<{validator.InterfaceType}, {validator.ClassName}>();");
         }
 
         sb.AppendLine("            return services;");
@@ -785,21 +772,21 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         // --- Behavior registration ---
         sb.AppendLine("        /// <summary>");
         sb.AppendLine("        /// Adds only source-generated pipeline behaviors to the service collection.");
-        sb.AppendLine("        /// ValidationBehavior is registered first to ensure validation runs before other behaviors.");
+        sb.AppendLine("        /// FluentValidationBehavior is registered first to ensure validation runs before other behaviors.");
         sb.AppendLine("        /// </summary>");
         sb.AppendLine(
             "        public static global::Microsoft.Extensions.DependencyInjection.IServiceCollection AddGeneratedBehaviors(");
         sb.AppendLine("            this global::Microsoft.Extensions.DependencyInjection.IServiceCollection services)");
         sb.AppendLine("        {");
 
-        // Register ValidationBehavior FIRST for request types with validators
-        // Register by concrete type so unrolled pipeline can resolve each behavior individually
+        // Register FluentValidationBehavior FIRST for request types with validators.
+        // Register by concrete type so the unrolled pipeline can resolve each behavior individually.
         if (requestTypesWithValidation.Count > 0)
         {
             sb.AppendLine("            // Validation behaviors (registered first to ensure validation runs before other behaviors)");
             foreach (var (requestType, responseType) in requestTypesWithValidation)
             {
-                sb.AppendLine($"            services.AddTransient<global::MediatorLite.Validation.ValidationBehavior<{requestType}, {responseType}>>();");
+                sb.AppendLine($"            services.AddTransient<global::MediatorLite.FluentValidation.FluentValidationBehavior<{requestType}, {responseType}>>();");
             }
             sb.AppendLine();
         }
@@ -808,7 +795,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         if (expandedBehaviors.Count > 0)
         {
             var nonValidationBehaviors = expandedBehaviors
-                .Where(b => !b.BehaviorTypeName.StartsWith("global::MediatorLite.Validation.ValidationBehavior<"))
+                .Where(b => !b.BehaviorTypeName.StartsWith("global::MediatorLite.FluentValidation.FluentValidationBehavior<"))
                 .ToList();
 
             if (nonValidationBehaviors.Count > 0)
@@ -826,9 +813,9 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine();
 
         // --- Diagnostic counts ---
-        var totalValidatorCount = validators.Count + requestTypesWithDataAnnotations.Count;
+        var totalValidatorCount = validatorsToRegister.Count;
         var nonValidationBehaviorCount = expandedBehaviors
-            .Count(b => !b.BehaviorTypeName.StartsWith("global::MediatorLite.Validation.ValidationBehavior<"));
+            .Count(b => !b.BehaviorTypeName.StartsWith("global::MediatorLite.FluentValidation.FluentValidationBehavior<"));
 
         sb.AppendLine($"        /// <summary>Number of request handlers discovered at compile time.</summary>");
         sb.AppendLine($"        public static int RequestHandlerCount => {requestHandlers.Count};");
@@ -867,12 +854,18 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         var notificationHandlers = handlers.SelectMany(h =>
             h.NotificationHandlers.Select(n => (Handler: h, Interface: n))).ToList();
 
-        // Group behaviors by request type for unrolled pipeline generation
+        // Group behaviors by request type for unrolled pipeline generation.
+        // Validation behaviors are forced to the front so they wrap (run before) every other
+        // behavior — this is the documented invariant that invalid requests short-circuit before
+        // any other behavior runs. [BehaviorOrder] only orders the non-validation behaviors.
         var behaviorsByRequest = expandedBehaviors
             .GroupBy(b => (b.RequestType, b.ResponseType))
             .ToDictionary(
                 g => g.Key,
-                g => g.OrderBy(b => b.Order).ToList());
+                g => g
+                    .OrderBy(b => b.BehaviorTypeName.StartsWith("global::MediatorLite.FluentValidation.FluentValidationBehavior<") ? 0 : 1)
+                    .ThenBy(b => b.Order)
+                    .ToList());
 
         // Group notification handlers by notification type (handlers pre-sorted by order),
         // then order the groups most-derived-first for the PublishAsync type-pattern switch.
@@ -1481,7 +1474,6 @@ internal sealed record HandlerInterfaceInfo(
     string InterfaceType,
     string RequestType,
     string? ResponseType,
-    bool HasDataAnnotations = false,
     List<string>? BaseTypes = null);
 
 internal sealed record NotificationHandlerInterfaceInfo(

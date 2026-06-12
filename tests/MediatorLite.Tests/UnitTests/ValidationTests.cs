@@ -27,32 +27,6 @@ namespace MediatorLite.Tests.UnitTests
         }
 
         [Fact]
-        public void ValidationResult_SuccessProperty_ReturnsValidResult()
-        {
-            var result = ValidationResult.Success;
-            Assert.True(result.IsValid);
-            Assert.Empty(result.Errors);
-        }
-
-        [Fact]
-        public void ValidationResult_Failure_WithParams_CreatesFailedResult()
-        {
-            var errors = new[] { new ValidationError("a", "b", null) };
-            var result = ValidationResult.Failure(errors[0]);
-            Assert.False(result.IsValid);
-            Assert.Single(result.Errors);
-        }
-
-        [Fact]
-        public void ValidationResult_Failure_WithEnumerable_CreatesFailedResult()
-        {
-            var errors = new List<ValidationError> { new ValidationError("a", "b", null) };
-            var result = ValidationResult.Failure(errors);
-            Assert.False(result.IsValid);
-            Assert.Single(result.Errors);
-        }
-
-        [Fact]
         public void ValidationException_Constructor_WithErrors_Works()
         {
             var errors = new List<ValidationError> { new ValidationError("a", "b", null) };

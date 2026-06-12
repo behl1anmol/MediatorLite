@@ -25,6 +25,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\MediatorLite\MediatorLite.csproj" />
+    <!-- FluentValidation integration (FluentValidationBehavior + FluentValidation) -->
+    <ProjectReference Include="..\..\src\MediatorLite.FluentValidation\MediatorLite.FluentValidation.csproj" />
     <!-- Source generator for SourceGeneration tests -->
     <ProjectReference Include="..\..\src\MediatorLite.SourceGeneration\MediatorLite.SourceGeneration.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>

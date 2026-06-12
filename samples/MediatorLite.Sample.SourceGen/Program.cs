@@ -24,10 +24,9 @@ Console.WriteLine($"   Notification Handlers discovered: {MediatorLiteRegistrati
 Console.WriteLine($"   Pipeline Behaviors discovered: {MediatorLiteRegistration.BehaviorCount}");
 Console.WriteLine($"      - PerformanceLoggingBehavior<,> (open generic - applies to all requests)");
 Console.WriteLine($"      - PlaceOrderAuthorizationBehavior (closed - applies only to PlaceOrderCommand)");
-Console.WriteLine($"      - ValidationBehavior<,> (auto-registered for validated request types)");
+Console.WriteLine($"      - FluentValidationBehavior<,> (auto-registered for validated request types)");
 Console.WriteLine($"   Validators discovered: {MediatorLiteRegistration.ValidatorCount}");
-Console.WriteLine($"      - DataAnnotationsValidator<CreateProductCommand> (auto-detected from attributes)");
-Console.WriteLine($"      - CreateProductCommandValidator (custom business logic validator)");
+Console.WriteLine($"      - CreateProductCommandValidator (FluentValidation AbstractValidator<CreateProductCommand>)");
 Console.WriteLine();
 
 // Configure services
@@ -45,10 +44,9 @@ services.AddLogging(builder =>
 //   - All IRequestHandler implementations
 //   - All INotificationHandler implementations
 //   - All IPipelineBehavior implementations (open generic AND closed)
-//   - All IValidator<T> implementations (custom validators)
-//   - DataAnnotationsValidator<T> for request types with DataAnnotation attributes
-//   - ValidationBehavior<,> registered FIRST to ensure validation short-circuits before other behaviors
-// NO NEED to call options.AddOpenBehavior() or manually register behaviors/validators!
+//   - All FluentValidation validators (AbstractValidator<T> / FluentValidation.IValidator<T>)
+//   - FluentValidationBehavior<,> registered FIRST to ensure validation short-circuits before other behaviors
+// NO NEED to call options.AddOpenBehavior() or AddValidatorsFromAssembly() — zero reflection scanning!
 services.AddGeneratedHandlers();
 
 // Add MediatorLite core services.
@@ -134,7 +132,7 @@ Console.WriteLine();
 // Demo 5: Validation - DataAnnotations failure
 Console.WriteLine("───────────────────────────────────────────────────────────────");
 Console.WriteLine();
-Console.WriteLine("5️⃣ Creating a product with INVALID data (DataAnnotations)...");
+Console.WriteLine("5️⃣ Creating a product with INVALID data (property rules)...");
 Console.WriteLine();
 
 try

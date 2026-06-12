@@ -66,7 +66,34 @@ public class ValidationTests
     }
 
     [Fact]
-    public async Task ValidationBehavior_ShortCircuitsOnDataAnnotationFailure()
+    public async Task ValidationBehavior_RunsOutermost_ShortCircuitsOtherBehaviors()
+    {
+        // Arrange
+        ValidatedCommandHandler.Reset();
+        ValidatedCommandCustomValidator.Reset();
+        ExecutionOrderTrackingBehavior<ValidatedCommand, string>.Reset();
+
+        var services = new ServiceCollection();
+        services.AddGeneratedHandlers();
+        services.AddMediatorLite();
+        services.AddLogging();
+
+        var provider = services.BuildServiceProvider();
+        var mediator = provider.GetRequiredService<IMediator>();
+
+        // Act - invalid request: validation (outermost) must throw before any other behavior runs
+        Func<Task> act = async () => await mediator.SendAsync(
+            new ValidatedCommand { Name = "A", Value = 0 });
+
+        // Assert - the open-generic tracking behavior never executed because validation is outermost
+        await act.Should().ThrowAsync<ValidationException>();
+        ExecutionOrderTrackingBehavior<ValidatedCommand, string>.ExecutionLog
+            .Should().BeEmpty("validation runs outermost and short-circuits other behaviors when it fails");
+        ValidatedCommandHandler.WasExecuted.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ValidationBehavior_ShortCircuitsOnPropertyRuleFailure()
     {
         // Arrange
         ValidatedCommandHandler.Reset();
@@ -117,7 +144,7 @@ public class ValidationTests
     }
 
     [Fact]
-    public async Task SourceGen_AutoRegistersDataAnnotationsValidator()
+    public async Task SourceGen_AutoRegistersFluentValidator_PropertyRules()
     {
         // Arrange - Only use AddGeneratedHandlers(), no manual validator registration
         ValidatedCommandHandler.Reset();
@@ -130,18 +157,18 @@ public class ValidationTests
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
 
-        // Act - Send request that violates DataAnnotation rules
+        // Act - Send request that violates the FluentValidation property rules
         Func<Task> act = async () => await mediator.SendAsync(
             new ValidatedCommand { Name = "X", Value = 200 });
 
-        // Assert - DataAnnotations validation should fail (auto-registered by source gen)
+        // Assert - validation should fail (validator auto-registered by source gen)
         var exception = await act.Should().ThrowAsync<ValidationException>();
         exception.Which.Errors.Should().HaveCountGreaterThan(0);
         ValidatedCommandHandler.WasExecuted.Should().BeFalse();
     }
 
     [Fact]
-    public async Task SourceGen_AutoRegistersCustomValidator()
+    public async Task SourceGen_AutoRegistersFluentValidator()
     {
         // Arrange - Only use AddGeneratedHandlers(), no manual validator registration
         ValidatedCommandCustomValidator.Reset();
@@ -154,12 +181,12 @@ public class ValidationTests
         var provider = services.BuildServiceProvider();
         var mediator = provider.GetRequiredService<IMediator>();
 
-        // Act - Send valid request to verify custom validator runs
+        // Act - Send valid request to verify the FluentValidation validator runs
         await mediator.SendAsync(new ValidatedCommand { Name = "ValidName", Value = 42 });
 
-        // Assert - Custom validator was called (auto-registered by source gen)
+        // Assert - validator was called (auto-registered by source gen)
         ValidatedCommandCustomValidator.WasExecuted.Should().BeTrue(
-            "source generator should auto-register custom validators implementing IValidator<T>");
+            "source generator should auto-register FluentValidation validators");
     }
 
     [Fact]

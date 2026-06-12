@@ -6,6 +6,12 @@ triggers: AddMediatorLite, dispatch, SourceGeneratedMediator, ThrowingMediator, 
 
 # MediatorLite (Core Runtime)
 
+> **⚠️ Partially STALE.** Validation moved to **FluentValidation** in the opt-in
+> `MediatorLite.FluentValidation` package. The in-house `ValidationBehavior` /
+> `DataAnnotationsValidator` referenced here were **removed** from core — core has no validation
+> subsystem. See [mediatorlite-validation](../mediatorlite-validation/SKILL.md),
+> [.claude/rules/50-validation.md](../../rules/50-validation.md), [docs/validation.md](../../../docs/validation.md).
+
 ## Purpose
 
 `MediatorLite` (project name, not the solution) is the runtime library consumers reference. It does **not** contain a hand-written `IMediator` implementation — the real `IMediator` is the generated `SourceGeneratedMediator` emitted by `MediatorLite.SourceGeneration`. This project contains the DI extension (`AddMediatorLite()`), the `ThrowingMediator` diagnostic fallback, diagnostic sources, and the validation runtime. The dispatch path contains **zero reflection** at call time — the generated mediator dispatches via a compile-time C# type-pattern switch. Logging and tracing are emitted inline by the generator, not by this project.

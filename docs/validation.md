@@ -1,88 +1,120 @@
 # Validation
 
-MediatorLite includes built-in validation support through pipeline behaviors. This allows you to validate requests before they reach your handlers.
+MediatorLite uses **[FluentValidation](https://docs.fluentvalidation.net/)** as its
+validation engine. Validators are discovered at compile time by the source generator and
+run as the **outermost pipeline behavior**, so invalid requests short-circuit before any
+other behavior or the handler executes — with **zero reflection-based assembly scanning**.
 
 ## Overview
 
-The validation system provides:
-- **`ValidationBehavior<TRequest, TResponse>`** - A pipeline behavior that validates requests
-- **`IValidator<TRequest>`** - Interface for creating custom validators
-- **`DataAnnotationsValidator<TRequest>`** - Built-in validator using `System.ComponentModel.DataAnnotations`
-- **`ValidationException`** - Exception thrown when validation fails
-- **`ValidationResult`** - Result object containing validation errors
+Validation lives in the opt-in **`MediatorLite.FluentValidation`** package (core
+`MediatorLite` takes no dependency on FluentValidation). It provides:
+
+- **`FluentValidationBehavior<TRequest, TResponse>`** — the pipeline behavior that runs all
+  FluentValidation validators for a request and throws on failure. The source generator
+  wires it in automatically; you never register it by hand.
+- **`ValidationException`** (`MediatorLite.Validation`) — thrown when validation fails.
+  FluentValidation failures are mapped onto this single, uniform exception type.
+- **`ValidationError`** (`MediatorLite.Validation.Models`) — one mapped failure
+  (`PropertyName`, `ErrorMessage`, `AttemptedValue`).
+
+You author validators with FluentValidation's `AbstractValidator<T>` exactly as you would
+anywhere else.
+
+## Setup
+
+Reference the integration package (alongside `MediatorLite` and the source generator):
+
+```xml
+<PackageReference Include="MediatorLite" Version="..." />
+<PackageReference Include="MediatorLite.FluentValidation" Version="..." />
+```
+
+> If the generator discovers FluentValidation validators for handled request types but the
+> `MediatorLite.FluentValidation` package is **not** referenced, the build fails with
+> **`MEDL1001`** telling you to add the package. Validation never silently stops running.
 
 ## Quick Start
 
-### 1. Define a Request with Validation Attributes
+### 1. Define a request
 
 ```csharp
-using System.ComponentModel.DataAnnotations;
-
 public record CreateUserCommand : IRequest<int>
 {
-    [Required(ErrorMessage = "Name is required")]
-    [StringLength(100, MinimumLength = 2, ErrorMessage = "Name must be between 2 and 100 characters")]
     public required string Name { get; init; }
-
-    [Required(ErrorMessage = "Email is required")]
-    [EmailAddress(ErrorMessage = "Invalid email format")]
     public required string Email { get; init; }
-
-    [Range(18, 120, ErrorMessage = "Age must be between 18 and 120")]
     public int Age { get; init; }
 }
 ```
 
-### 2. Register Services
+### 2. Write a FluentValidation validator
 
-#### With Source Generation (Required for v2)
+```csharp
+using FluentValidation;
 
-The source generator automatically handles validation setup:
+public sealed class CreateUserCommandValidator : AbstractValidator<CreateUserCommand>
+{
+    public CreateUserCommandValidator()
+    {
+        RuleFor(x => x.Name)
+            .NotEmpty().WithMessage("Name is required")
+            .Length(2, 100).WithMessage("Name must be between 2 and 100 characters");
 
-- **Discovers** all `IValidator<T>` implementations at compile time
-- **Auto-registers** `DataAnnotationsValidator<T>` for request types with DataAnnotation attributes
-- **Registers** `ValidationBehavior<,>` respecting `[BehaviorOrder]` attributes
+        RuleFor(x => x.Email)
+            .NotEmpty().WithMessage("Email is required")
+            .EmailAddress().WithMessage("Invalid email format");
+
+        RuleFor(x => x.Age)
+            .InclusiveBetween(18, 120).WithMessage("Age must be between 18 and 120");
+    }
+}
+```
+
+### 3. Register services
+
+The source generator discovers the validator and wires `FluentValidationBehavior` for you.
+There is **no** `AddValidatorsFromAssembly(...)` scan.
 
 ```csharp
 using MediatorLite.Generated;
 
 services
-    .AddGeneratedHandlers()   // MUST be called first — registers handlers, validators, behaviors with O(1) dispatch
+    .AddGeneratedHandlers()   // registers handlers, validators, behaviors — O(1) dispatch
     .AddMediatorLite();
 
-// That's it! No manual validator or behavior registration needed.
 // The source generator:
-//   1. Detects [Required], [Range], etc. on CreateUserCommand properties
-//   2. Registers DataAnnotationsValidator<CreateUserCommand> automatically
-//   3. Registers ValidationBehavior<CreateUserCommand, int> with proper [BehaviorOrder]
-//   4. Discovers any custom IValidator<CreateUserCommand> implementations
+//   1. Discovers every concrete FluentValidation.IValidator<T> (AbstractValidator<T> subclasses)
+//   2. Registers each against FluentValidation.IValidator<T> for the handled request type
+//   3. Emits FluentValidationBehavior<T, _> as the OUTERMOST pipeline behavior for that type
 ```
 
-For granular control, use the individual methods:
+For granular control, the individual methods still exist:
 
 ```csharp
 services
     .AddGeneratedRequestHandlers()
     .AddGeneratedNotificationHandlers()
-    .AddGeneratedValidators()       // Registers discovered validators + DataAnnotationsValidator
-    .AddGeneratedBehaviors()        // Registers behaviors with [BehaviorOrder] ordering
+    .AddGeneratedValidators()       // registers discovered FluentValidation validators
+    .AddGeneratedBehaviors()        // registers behaviors (validation first, then [BehaviorOrder])
     .AddMediatorLite();
 ```
 
-#### Without Source Generation (Not Supported)
+> **Note:** Only validators whose request type has a handler **in the same compilation** are
+> registered and counted in `ValidatorCount`. A validator for an unhandled request type has no
+> generated pipeline to run in, so it is ignored.
 
-> ⚠️ **Not supported in v2:** There is no reflection fallback. Manual registrations of `ValidationBehavior<,>` or validators are never dispatched without `AddGeneratedHandlers()` — the `IMediator` registered by `AddMediatorLite()` alone throws on first use. Hand-registering validators alongside source generation is also a smell: the generator already registered them via `AddGeneratedValidators()`, and duplicates inflate `ValidatorCount`.
-
-### 3. Handle ValidationException
+### 4. Handle `ValidationException`
 
 ```csharp
+using MediatorLite.Validation;
+
 try
 {
     var userId = await mediator.SendAsync(new CreateUserCommand
     {
-        Name = "",  // Invalid: too short
-        Email = "invalid-email",  // Invalid: bad format
-        Age = 15  // Invalid: below minimum
+        Name = "",                 // invalid: too short
+        Email = "invalid-email",   // invalid: bad format
+        Age = 15                   // invalid: below minimum
     });
 }
 catch (ValidationException ex)
@@ -91,168 +123,68 @@ catch (ValidationException ex)
     {
         Console.WriteLine($"{error.PropertyName}: {error.ErrorMessage}");
     }
-    // Output:
-    // Name: Name must be between 2 and 100 characters
-    // Email: Invalid email format
-    // Age: Age must be between 18 and 120
 }
 ```
 
-## Custom Validators
+## Async and database-backed rules
 
-Create custom validators by implementing `IValidator<TRequest>`. The source generator automatically discovers and registers these at compile time:
+FluentValidation's async rules work out of the box — `FluentValidationBehavior` always calls
+`ValidateAsync`. Validators are resolved from the request's DI scope, so injecting scoped
+dependencies (such as a `DbContext`) is fine:
 
 ```csharp
-public class CreateUserCommandValidator : IValidator<CreateUserCommand>
+public sealed class CreateUserCommandValidator : AbstractValidator<CreateUserCommand>
 {
-    private readonly IUserRepository _userRepository;
-
-    public CreateUserCommandValidator(IUserRepository userRepository)
+    public CreateUserCommandValidator(IUserRepository users)
     {
-        _userRepository = userRepository;
-    }
-
-    public async ValueTask<ValidationResult> ValidateAsync(
-        CreateUserCommand request,
-        CancellationToken cancellationToken = default)
-    {
-        var errors = new List<ValidationError>();
-
-        // Check if email already exists (async validation)
-        if (await _userRepository.EmailExistsAsync(request.Email, cancellationToken))
-        {
-            errors.Add(new ValidationError(
-                nameof(request.Email),
-                "Email is already registered",
-                request.Email));
-        }
-
-        // Custom business logic validation
-        if (request.Age < 18 && !request.HasParentalConsent)
-        {
-            errors.Add(new ValidationError(
-                nameof(request.Age),
-                "Users under 18 require parental consent"));
-        }
-
-        return errors.Count > 0
-            ? ValidationResult.Failure(errors)
-            : ValidationResult.Success;
+        RuleFor(x => x.Email)
+            .MustAsync(async (email, ct) => !await users.EmailExistsAsync(email, ct))
+            .WithMessage("Email is already registered");
     }
 }
 ```
 
-Register the custom validator (only needed without source generation):
+## Multiple validators
 
-```csharp
-// With source generation: automatically discovered and registered by AddGeneratedHandlers()
-// Without source generation: register manually
-services.AddTransient<IValidator<CreateUserCommand>, CreateUserCommandValidator>();
+Register more than one `AbstractValidator<T>` for the same request type and all of them run;
+their failures are aggregated into a single `ValidationException`.
+
+## Execution order
+
+`FluentValidationBehavior` is always the **outermost** behavior for a validated request type —
+it wraps (runs before) every `[BehaviorOrder]` behavior and the handler. `[BehaviorOrder]` only
+orders the non-validation behaviors among themselves.
+
+```
+Request → FluentValidationBehavior → [BehaviorOrder(0)] Logging → … → Handler
 ```
 
-Use `[MediatorGeneration(Skip = true)]` to exclude a validator from source generation:
+If validation fails, the pipeline short-circuits: no other behavior and no handler runs.
 
-```csharp
-[MediatorGeneration(Skip = true)]
-public class TestOnlyValidator : IValidator<CreateUserCommand>
-{
-    // This validator will NOT be registered by AddGeneratedHandlers()
-}
-```
+## Error mapping
 
-## Multiple Validators
+Each FluentValidation `ValidationFailure` is mapped to a MediatorLite `ValidationError`:
 
-You can register multiple validators for the same request. `ValidationBehavior` will execute all of them and aggregate errors:
+| FluentValidation `ValidationFailure` | MediatorLite `ValidationError` |
+|--------------------------------------|--------------------------------|
+| `PropertyName`                       | `PropertyName`                 |
+| `ErrorMessage`                       | `ErrorMessage`                 |
+| `AttemptedValue`                     | `AttemptedValue`               |
 
-```csharp
-// Register both DataAnnotations and custom validator
-services.AddTransient<IValidator<CreateUserCommand>, DataAnnotationsValidator<CreateUserCommand>>();
-services.AddTransient<IValidator<CreateUserCommand>, CreateUserCommandValidator>();
-```
-
-When validation fails, all errors from all validators are collected and thrown in a single `ValidationException`.
-
-## Validation Error Details
-
-`ValidationError` contains:
-
-```csharp
-public sealed record ValidationError(
-    string PropertyName,        // Property that failed validation
-    string ErrorMessage,        // Error description
-    object? AttemptedValue);    // The value that failed (optional)
-```
-
-Example usage:
+This gives you one exception type (`MediatorLite.Validation.ValidationException`) to catch at
+your API boundary, regardless of the validators involved:
 
 ```csharp
 catch (ValidationException ex)
 {
-    var errorDetails = ex.Errors.Select(e => new
-    {
-        Field = e.PropertyName,
-        Message = e.ErrorMessage,
-        Value = e.AttemptedValue
-    });
-
     return Results.ValidationProblem(
-        errorDetails.ToDictionary(
-            e => e.Field,
-            e => new[] { e.Message }));
+        ex.Errors
+          .GroupBy(e => e.PropertyName)
+          .ToDictionary(g => g.Key, g => g.Select(e => e.ErrorMessage).ToArray()));
 }
 ```
 
-## DataAnnotations Support
-
-The built-in `DataAnnotationsValidator<T>` supports all standard `System.ComponentModel.DataAnnotations` attributes:
-
-| Attribute | Description |
-|-----------|-------------|
-| `[Required]` | Property must have a value |
-| `[StringLength]` | String length constraints |
-| `[Range]` | Numeric range validation |
-| `[EmailAddress]` | Email format validation |
-| `[Phone]` | Phone number format |
-| `[Url]` | URL format validation |
-| `[RegularExpression]` | Custom regex pattern |
-| `[Compare]` | Compare two properties |
-| `[CreditCard]` | Credit card format |
-| Custom attributes | Any attribute inheriting `ValidationAttribute` |
-
-## Validation Behavior Execution Order (v2)
-
-`ValidationBehavior` runs as part of the pipeline. Use `[BehaviorOrder]` to ensure it executes first:
-
-### With Source Generation (Automatic)
-
-The source generator respects `[BehaviorOrder]` attributes. Add `[BehaviorOrder(0)]` to your `ValidationBehavior` to ensure it runs first:
-
-```csharp
-[BehaviorOrder(0)]  // Runs before other behaviors
-public class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse> { }
-```
-
-```
-Request → [BehaviorOrder(0)] ValidationBehavior → [BehaviorOrder(1)] LoggingBehavior → Handler
-```
-
-If validation fails, the pipeline short-circuits and subsequent behaviors/handlers are not executed.
-
-### Without Source Generation (Deprecated)
-
-> ⚠️ **Deprecated in v2:** Manual registration order is deprecated. Use `[BehaviorOrder]` with source generation.
-
-Register `ValidationBehavior` before other behaviors to ensure it runs first:
-
-```csharp
-// ValidationBehavior runs first (validates before logging)
-services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
-services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
-```
-
-## Source Generator Diagnostics
-
-The source generator exposes validator counts for diagnostics:
+## Source generator diagnostics
 
 ```csharp
 using MediatorLite.Generated;
@@ -260,133 +192,43 @@ using MediatorLite.Generated;
 Console.WriteLine($"Validators discovered: {MediatorLiteRegistration.ValidatorCount}");
 ```
 
-## Advanced Patterns
+## Testing validators
 
-### Conditional Validation
-
-```csharp
-public class ConditionalValidator : IValidator<MyCommand>
-{
-    public ValueTask<ValidationResult> ValidateAsync(MyCommand request, CancellationToken ct = default)
-    {
-        // Skip validation for admin users
-        if (request.IsAdminUser)
-        {
-            return ValueTask.FromResult(ValidationResult.Success);
-        }
-
-        // Validate for normal users
-        var errors = new List<ValidationError>();
-        // ... validation logic
-
-        return ValueTask.FromResult(
-            errors.Count > 0
-                ? ValidationResult.Failure(errors)
-                : ValidationResult.Success);
-    }
-}
-```
-
-### Fluent Validation Integration
-
-You can integrate FluentValidation by adapting its validators to `IValidator<T>`:
+FluentValidation ships a test helper:
 
 ```csharp
-public class FluentValidationAdapter<TRequest> : IValidator<TRequest>
-{
-    private readonly FluentValidation.IValidator<TRequest> _fluentValidator;
+using FluentValidation.TestHelper;
 
-    public FluentValidationAdapter(FluentValidation.IValidator<TRequest> fluentValidator)
-    {
-        _fluentValidator = fluentValidator;
-    }
-
-    public async ValueTask<ValidationResult> ValidateAsync(
-        TRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        var result = await _fluentValidator.ValidateAsync(request, cancellationToken);
-
-        if (result.IsValid)
-        {
-            return ValidationResult.Success;
-        }
-
-        var errors = result.Errors.Select(e => new ValidationError(
-            e.PropertyName,
-            e.ErrorMessage,
-            e.AttemptedValue)).ToList();
-
-        return ValidationResult.Failure(errors);
-    }
-}
-```
-
-Register:
-
-```csharp
-services.AddValidatorsFromAssemblyContaining<Program>();  // FluentValidation
-services.AddTransient(typeof(IValidator<>), typeof(FluentValidationAdapter<>));
-```
-
-### Per-Request Validator Registration
-
-With source generation, validation is automatically scoped to request types that have validators or DataAnnotation attributes. Request types without either are not validated:
-
-```csharp
-// CreateUserCommand has [Required], [EmailAddress], etc.
-// Source generator auto-registers DataAnnotationsValidator<CreateUserCommand>
-
-// UpdateUserCommand has no annotations and no custom validator
-// No validation is registered - ValidationBehavior is not added for this type
-```
-
-Without source generation, register validators per-request manually:
-
-```csharp
-// Only CreateUserCommand has validation
-services.AddTransient<IValidator<CreateUserCommand>, DataAnnotationsValidator<CreateUserCommand>>();
-
-// UpdateUserCommand - no validators registered, validation is skipped
-// ValidationBehavior will call next() immediately when no validators are found
-```
-
-## Testing Validators
-
-```csharp
 [Fact]
-public async Task Validator_ShouldFailForInvalidEmail()
+public void Validator_ShouldFailForInvalidEmail()
 {
-    var validator = new DataAnnotationsValidator<CreateUserCommand>();
+    var validator = new CreateUserCommandValidator();
 
-    var command = new CreateUserCommand
+    var result = validator.TestValidate(new CreateUserCommand
     {
         Name = "John Doe",
-        Email = "invalid-email",  // Invalid
+        Email = "invalid-email",
         Age = 25
-    };
+    });
 
-    var result = await validator.ValidateAsync(command);
-
-    result.IsValid.Should().BeFalse();
-    result.Errors.Should().ContainSingle(e =>
-        e.PropertyName == nameof(CreateUserCommand.Email) &&
-        e.ErrorMessage.Contains("email"));
+    result.ShouldHaveValidationErrorFor(x => x.Email);
 }
 ```
 
-## Best Practices
+## Migrating from the in-house validator (pre-FluentValidation)
 
-1. **Use `AddGeneratedHandlers()` first** — Required for v2 O(1) dispatch and proper `[BehaviorOrder]` support
-2. **Use `[BehaviorOrder(0)]` for ValidationBehavior** — Ensures validation runs first
-3. **Use DataAnnotations for simple validation** — Required, ranges, string lengths, formats
-4. **Use custom validators for business logic** — Async database checks, complex rules
-5. **Create specific error messages** — Help users understand what went wrong
-6. **Include AttemptedValue in errors** — Useful for logging and debugging
-7. **Handle ValidationException at API boundary** — Convert to HTTP 400 responses
-8. **Use `[MediatorGeneration(Skip = true)]`** — To exclude test-only validators from source generation
+Earlier versions shipped an in-house `MediatorLite.Validation.IValidator<T>`, a
+`DataAnnotationsValidator<T>`, and a `ValidationResult`. These have been **removed**. To
+migrate:
+
+- Replace `IValidator<T>` implementations with `AbstractValidator<T>` (`RuleFor(...)`).
+- Replace DataAnnotations (`[Required]`, `[Range]`, …) with equivalent FluentValidation rules
+  (`NotEmpty()`, `InclusiveBetween(...)`, `EmailAddress()`, …).
+- Add the `MediatorLite.FluentValidation` package reference.
+- `ValidationException` and `ValidationError` are unchanged — existing `catch` blocks keep working.
 
 ## See Also
 
-- [Pipeline Behaviors](pipeline-behaviors.md) - Learn about behavior execution order
-- [Quick Start](quick-start.md) - Basic MediatorLite setup
+- [Pipeline Behaviors](pipeline-behaviors.md) — behavior execution order
+- [Quick Start](quick-start.md) — basic MediatorLite setup
+- [FluentValidation docs](https://docs.fluentvalidation.net/)

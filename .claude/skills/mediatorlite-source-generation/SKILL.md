@@ -6,6 +6,12 @@ triggers: source generator, HandlerDiscoveryGenerator, IIncrementalGenerator, Me
 
 # MediatorLite.SourceGeneration
 
+> **⚠️ Validation note.** The validator discovery pipeline now matches **FluentValidation**
+> `AbstractValidator<T>` / `FluentValidation.IValidator<T>` (DataAnnotations discovery was
+> removed) and emits `MediatorLite.FluentValidation.FluentValidationBehavior<,>` outermost, plus
+> the `MEDL1001` missing-package diagnostic. See [mediatorlite-validation](../mediatorlite-validation/SKILL.md)
+> and [.claude/rules/50-validation.md](../../rules/50-validation.md).
+
 ## Purpose
 
 `MediatorLite.SourceGeneration` is a Roslyn incremental source generator that transforms every `IRequestHandler<,>`, `INotificationHandler<>`, `IPipelineBehavior<,>`, and `IValidator<>` in the compilation into a fully unrolled, reflection-free dispatch implementation. It emits two generated files per compilation unit — `MediatorLiteRegistration.g.cs` (DI wiring + diagnostic counts) and `SourceGeneratedMediator.g.cs` (O(1) dispatch tables + per-request/per-notification methods) — and resolves every notification execution/error strategy and observability decision at compile time so the runtime `Mediator.cs` has zero branches.

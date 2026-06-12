@@ -152,35 +152,11 @@ Behaviors without `[BehaviorOrder]` default to order `0`.
 
 ### Validation Behavior
 
-```csharp
-public class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
-    where TRequest : IRequest<TResponse>
-{
-    private readonly IEnumerable<IValidator<TRequest>> _validators;
-
-    public ValidationBehavior(IEnumerable<IValidator<TRequest>> validators)
-    {
-        _validators = validators;
-    }
-
-    public async ValueTask<TResponse> HandleAsync(
-        TRequest request,
-        RequestHandlerDelegate<TResponse> next,
-        CancellationToken cancellationToken = default)
-    {
-        foreach (var validator in _validators)
-        {
-            var result = await validator.ValidateAsync(request, cancellationToken);
-            if (!result.IsValid)
-            {
-                throw new ValidationException(result.Errors);
-            }
-        }
-
-        return await next();
-    }
-}
-```
+You do **not** need to write your own validation behavior. MediatorLite provides
+FluentValidation integration out of the box: add the `MediatorLite.FluentValidation` package,
+write `AbstractValidator<T>` validators, and the source generator wires
+`FluentValidationBehavior<,>` as the outermost behavior automatically. See
+[Validation](validation.md).
 
 ### Transaction Behavior
 

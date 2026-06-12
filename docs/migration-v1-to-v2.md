@@ -322,6 +322,24 @@ services.AddLogging(b => b.AddFilter("MediatorLite.IMediator", LogLevel.Informat
 
 ---
 
+## Validation → FluentValidation
+
+The in-house validation model was **removed**. `MediatorLite.Validation.IValidator<T>`,
+`DataAnnotationsValidator<T>`, and `ValidationResult` no longer exist. Validation is now powered
+by **FluentValidation** via the opt-in **`MediatorLite.FluentValidation`** package.
+
+- Add the package reference: `MediatorLite.FluentValidation` (brings in `FluentValidation`).
+  If the generator finds validators for handled requests but the package is missing, the build
+  fails with **`MEDL1001`**.
+- Replace `IValidator<T>` implementations with FluentValidation `AbstractValidator<T>` (`RuleFor(...)`).
+- Replace DataAnnotations (`[Required]`, `[Range]`, `[EmailAddress]`, …) with the equivalent
+  FluentValidation rules (`NotEmpty()`, `InclusiveBetween(...)`, `EmailAddress()`, …).
+- `ValidationException` and `ValidationError` are **unchanged** — FluentValidation failures are
+  mapped onto them, so existing `catch (ValidationException)` blocks keep working.
+- Registration is still automatic via `AddGeneratedHandlers()`; never call
+  `AddValidatorsFromAssembly(...)`. The generator emits `FluentValidationBehavior<,>` as the
+  outermost pipeline behavior. See [validation.md](validation.md).
+
 ## Summary
 
 1. **Add source generator** package reference

@@ -59,7 +59,7 @@ MediatorLite implements the [Mediator pattern](https://en.wikipedia.org/wiki/Med
 - **High Performance** — `ValueTask`-based handlers with minimal overhead and no boxing.
 - **Pipeline Behaviors** — Composable middleware for cross-cutting concerns (logging, validation, caching, etc.).
 - **Notifications** — Pub/sub pattern with configurable execution strategies: `Sequential`, `Parallel`, and `StopOnFirst`.
-- **Built-in Validation** — First-class support for `DataAnnotations` and custom `IValidator<T>` implementations.
+- **FluentValidation Integration** — First-class validation via the opt-in `MediatorLite.FluentValidation` package; validators are source-generated into the pipeline with no reflection scanning.
 - **Observability** — Structured logging and OpenTelemetry tracing out of the box.
 - **DI Native** — Integrates directly with `Microsoft.Extensions.DependencyInjection`.
 - **Native AOT & Trimming** — Works with .NET's native AOT compilation and assembly trimming.
@@ -129,7 +129,7 @@ That's it. The source generator discovers `GetUserQueryHandler` at compile time 
 |---|---|
 | [Quick Start]({{ site.baseurl }}/quick-start) | Install the library and set up your first request, handler, and notification in minutes. |
 | [Pipeline Behaviors]({{ site.baseurl }}/pipeline-behaviors) | Compose reusable middleware for logging, validation, caching, and other cross-cutting concerns. |
-| [Validation]({{ site.baseurl }}/validation) | Use `DataAnnotations` or custom `IValidator<T>` validator to validate requests before they reach handlers. |
+| [Validation]({{ site.baseurl }}/validation) | Use FluentValidation `AbstractValidator<T>` to validate requests before they reach handlers. |
 | [Notifications]({{ site.baseurl }}/notifications) | Publish events to multiple handlers with `Sequential`, `Parallel`, or `StopOnFirst` execution strategies. |
 | [Observability]({{ site.baseurl }}/observability) | Configure built-in structured logging and OpenTelemetry tracing. |
 | [Benchmarks]({{ site.baseurl }}/benchmarks) | Performance comparisons against MediatR across request dispatch, pipeline behaviors, and notifications. |

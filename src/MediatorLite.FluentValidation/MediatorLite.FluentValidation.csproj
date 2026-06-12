@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>MediatorLite.FluentValidation</PackageId>
+    <Description>FluentValidation integration for MediatorLite. Provides the source-generator-wired FluentValidationBehavior that runs FluentValidation validators as the outermost pipeline behavior, with zero reflection-based assembly scanning.</Description>
+    <PackageTags>mediator;cqrs;validation;fluentvalidation;pipeline;source-generator</PackageTags>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PackageIcon>icon.png</PackageIcon>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FluentValidation" Version="12.1.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MediatorLite.Abstractions\MediatorLite.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\icon.png" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>
