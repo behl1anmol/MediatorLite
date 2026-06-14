@@ -1,16 +1,26 @@
-# ![MediatorLite Icon](https://raw.githubusercontent.com/behl1anmol/MediatorLite/main/icon-readme.png) MediatorLite.SourceGeneration
+<div align="center">
+  <img src="https://raw.githubusercontent.com/behl1anmol/MediatorLite/main/icon-readme.png" alt="MediatorLite Icon" />
+  <h1>MediatorLite</h1>
+  <p>Source generators for MediatorLite that enable O(1) dispatch via compile-time generated switch expressions.</p>
 
-[![CI](https://github.com/behl1anmol/MediatorLite/actions/workflows/ci.yml/badge.svg)](https://github.com/behl1anmol/MediatorLite/actions/workflows/ci.yml)
-[![MediatorLite Version](https://img.shields.io/nuget/v/MediatorLite.svg?label=MediatorLite)](https://www.nuget.org/packages/MediatorLite/)
-[![MediatorLite Downloads](https://img.shields.io/nuget/dt/MediatorLite.svg?label=MediatorLite%20downloads)](https://www.nuget.org/packages/MediatorLite/)
-[![MediatorLite.SourceGeneration Version](https://img.shields.io/nuget/v/MediatorLite.SourceGeneration.svg?label=MediatorLite.SourceGeneration)](https://www.nuget.org/packages/MediatorLite.SourceGeneration/)
-[![MediatorLite.SourceGeneration Downloads](https://img.shields.io/nuget/dt/MediatorLite.SourceGeneration.svg?label=MediatorLite.SourceGeneration%20downloads)](https://www.nuget.org/packages/MediatorLite.SourceGeneration/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![.NET](https://img.shields.io/badge/.NET-10.0-blue.svg)](https://dotnet.microsoft.com/)
+  <!-- CI & License -->
+  [![CI](https://github.com/behl1anmol/MediatorLite/actions/workflows/ci.yml/badge.svg)](https://github.com/behl1anmol/MediatorLite/actions/workflows/ci.yml)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+  [![.NET](https://img.shields.io/badge/.NET-10.0-blue.svg)](https://dotnet.microsoft.com/)
 
-Source generators for MediatorLite v2 that enable **O(1) dispatch** via compile-time generated switch expressions.
+  <!-- Packages -->
+  [![MediatorLite](https://img.shields.io/nuget/v/MediatorLite.svg?label=MediatorLite)](https://www.nuget.org/packages/MediatorLite/)
+  [![MediatorLite.SourceGeneration](https://img.shields.io/nuget/v/MediatorLite.SourceGeneration.svg?label=MediatorLite.SourceGeneration)](https://www.nuget.org/packages/MediatorLite.SourceGeneration/)
+  [![MediatorLite.Abstractions](https://img.shields.io/nuget/v/MediatorLite.Abstractions.svg?label=MediatorLite.Abstractions)](https://www.nuget.org/packages/MediatorLite.Abstractions/)
 
-> **Documentation:** [behl1anmol.github.io/MediatorLite](https://behl1anmol.github.io/MediatorLite)
+  <!-- Downloads -->
+  [![MediatorLite downloads](https://img.shields.io/nuget/dt/MediatorLite.svg?label=MediatorLite%20downloads)](https://www.nuget.org/packages/MediatorLite/)
+  [![MediatorLite.SourceGeneration downloads](https://img.shields.io/nuget/dt/MediatorLite.SourceGeneration.svg?label=MediatorLite.SourceGeneration%20downloads)](https://www.nuget.org/packages/MediatorLite.SourceGeneration/)
+  [![MediatorLite.Abstractions downloads](https://img.shields.io/nuget/dt/MediatorLite.Abstractions.svg?label=MediatorLite.Abstractions%20downloads)](https://www.nuget.org/packages/MediatorLite.Abstractions/)
+  [![MediatorLite.FluentValidation downloads](https://img.shields.io/nuget/dt/MediatorLite.FluentValidation.svg?label=MediatorLite.FluentValidation%20downloads)](https://www.nuget.org/packages/MediatorLite.FluentValidation/)
+
+  **[📚 Documentation](https://behl1anmol.github.io/MediatorLite)**
+</div>
 
 ## What is this?
 

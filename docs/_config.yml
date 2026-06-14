@@ -41,6 +41,9 @@ aux_links:
     - "https://github.com/behl1anmol/MediatorLite"
   "NuGet":
     - "https://www.nuget.org/packages/MediatorLite/"
+    - "https://www.nuget.org/packages/MediatorLite.Abstractions/"
+    - "https://www.nuget.org/packages/MediatorLite.SourceGeneration/"
+    - "https://www.nuget.org/packages/MediatorLite.FluentValidation/"
 
 aux_links_new_tab: true
 
@@ -57,6 +60,9 @@ nav_external_links:
     hide_icon: false
   - title: MediatorLite.SourceGeneration on NuGet
     url: https://www.nuget.org/packages/MediatorLite.SourceGeneration/
+    hide_icon: false
+  - title: MediatorLite.FluentValidation on NuGet
+    url: https://www.nuget.org/packages/MediatorLite.FluentValidation/
     hide_icon: false
 
 # Callouts
