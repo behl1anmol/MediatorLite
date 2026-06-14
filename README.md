@@ -18,6 +18,7 @@
   [![MediatorLite downloads](https://img.shields.io/nuget/dt/MediatorLite.svg?label=MediatorLite%20downloads)](https://www.nuget.org/packages/MediatorLite/)
   [![MediatorLite.SourceGeneration downloads](https://img.shields.io/nuget/dt/MediatorLite.SourceGeneration.svg?label=MediatorLite.SourceGeneration%20downloads)](https://www.nuget.org/packages/MediatorLite.SourceGeneration/)
   [![MediatorLite.Abstractions downloads](https://img.shields.io/nuget/dt/MediatorLite.Abstractions.svg?label=MediatorLite.Abstractions%20downloads)](https://www.nuget.org/packages/MediatorLite.Abstractions/)
+  [![MediatorLite.FluentValidation downloads](https://img.shields.io/nuget/dt/MediatorLite.FluentValidation.svg?label=MediatorLite.FluentValidation%20downloads)](https://www.nuget.org/packages/MediatorLite.FluentValidation/)
 
   **[📚 Documentation](https://behl1anmol.github.io/MediatorLite)**
 </div>
