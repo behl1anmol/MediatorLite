@@ -17,8 +17,9 @@ public sealed class ValidationException : Exception
     /// Initializes a new instance of the <see cref="ValidationException"/> class.
     /// </summary>
     /// <param name="errors">The validation errors.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="errors"/> is <see langword="null"/>.</exception>
     public ValidationException(IEnumerable<ValidationError> errors)
-        : this([.. errors])
+        : this(Freeze(errors))
     {
     }
 
@@ -37,10 +38,19 @@ public sealed class ValidationException : Exception
     /// </summary>
     /// <param name="message">The error message.</param>
     /// <param name="errors">The validation errors.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="errors"/> is <see langword="null"/>.</exception>
     public ValidationException(string message, IEnumerable<ValidationError> errors)
         : base(message)
     {
-        Errors = errors.ToList();
+        Errors = Freeze(errors);
+    }
+
+    // Snapshot into an array so Errors is genuinely immutable regardless of which
+    // constructor ran — a live List<T> behind IReadOnlyList can be cast and mutated.
+    private static ValidationError[] Freeze(IEnumerable<ValidationError> errors)
+    {
+        ArgumentNullException.ThrowIfNull(errors);
+        return [.. errors];
     }
 
     private static string BuildMessage(IReadOnlyList<ValidationError> errors)

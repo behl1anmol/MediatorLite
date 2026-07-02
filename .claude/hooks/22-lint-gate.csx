@@ -33,7 +33,19 @@ if (!files.Any(f => f.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)))
 }
 
 Console.WriteLine("[hook:22-lint-gate] dotnet format --verify-no-changes …");
-var (exit, stdout, stderr) = Run("dotnet", "format MediatorLite.sln --verify-no-changes --no-restore --severity warn");
+(int exit, string stdout, string stderr) formatResult;
+try
+{
+    formatResult = Run("dotnet", "format MediatorLite.sln --verify-no-changes --no-restore --severity warn");
+}
+catch (Exception ex)
+{
+    // Fail open, as documented ("if dotnet format is not installed, warns and allows commit").
+    Console.Error.WriteLine($"[hook:22-lint-gate] WARN — could not run dotnet format ({ex.Message}); allowing commit unverified");
+    ContextDb.LogHookEvent("22-lint-gate.csx", "beforeCommit", "warn", sw.ElapsedMilliseconds, new { reason = "dotnet-missing" });
+    return;
+}
+var (exit, stdout, stderr) = formatResult;
 if (exit == 0)
 {
     Console.WriteLine("[hook:22-lint-gate] format OK");
@@ -58,10 +70,13 @@ static (int, string, string) Run(string file, string args)
 {
     var psi = new ProcessStartInfo(file, args) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
     using var p = Process.Start(psi)!;
-    var so = p.StandardOutput.ReadToEnd();
-    var se = p.StandardError.ReadToEnd();
+    // Drain both pipes concurrently: reading stdout to EOF while the child blocks on a
+    // full stderr pipe buffer (or vice versa) deadlocks both processes.
+    var so = p.StandardOutput.ReadToEndAsync();
+    var se = p.StandardError.ReadToEndAsync();
+    System.Threading.Tasks.Task.WaitAll(so, se);
     p.WaitForExit();
-    return (p.ExitCode, so, se);
+    return (p.ExitCode, so.Result, se.Result);
 }
 
 static string? RunCapture(string file, string args)

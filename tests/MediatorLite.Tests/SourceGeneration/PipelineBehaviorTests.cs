@@ -29,7 +29,8 @@ public class PipelineBehaviorTests
         // Act
         var result = await mediator.SendAsync(new ComputeValueQuery(5));
 
-        // Assert - Handler returns 5 * 2 = 10 (behaviors not applied)
+        // Assert - Handler returns 5 * 2 = 10; MultiplyByTwoBehavior (order 2, inner) doubles
+        // it to 20; AddOneBehavior (order 1, outer) adds 1 → 21.
         result.Should().Be(21, "All compile-time discovered behaviors execute successfully with handlers");
     }
 

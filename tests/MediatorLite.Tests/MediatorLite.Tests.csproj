@@ -21,14 +21,17 @@
     <PackageReference Include="NSubstitute" Version="5.1.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.0" />
+    <!-- Drives the generator in-memory (diagnostics + incrementality tests in UnitTests) -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\MediatorLite\MediatorLite.csproj" />
     <!-- FluentValidation integration (FluentValidationBehavior + FluentValidation) -->
     <ProjectReference Include="..\..\src\MediatorLite.FluentValidation\MediatorLite.FluentValidation.csproj" />
-    <!-- Source generator for SourceGeneration tests -->
-    <ProjectReference Include="..\..\src\MediatorLite.SourceGeneration\MediatorLite.SourceGeneration.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <!-- Source generator: analyzer for SourceGeneration tests AND compile reference so
+         UnitTests can construct it for GeneratorDriver-based tests -->
+    <ProjectReference Include="..\..\src\MediatorLite.SourceGeneration\MediatorLite.SourceGeneration.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
   </ItemGroup>
 
 </Project>

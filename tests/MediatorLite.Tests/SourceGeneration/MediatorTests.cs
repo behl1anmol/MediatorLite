@@ -250,4 +250,47 @@ public class MediatorTests
         var result = await mediator.SendAsync(new GetUserByIdQuery(1));
         result.Should().NotBeNull();
     }
+
+    [Fact]
+    public async Task SendAsync_RecordDeclaredHandler_IsDiscoveredAndDispatched()
+    {
+        // Arrange - RecordDeclaredQueryHandler is a `sealed record`, not a class. Records
+        // are a distinct syntax node, and the generator used to silently skip them.
+        var services = new ServiceCollection();
+        services.AddGeneratedHandlers();
+        services.AddMediatorLite();
+        services.AddLogging();
+
+        var provider = services.BuildServiceProvider();
+        var mediator = provider.GetRequiredService<IMediator>();
+
+        // Act
+        var result = await mediator.SendAsync(new RecordHandledQuery(1));
+
+        // Assert
+        result.Should().Be(101, "the record-declared handler adds 100 to the request value");
+    }
+
+    [Fact]
+    public async Task SendAsync_RequestWithMultipleResponseTypes_DispatchesEachResponseToItsHandler()
+    {
+        // Arrange - MultiResponseQuery implements both IRequest<int> and IRequest<string>.
+        // The generator used to collapse the request type to a single dispatch arm, so one
+        // of the two calls below threw InvalidCastException despite a registered handler.
+        var services = new ServiceCollection();
+        services.AddGeneratedHandlers();
+        services.AddMediatorLite();
+        services.AddLogging();
+
+        var provider = services.BuildServiceProvider();
+        var mediator = provider.GetRequiredService<IMediator>();
+
+        // Act
+        var intResult = await mediator.SendAsync<int>(new MultiResponseQuery(5));
+        var stringResult = await mediator.SendAsync<string>(new MultiResponseQuery(5));
+
+        // Assert
+        intResult.Should().Be(50);
+        stringResult.Should().Be("value:5");
+    }
 }

@@ -16,8 +16,10 @@ tests/
       TestTypes.cs        # shared request/notification/handler/behavior fixtures
     UnitTests/            # narrow unit tests that do not spin up the mediator
   MediatorLite.Benchmarks/
-  MediatorLite.RestApiBenchmarks/
 ```
+
+(The former `MediatorLite.RestApiBenchmarks` REST harness has been removed from the
+repository; do not reference it in new tests or docs.)
 
 New source-gen-dependent fixtures go next to `TestTypes.cs`; do not create
 sibling fixture files if a type can live alongside existing ones.

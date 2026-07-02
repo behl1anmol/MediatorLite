@@ -40,6 +40,25 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
+    /// <summary>
+    /// Reported when an open generic pipeline behavior cannot be expanded over the discovered
+    /// request types: expansion substitutes each (request, response) pair for the class's type
+    /// parameters, which is only valid for the canonical
+    /// <c>Behavior&lt;TRequest, TResponse&gt; : IPipelineBehavior&lt;TRequest, TResponse&gt;</c>
+    /// shape with no extra constraints. Emitting anything else would produce generated code
+    /// that fails to compile, so the behavior is skipped and surfaced here instead.
+    /// </summary>
+    private static readonly DiagnosticDescriptor UnsupportedOpenBehaviorShape = new(
+        id: "MEDL1002",
+        title: "Open generic pipeline behavior has an unsupported shape",
+        messageFormat: "Pipeline behavior '{0}' implements an open IPipelineBehavior<,> but does not match "
+            + "the supported shape Behavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse> "
+            + "with no constraints beyond 'where TRequest : IRequest<TResponse>'. The behavior was not "
+            + "registered. Close the behavior over concrete types or remove the extra type parameters/constraints.",
+        category: "MediatorLite.Behaviors",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         // Find all class declarations that might be handlers
@@ -74,19 +93,25 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         var assemblyDefaults = context.CompilationProvider
             .Select(static (compilation, _) => GetAssemblyDefaults(compilation));
 
-        // Combine with compilation
-        var compilationAndData = context.CompilationProvider
-            .Combine(handlerDeclarations.Collect())
+        // Project the only compilation-level fact Execute needs into a stable bool instead of
+        // combining the Compilation itself: a raw Compilation is a new instance on every edit
+        // and would force the output node to rerun on every keystroke.
+        var hasFluentValidationReference = context.CompilationProvider
+            .Select(static (compilation, _) =>
+                compilation.GetTypeByMetadataName("MediatorLite.FluentValidation.FluentValidationBehavior`2") is not null);
+
+        var combinedData = handlerDeclarations.Collect()
             .Combine(notificationDeclarations.Collect())
             .Combine(behaviorDeclarations.Collect())
             .Combine(validatorDeclarations.Collect())
-            .Combine(assemblyDefaults);
+            .Combine(assemblyDefaults)
+            .Combine(hasFluentValidationReference);
 
         // Generate the output
-        context.RegisterSourceOutput(compilationAndData, static (spc, source) =>
+        context.RegisterSourceOutput(combinedData, static (spc, source) =>
         {
-            var (((((compilation, handlers), notifications), behaviors), validators), defaults) = source;
-            Execute(spc, compilation, handlers!, notifications!, behaviors!, validators!, defaults);
+            var (((((handlers, notifications), behaviors), validators), defaults), hasFluentValidation) = source;
+            Execute(spc, handlers!, notifications!, behaviors!, validators!, defaults, hasFluentValidation);
         });
     }
 
@@ -145,9 +170,12 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
 
     private static bool IsHandlerCandidate(SyntaxNode node)
     {
-        return node is ClassDeclarationSyntax classDecl
-               && classDecl.BaseList is not null
-               && !classDecl.Modifiers.Any(SyntaxKind.AbstractKeyword);
+        // Classes and (reference-type) records alike can implement handler interfaces;
+        // record structs are excluded because DI implementation types must be classes.
+        return node is (ClassDeclarationSyntax or RecordDeclarationSyntax) and TypeDeclarationSyntax typeDecl
+               && !node.IsKind(SyntaxKind.RecordStructDeclaration)
+               && typeDecl.BaseList is not null
+               && !typeDecl.Modifiers.Any(SyntaxKind.AbstractKeyword);
     }
 
     private static bool IsNotificationCandidate(SyntaxNode node)
@@ -200,20 +228,15 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             ErrorStrategy: errorStrategy);
     }
 
-    private static bool IsBehaviorCandidate(SyntaxNode node)
-    {
-        return node is ClassDeclarationSyntax classDecl
-               && classDecl.BaseList is not null
-               && !classDecl.Modifiers.Any(SyntaxKind.AbstractKeyword);
-    }
+    private static bool IsBehaviorCandidate(SyntaxNode node) => IsHandlerCandidate(node);
 
     private static BehaviorInfo? GetBehaviorInfo(GeneratorSyntaxContext context, CancellationToken ct)
     {
-        var classDecl = (ClassDeclarationSyntax)context.Node;
+        var typeDecl = (TypeDeclarationSyntax)context.Node;
         var semanticModel = context.SemanticModel;
-        var classSymbol = semanticModel.GetDeclaredSymbol(classDecl, ct) as INamedTypeSymbol;
+        var classSymbol = semanticModel.GetDeclaredSymbol(typeDecl, ct) as INamedTypeSymbol;
 
-        if (classSymbol is null || classSymbol.IsAbstract)
+        if (classSymbol is null || classSymbol.IsAbstract || !classSymbol.IsReferenceType)
             return null;
 
         var hasSkipAttribute = classSymbol.GetAttributes()
@@ -226,6 +249,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         var behaviorInterfaces = new List<BehaviorInterfaceInfo>();
         bool isOpenGeneric = classSymbol.IsGenericType && classSymbol.IsUnboundGenericType == false
                              && classSymbol.TypeParameters.Length > 0;
+        bool hasUnsupportedOpenShape = false;
 
         foreach (var iface in classSymbol.AllInterfaces)
         {
@@ -241,6 +265,19 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 {
                     bool isInterfaceOpen = typeArgs.Any(t => t.TypeKind == TypeKind.TypeParameter);
 
+                    // Open interfaces are expanded by substituting each discovered
+                    // (request, response) pair for the class's type parameters. That is only
+                    // valid for the canonical shape Behavior<TRequest, TResponse> with no
+                    // constraints beyond `where TRequest : IRequest<TResponse>` — anything
+                    // else would emit closed types that do not compile (wrong arity, swapped
+                    // parameters, or unsatisfied constraints). Such behaviors are skipped and
+                    // surfaced via MEDL1002 instead.
+                    if (isInterfaceOpen && !IsSupportedOpenShape(classSymbol, iface))
+                    {
+                        hasUnsupportedOpenShape = true;
+                        continue;
+                    }
+
                     behaviorInterfaces.Add(new BehaviorInterfaceInfo(
                         InterfaceType: iface.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                         RequestType: isInterfaceOpen ? null : typeArgs[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
@@ -250,7 +287,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             }
         }
 
-        if (behaviorInterfaces.Count == 0)
+        if (behaviorInterfaces.Count == 0 && !hasUnsupportedOpenShape)
             return null;
 
         // Extract BehaviorOrderAttribute if present
@@ -265,25 +302,67 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         return new BehaviorInfo(
             ClassName: classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             Namespace: classSymbol.ContainingNamespace?.ToDisplayString() ?? "",
-            BehaviorInterfaces: behaviorInterfaces,
+            BehaviorInterfaces: new EquatableArray<BehaviorInterfaceInfo>(behaviorInterfaces.ToArray()),
             IsOpenGeneric: isOpenGeneric,
-            Order: behaviorOrder);
+            Order: behaviorOrder,
+            HasUnsupportedOpenShape: hasUnsupportedOpenShape);
     }
 
-    private static bool IsValidatorCandidate(SyntaxNode node)
+    /// <summary>
+    /// A behavior's open <c>IPipelineBehavior&lt;,&gt;</c> interface can be expanded over all
+    /// discovered request/response pairs only when the class has exactly two type parameters
+    /// used directly, in order, as the interface's type arguments, and the parameters carry no
+    /// constraints beyond the interface-mandated <c>where TRequest : IRequest&lt;TResponse&gt;</c>.
+    /// </summary>
+    private static bool IsSupportedOpenShape(INamedTypeSymbol classSymbol, INamedTypeSymbol iface)
     {
-        return node is ClassDeclarationSyntax classDecl
-               && classDecl.BaseList is not null
-               && !classDecl.Modifiers.Any(SyntaxKind.AbstractKeyword);
+        if (classSymbol.TypeParameters.Length != 2)
+            return false;
+
+        var requestParam = classSymbol.TypeParameters[0];
+        var responseParam = classSymbol.TypeParameters[1];
+
+        if (!SymbolEqualityComparer.Default.Equals(iface.TypeArguments[0], requestParam)
+            || !SymbolEqualityComparer.Default.Equals(iface.TypeArguments[1], responseParam))
+        {
+            return false;
+        }
+
+        if (HasSpecialConstraints(requestParam) || HasSpecialConstraints(responseParam)
+            || responseParam.ConstraintTypes.Length > 0)
+        {
+            return false;
+        }
+
+        foreach (var constraint in requestParam.ConstraintTypes)
+        {
+            var isRequestConstraint = constraint is INamedTypeSymbol { TypeArguments.Length: 1 } named
+                && named.OriginalDefinition.ToDisplayString() == "MediatorLite.IRequest<TResponse>"
+                && SymbolEqualityComparer.Default.Equals(named.TypeArguments[0], responseParam);
+
+            if (!isRequestConstraint)
+                return false;
+        }
+
+        return true;
+
+        static bool HasSpecialConstraints(ITypeParameterSymbol parameter)
+            => parameter.HasReferenceTypeConstraint
+               || parameter.HasValueTypeConstraint
+               || parameter.HasNotNullConstraint
+               || parameter.HasUnmanagedTypeConstraint
+               || parameter.HasConstructorConstraint;
     }
+
+    private static bool IsValidatorCandidate(SyntaxNode node) => IsHandlerCandidate(node);
 
     private static ValidatorInfo? GetValidatorInfo(GeneratorSyntaxContext context, CancellationToken ct)
     {
-        var classDecl = (ClassDeclarationSyntax)context.Node;
+        var typeDecl = (TypeDeclarationSyntax)context.Node;
         var semanticModel = context.SemanticModel;
-        var classSymbol = semanticModel.GetDeclaredSymbol(classDecl, ct) as INamedTypeSymbol;
+        var classSymbol = semanticModel.GetDeclaredSymbol(typeDecl, ct) as INamedTypeSymbol;
 
-        if (classSymbol is null || classSymbol.IsAbstract)
+        if (classSymbol is null || classSymbol.IsAbstract || !classSymbol.IsReferenceType)
             return null;
 
         // Skip open generic validators (e.g., a user's own generic AbstractValidator<T>)
@@ -334,7 +413,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
     /// Used to order switch arms most-derived-first so type-pattern dispatch preserves
     /// runtime-type specificity when message types inherit from each other.
     /// </summary>
-    private static List<string> GetBaseTypeNames(ITypeSymbol type)
+    private static EquatableArray<string> GetBaseTypeNames(ITypeSymbol type)
     {
         var result = new List<string>();
         var current = type.BaseType;
@@ -343,7 +422,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             result.Add(current.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
             current = current.BaseType;
         }
-        return result;
+        return new EquatableArray<string>(result.ToArray());
     }
 
     /// <summary>
@@ -356,12 +435,12 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
     private static List<T> SortMostDerivedFirst<T>(
         List<T> items,
         Func<T, string> typeName,
-        Func<T, List<string>?> baseTypes)
+        Func<T, EquatableArray<string>> baseTypes)
     {
         var dispatchedTypes = new HashSet<string>(items.Select(typeName));
         return items
             .Select((item, index) => (Item: item, Index: index,
-                Depth: baseTypes(item)?.Count(dispatchedTypes.Contains) ?? 0))
+                Depth: baseTypes(item).Count(dispatchedTypes.Contains)))
             .OrderByDescending(x => x.Depth)
             .ThenBy(x => x.Index)
             .Select(x => x.Item)
@@ -370,11 +449,11 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
 
     private static HandlerInfo? GetHandlerInfo(GeneratorSyntaxContext context, CancellationToken ct)
     {
-        var classDecl = (ClassDeclarationSyntax)context.Node;
+        var typeDecl = (TypeDeclarationSyntax)context.Node;
         var semanticModel = context.SemanticModel;
-        var classSymbol = semanticModel.GetDeclaredSymbol(classDecl, ct) as INamedTypeSymbol;
+        var classSymbol = semanticModel.GetDeclaredSymbol(typeDecl, ct) as INamedTypeSymbol;
 
-        if (classSymbol is null || classSymbol.IsAbstract)
+        if (classSymbol is null || classSymbol.IsAbstract || !classSymbol.IsReferenceType)
             return null;
 
         var hasSkipAttribute = classSymbol.GetAttributes()
@@ -434,23 +513,33 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         return new HandlerInfo(
             ClassName: classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             Namespace: classSymbol.ContainingNamespace?.ToDisplayString() ?? "",
-            RequestHandlers: requestHandlerInterfaces,
-            NotificationHandlers: notificationHandlerInterfaces);
+            RequestHandlers: new EquatableArray<HandlerInterfaceInfo>(requestHandlerInterfaces.ToArray()),
+            NotificationHandlers: new EquatableArray<NotificationHandlerInterfaceInfo>(notificationHandlerInterfaces.ToArray()));
     }
 
     private static void Execute(
         SourceProductionContext context,
-        Compilation compilation,
         ImmutableArray<HandlerInfo?> handlers,
         ImmutableArray<NotificationTypeInfo?> notifications,
         ImmutableArray<BehaviorInfo?> behaviors,
         ImmutableArray<ValidatorInfo?> validators,
-        AssemblyDefaults assemblyDefaults)
+        AssemblyDefaults assemblyDefaults,
+        bool hasFluentValidationReference)
     {
-        var validHandlers = handlers.Where(h => h is not null).Cast<HandlerInfo>().ToList();
-        var validNotifications = notifications.Where(n => n is not null).Cast<NotificationTypeInfo>().ToList();
-        var validBehaviors = behaviors.Where(b => b is not null).Cast<BehaviorInfo>().ToList();
-        var validValidators = validators.Where(v => v is not null).Cast<ValidatorInfo>().ToList();
+        // Dedupe by fully-qualified name: the syntax providers run the transform once per
+        // declaration node, so a partial type whose declarations each carry a base list is
+        // discovered once per declaration. Without this, a partial notification handler would
+        // be registered — and invoked — once per part.
+        var validHandlers = DistinctByName(handlers, h => h.ClassName);
+        var validNotifications = DistinctByName(notifications, n => n.TypeName);
+        var validBehaviors = DistinctByName(behaviors, b => b.ClassName);
+        var validValidators = DistinctByName(validators, v => v.ClassName);
+
+        foreach (var behavior in validBehaviors.Where(b => b.HasUnsupportedOpenShape))
+        {
+            context.ReportDiagnostic(Diagnostic.Create(
+                UnsupportedOpenBehaviorShape, Location.None, StripGlobalPrefix(behavior.ClassName)));
+        }
 
         if (validHandlers.Count == 0)
         {
@@ -471,7 +560,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         // the developer sees exactly one actionable error rather than a cascade of missing-type
         // errors. MEDL1001 is error-severity, so validation can never silently fail to run.
         if (requestTypesWithValidation.Count > 0
-            && compilation.GetTypeByMetadataName("MediatorLite.FluentValidation.FluentValidationBehavior`2") is null)
+            && !hasFluentValidationReference)
         {
             context.ReportDiagnostic(Diagnostic.Create(MissingFluentValidationPackage, Location.None));
             requestTypesWithValidation = new List<(string RequestType, string ResponseType)>();
@@ -489,6 +578,26 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
 
         GenerateRegistrationCode(context, validHandlers, expandedBehaviors, validValidators, requestTypesWithValidation);
         GenerateSourceGeneratedMediator(context, validHandlers, validNotifications, validBehaviors, expandedBehaviors, assemblyDefaults);
+    }
+
+    /// <summary>
+    /// Filters out nulls and keeps the first occurrence per fully-qualified name.
+    /// See the call site in <see cref="Execute"/> for why duplicates can occur (partial types).
+    /// </summary>
+    private static List<T> DistinctByName<T>(ImmutableArray<T?> items, Func<T, string> name)
+        where T : class
+    {
+        var seen = new HashSet<string>();
+        var result = new List<T>();
+        foreach (var item in items)
+        {
+            if (item is not null && seen.Add(name(item)))
+            {
+                result.Add(item);
+            }
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -880,17 +989,22 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             g => g.NotificationType,
             g => g.Handlers[0].Interface.BaseTypes);
 
-        // One dispatch entry (switch arm + Send_* method) per request type. Duplicate handler
-        // registrations for the same request type collapse to a single entry — resolution via
-        // IRequestHandler<,> picks the last DI registration, matching previous behavior.
-        var dispatchEntries = requestHandlers
+        // One switch arm per request type. Duplicate handlers for the same (request, response)
+        // pair collapse to a single entry — resolution via IRequestHandler<,> picks the last DI
+        // registration, matching previous behavior. A request type may implement IRequest<T>
+        // for several T (each with its own handler); every distinct response type keeps its own
+        // fully-typed Send_* pipeline inside the shared arm, selected by the TResponse guard.
+        var dispatchGroups = requestHandlers
             .GroupBy(rh => rh.Interface.RequestType)
-            .Select(g => g.First())
+            .Select(g => (
+                RequestType: g.Key,
+                BaseTypes: g.First().Interface.BaseTypes,
+                Entries: g.GroupBy(x => x.Interface.ResponseType).Select(rg => rg.First()).ToList()))
             .ToList();
-        dispatchEntries = SortMostDerivedFirst(
-            dispatchEntries,
-            rh => rh.Interface.RequestType,
-            rh => rh.Interface.BaseTypes);
+        dispatchGroups = SortMostDerivedFirst(
+            dispatchGroups,
+            g => g.RequestType,
+            g => g.BaseTypes);
 
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated />");
@@ -931,20 +1045,53 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("        {");
         sb.AppendLine("            switch (request)");
         sb.AppendLine("            {");
-        foreach (var (handler, iface) in dispatchEntries)
+        foreach (var group in dispatchGroups)
         {
-            var safeName = GetSafeTypeName(iface.RequestType);
-            sb.AppendLine($"                case {iface.RequestType} r_{safeName}:");
+            var safeName = GetSafeTypeName(group.RequestType);
+            sb.AppendLine($"                case {group.RequestType} r_{safeName}:");
             sb.AppendLine("                {");
-            sb.AppendLine($"                    var vt = Send_{safeName}(r_{safeName}, cancellationToken);");
-            sb.AppendLine($"                    if (typeof(TResponse) == typeof({iface.ResponseType}))");
-            sb.AppendLine("                    {");
-            sb.AppendLine("                        // SAFETY: guarded by the exact type-equality check above, this is an");
-            sb.AppendLine("                        // identity reinterpret (ValueTask<T> as ValueTask<T>). The guard is");
-            sb.AppendLine("                        // JIT-folded to a constant, so the cast itself is free.");
-            sb.AppendLine($"                        return Unsafe.As<ValueTask<{iface.ResponseType}>, ValueTask<TResponse>>(ref vt);");
-            sb.AppendLine("                    }");
-            sb.AppendLine($"                    return SlowCast<{iface.ResponseType}, TResponse>(vt);");
+
+            if (group.Entries.Count == 1)
+            {
+                var iface = group.Entries[0].Interface;
+                sb.AppendLine($"                    var vt = Send_{safeName}(r_{safeName}, cancellationToken);");
+                sb.AppendLine($"                    if (typeof(TResponse) == typeof({iface.ResponseType}))");
+                sb.AppendLine("                    {");
+                sb.AppendLine("                        // SAFETY: guarded by the exact type-equality check above, this is an");
+                sb.AppendLine("                        // identity reinterpret (ValueTask<T> as ValueTask<T>). The guard is");
+                sb.AppendLine("                        // JIT-folded to a constant, so the cast itself is free.");
+                sb.AppendLine($"                        return Unsafe.As<ValueTask<{iface.ResponseType}>, ValueTask<TResponse>>(ref vt);");
+                sb.AppendLine("                    }");
+                sb.AppendLine($"                    return SlowCast<{iface.ResponseType}, TResponse>(vt);");
+            }
+            else
+            {
+                foreach (var (_, iface) in group.Entries)
+                {
+                    var sendName = $"Send_{safeName}_{GetSafeTypeName(iface.ResponseType!)}";
+                    sb.AppendLine($"                    if (typeof(TResponse) == typeof({iface.ResponseType}))");
+                    sb.AppendLine("                    {");
+                    sb.AppendLine("                        // SAFETY: identity reinterpret guarded by the exact type-equality check.");
+                    sb.AppendLine($"                        var vt = {sendName}(r_{safeName}, cancellationToken);");
+                    sb.AppendLine($"                        return Unsafe.As<ValueTask<{iface.ResponseType}>, ValueTask<TResponse>>(ref vt);");
+                    sb.AppendLine("                    }");
+                }
+
+                sb.AppendLine("                    // Covariant dispatch (IRequest<out T>): pick the pipeline whose concrete");
+                sb.AppendLine("                    // response type is assignable to the requested TResponse.");
+                foreach (var (_, iface) in group.Entries)
+                {
+                    var sendName = $"Send_{safeName}_{GetSafeTypeName(iface.ResponseType!)}";
+                    sb.AppendLine($"                    if (typeof({iface.ResponseType}).IsAssignableTo(typeof(TResponse)))");
+                    sb.AppendLine("                    {");
+                    sb.AppendLine($"                        return SlowCast<{iface.ResponseType}, TResponse>({sendName}(r_{safeName}, cancellationToken));");
+                    sb.AppendLine("                    }");
+                }
+
+                sb.AppendLine("                    throw new InvalidOperationException(");
+                sb.AppendLine($"                        $\"Request type {StripGlobalPrefix(group.RequestType)} has no handler producing response type {{typeof(TResponse).FullName}}.\");");
+            }
+
             sb.AppendLine("                }");
         }
         sb.AppendLine("                case null:");
@@ -992,26 +1139,35 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine("        // ═══════════════════════════════════════════════════════════════════════════════");
         sb.AppendLine();
 
-        foreach (var (handler, iface) in dispatchEntries)
+        foreach (var group in dispatchGroups)
         {
-            var safeName = GetSafeTypeName(iface.RequestType);
-            var requestType = iface.RequestType;
-            var responseType = iface.ResponseType!;
+            var multipleResponses = group.Entries.Count > 1;
+            foreach (var (_, iface) in group.Entries)
+            {
+                var requestType = iface.RequestType;
+                var responseType = iface.ResponseType!;
 
-            // Get behaviors for this request type, sorted by order
-            var key = (requestType, responseType);
-            var behaviorsForRequest = behaviorsByRequest.ContainsKey(key)
-                ? behaviorsByRequest[key]
-                : new List<ExpandedBehaviorInfo>();
+                // Multi-response request types get one Send_* method per response type; the
+                // name must stay in sync with the switch-arm emission above.
+                var safeName = multipleResponses
+                    ? $"{GetSafeTypeName(requestType)}_{GetSafeTypeName(responseType)}"
+                    : GetSafeTypeName(requestType);
 
-            GenerateUnrolledPipeline(
-                sb,
-                safeName,
-                requestType,
-                responseType,
-                behaviorsForRequest,
-                loggingEnabled: !assemblyDefaults.LoggingDisabled,
-                tracingEnabled: !assemblyDefaults.TracingDisabled);
+                // Get behaviors for this request type, sorted by order
+                var key = (requestType, responseType);
+                var behaviorsForRequest = behaviorsByRequest.ContainsKey(key)
+                    ? behaviorsByRequest[key]
+                    : new List<ExpandedBehaviorInfo>();
+
+                GenerateUnrolledPipeline(
+                    sb,
+                    safeName,
+                    requestType,
+                    responseType,
+                    behaviorsForRequest,
+                    loggingEnabled: !assemblyDefaults.LoggingDisabled,
+                    tracingEnabled: !assemblyDefaults.TracingDisabled);
+            }
         }
 
         // === UNROLLED NOTIFICATION PUBLISHERS ===
@@ -1074,7 +1230,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         // name by taking the substring after the last '.'.
         var fullRequest = StripGlobalPrefix(requestType);
         var fullResponse = StripGlobalPrefix(responseType);
-        var simpleRequest = requestType.Substring(requestType.LastIndexOf('.') + 1);
+        var simpleRequest = GetSimpleDisplayName(requestType);
 
         // The nested behavior/handler invocation chain, built outside-in. With no behaviors
         // this is just the handler call.
@@ -1187,7 +1343,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         bool tracingEnabled)
     {
         var fullNotification = StripGlobalPrefix(notificationType);
-        var simpleNotification = notificationType.Substring(notificationType.LastIndexOf('.') + 1);
+        var simpleNotification = GetSimpleDisplayName(notificationType);
 
         void EmitStrategyBody()
         {
@@ -1202,7 +1358,13 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             }
             else if (executionStrategy == 2) // StopOnFirst
             {
-                GenerateStopOnFirstNotificationExecution(sb, notificationType, handlers, errorStrategy);
+                // StopOnFirst returns from inside the strategy body on the first successful
+                // handler, bypassing the wrapper's post-body success log — so the success log
+                // statement is passed in and emitted before each early return instead.
+                var successLogStatement = loggingEnabled
+                    ? $"__logger.LogDebug(\"Notification {{NotificationType}} published successfully\", \"{simpleNotification}\");"
+                    : null;
+                GenerateStopOnFirstNotificationExecution(sb, notificationType, handlers, errorStrategy, successLogStatement);
             }
             else // Sequential (default)
             {
@@ -1366,6 +1528,15 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             sb.AppendLine("            {");
             sb.AppendLine("                // Prioritize cancellation - rethrow OperationCanceledException directly");
             sb.AppendLine("                ct.ThrowIfCancellationRequested();");
+            sb.AppendLine("                // Match sequential semantics: a handler's OperationCanceledException");
+            sb.AppendLine("                // surfaces unwrapped (first in start order), never inside an AggregateException.");
+            sb.AppendLine("                foreach (var __candidate in exceptions)");
+            sb.AppendLine("                {");
+            sb.AppendLine("                    if (__candidate is OperationCanceledException)");
+            sb.AppendLine("                    {");
+            sb.AppendLine("                        global::System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(__candidate).Throw();");
+            sb.AppendLine("                    }");
+            sb.AppendLine("                }");
             sb.AppendLine("                // For handler failures, throw an AggregateException with all exceptions");
             sb.AppendLine("                throw new AggregateException(exceptions);");
             sb.AppendLine("            }");
@@ -1390,7 +1561,8 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         StringBuilder sb,
         string notificationType,
         List<(HandlerInfo Handler, NotificationHandlerInterfaceInfo Interface)> handlers,
-        int errorStrategy)
+        int errorStrategy,
+        string? successLogStatement = null)
     {
         if (errorStrategy == 0) // StopOnFirstError
         {
@@ -1422,6 +1594,10 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 sb.AppendLine("            {");
                 sb.AppendLine("                ct.ThrowIfCancellationRequested();");
                 sb.AppendLine($"                await h{i + 1}.HandleAsync(notification, ct).ConfigureAwait(false);");
+                if (successLogStatement is not null)
+                {
+                    sb.AppendLine($"                {successLogStatement}");
+                }
                 sb.AppendLine("                return; // Success — stop here");
                 sb.AppendLine("            }");
                 sb.AppendLine("            catch (OperationCanceledException) { throw; }");
@@ -1462,25 +1638,43 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         const string prefix = "global::";
         return typeName.StartsWith(prefix) ? typeName.Substring(prefix.Length) : typeName;
     }
+
+    /// <summary>
+    /// Computes the simple display name of a fully-qualified type for log messages and
+    /// activity names. The namespace is stripped from the type itself, not from inside its
+    /// type arguments: a plain <c>LastIndexOf('.')</c> on a generic like
+    /// <c>Ns.Query&lt;System.String&gt;</c> would land inside the argument and yield "String&gt;".
+    /// </summary>
+    private static string GetSimpleDisplayName(string typeName)
+    {
+        var name = typeName.Replace("global::", "");
+        var genericStart = name.IndexOf('<');
+        var searchEnd = (genericStart >= 0 ? genericStart : name.Length) - 1;
+        var lastDot = searchEnd >= 0 ? name.LastIndexOf('.', searchEnd) : -1;
+        return lastDot >= 0 ? name.Substring(lastDot + 1) : name;
+    }
 }
+
+// Pipeline model records. All collection members use EquatableArray<T> (value equality):
+// List<T> members would compare by reference and permanently defeat incremental caching.
 
 internal sealed record HandlerInfo(
     string ClassName,
     string Namespace,
-    List<HandlerInterfaceInfo> RequestHandlers,
-    List<NotificationHandlerInterfaceInfo> NotificationHandlers);
+    EquatableArray<HandlerInterfaceInfo> RequestHandlers,
+    EquatableArray<NotificationHandlerInterfaceInfo> NotificationHandlers);
 
 internal sealed record HandlerInterfaceInfo(
     string InterfaceType,
     string RequestType,
     string? ResponseType,
-    List<string>? BaseTypes = null);
+    EquatableArray<string> BaseTypes = default);
 
 internal sealed record NotificationHandlerInterfaceInfo(
     string InterfaceType,
     string NotificationType,
     int? Order,
-    List<string>? BaseTypes = null);
+    EquatableArray<string> BaseTypes = default);
 
 internal sealed record NotificationTypeInfo(
     string TypeName,
@@ -1496,9 +1690,10 @@ internal readonly record struct AssemblyDefaults(
 internal sealed record BehaviorInfo(
     string ClassName,
     string Namespace,
-    List<BehaviorInterfaceInfo> BehaviorInterfaces,
+    EquatableArray<BehaviorInterfaceInfo> BehaviorInterfaces,
     bool IsOpenGeneric,
-    int Order = 0);
+    int Order = 0,
+    bool HasUnsupportedOpenShape = false);
 
 internal sealed record BehaviorInterfaceInfo(
     string InterfaceType,
