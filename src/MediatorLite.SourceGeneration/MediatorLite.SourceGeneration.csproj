@@ -24,6 +24,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Lets the test project exercise internal helpers (e.g. EquatableArray<T>) directly. -->
+    <InternalsVisibleTo Include="MediatorLite.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Analyzer release tracking for declared diagnostics (RS2008). -->
     <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
     <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />

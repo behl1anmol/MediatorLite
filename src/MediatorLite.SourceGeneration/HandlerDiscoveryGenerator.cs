@@ -1616,17 +1616,23 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// Converts a fully qualified type name to a safe C# identifier.
+    /// Converts a fully qualified type name to a safe C# identifier fragment.
+    /// Every character that is not a letter, digit, or underscore is mapped to '_' so the
+    /// result is always a valid identifier fragment — a whitelist of a few punctuation
+    /// characters is not enough once response type names reach the method name (e.g. an
+    /// array response <c>int[]</c> or a tuple <c>(int, string)</c> carries '[', ']', '(', ')').
+    /// Callers always prefix the result (Send_, Publish_, r_, n_), so a leading digit is fine.
     /// </summary>
     private static string GetSafeTypeName(string typeName)
     {
-        return typeName
-            .Replace("global::", "")
-            .Replace(".", "_")
-            .Replace("<", "_")
-            .Replace(">", "_")
-            .Replace(",", "_")
-            .Replace(" ", "");
+        var cleaned = typeName.Replace("global::", "");
+        var sb = new StringBuilder(cleaned.Length);
+        foreach (var c in cleaned)
+        {
+            sb.Append(char.IsLetterOrDigit(c) || c == '_' ? c : '_');
+        }
+
+        return sb.ToString();
     }
 
     /// <summary>

@@ -640,6 +640,29 @@ public sealed class MultiResponseStringHandler : IRequestHandler<MultiResponseQu
     }
 }
 
+// ── PR #22 P2: multi-response request whose response type name has non-identifier chars ──
+// int[] renders as "int[]"; the response suffix reaches the generated Send_* method name,
+// so unsanitized brackets would emit an invalid identifier and fail this project's build.
+// The fixture existing and compiling is the regression guard.
+
+public record ArrayItemsQuery(int Count) : IRequest<int[]>, IRequest<string>;
+
+public sealed class ArrayItemsIntArrayHandler : IRequestHandler<ArrayItemsQuery, int[]>
+{
+    public ValueTask<int[]> HandleAsync(ArrayItemsQuery request, CancellationToken cancellationToken = default)
+    {
+        return ValueTask.FromResult(Enumerable.Range(0, request.Count).ToArray());
+    }
+}
+
+public sealed class ArrayItemsStringHandler : IRequestHandler<ArrayItemsQuery, string>
+{
+    public ValueTask<string> HandleAsync(ArrayItemsQuery request, CancellationToken cancellationToken = default)
+    {
+        return ValueTask.FromResult($"count:{request.Count}");
+    }
+}
+
 #endregion
 
 #region Parallel Cancellation Fixtures (F8)
