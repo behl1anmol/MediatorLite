@@ -42,7 +42,7 @@ public class EquatableArrayTests
     }
 
     [Fact]
-    public void Equals_DefaultAndEmpty_AreEqualAndZeroCount()
+    public void Equals_DefaultAndEmpty_AreEqualWithMatchingHashAndZeroCount()
     {
         EquatableArray<int> def = default;
         var empty = new EquatableArray<int>([]);
@@ -51,6 +51,8 @@ public class EquatableArrayTests
         empty.Count.Should().Be(0);
         def.Equals(empty).Should().BeTrue();
         def.Equals(default).Should().BeTrue();
+        // Equal values MUST hash equally, or hash-based caches miss them.
+        def.GetHashCode().Should().Be(empty.GetHashCode());
     }
 
     [Fact]

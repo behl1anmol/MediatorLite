@@ -62,17 +62,20 @@ internal readonly struct EquatableArray<T> : IEquatable<EquatableArray<T>>, IEnu
 
     public override int GetHashCode()
     {
-        if (_items is null)
-        {
-            return 0;
-        }
-
+        // A default (null-backed) instance and an explicitly empty array compare equal via
+        // Equals, so they must hash identically. Do not early-return a different constant for
+        // null: fall through to the same seed the empty-loop produces, or hash-based caches
+        // (and record hashing) can miss equal values — defeating the incremental caching this
+        // type exists to support.
         unchecked
         {
             var hash = 17;
-            foreach (var item in _items)
+            if (_items is not null)
             {
-                hash = (hash * 31) + (item?.GetHashCode() ?? 0);
+                foreach (var item in _items)
+                {
+                    hash = (hash * 31) + (item?.GetHashCode() ?? 0);
+                }
             }
 
             return hash;
