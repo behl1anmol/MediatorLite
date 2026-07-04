@@ -8,9 +8,8 @@
 // Slow-path: `dotnet build MediatorLite.sln -c Release --nologo -v q`.
 //
 // Exit semantics:
-//   0   build succeeded (or skipped)
-//   1   build failed — commit blocked
-//   2   dotnet SDK not found — warns but allows commit
+//   0   build succeeded (or skipped, or dotnet SDK not found — warned, commit allowed)
+//   1+  build failed — commit blocked
 
 #load "../lib/ContextDb.csx"
 
@@ -38,7 +37,20 @@ if (!codeTouched)
 }
 
 Console.WriteLine("[hook:21-build-gate] dotnet build MediatorLite.sln -c Release …");
-var (exit, stdout, stderr) = Run("dotnet", "build MediatorLite.sln -c Release --nologo -v q");
+(int exit, string stdout, string stderr) buildResult;
+try
+{
+    buildResult = Run("dotnet", "build MediatorLite.sln -c Release --nologo -v q");
+}
+catch (Exception ex)
+{
+    // Fail open, as documented: a machine without the SDK cannot verify the build, which
+    // is not the same as the build failing. Crashing here used to hard-block the commit.
+    Console.Error.WriteLine($"[hook:21-build-gate] WARN — could not run dotnet ({ex.Message}); allowing commit unverified");
+    ContextDb.LogHookEvent("21-build-gate.csx", "beforeCommit", "warn", sw.ElapsedMilliseconds, new { reason = "dotnet-missing" });
+    return;
+}
+var (exit, stdout, stderr) = buildResult;
 if (exit == 0)
 {
     Console.WriteLine("[hook:21-build-gate] build OK");
@@ -62,10 +74,13 @@ static (int, string, string) Run(string file, string args)
 {
     var psi = new ProcessStartInfo(file, args) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
     using var p = Process.Start(psi)!;
-    var so = p.StandardOutput.ReadToEnd();
-    var se = p.StandardError.ReadToEnd();
+    // Drain both pipes concurrently: reading stdout to EOF while the child blocks on a
+    // full stderr pipe buffer (or vice versa) deadlocks both processes.
+    var so = p.StandardOutput.ReadToEndAsync();
+    var se = p.StandardError.ReadToEndAsync();
+    System.Threading.Tasks.Task.WaitAll(so, se);
     p.WaitForExit();
-    return (p.ExitCode, so, se);
+    return (p.ExitCode, so.Result, se.Result);
 }
 
 static string? RunCapture(string file, string args)

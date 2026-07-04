@@ -573,3 +573,126 @@ public sealed class ParallelPhaseHandler2 : INotificationHandler<ParallelPhaseEv
 }
 
 #endregion
+
+#region Bug-Hunt Regression Fixtures
+
+// ── F9: genuine zero-handler notification ────────────────────────────────────────────
+// No INotificationHandler<OrphanEvent> exists anywhere in this assembly; publishing it
+// must hit the generated `default: return default;` arm and complete silently.
+
+public record OrphanEvent(string Message) : INotification;
+
+// ── F2: record handler discovery ─────────────────────────────────────────────────────
+// Handlers declared as records compile like classes but are a different syntax node;
+// the generator used to silently skip them.
+
+public record RecordHandledQuery(int Value) : IRequest<int>;
+
+public sealed record RecordDeclaredQueryHandler : IRequestHandler<RecordHandledQuery, int>
+{
+    public ValueTask<int> HandleAsync(RecordHandledQuery request, CancellationToken cancellationToken = default)
+    {
+        return ValueTask.FromResult(request.Value + 100);
+    }
+}
+
+// ── F1: partial handler declared across two parts, each with a base list ─────────────
+// The generator's syntax provider visits every declaration node; without deduplication
+// the handler was registered — and invoked — once per part.
+
+public interface IPartialHandlerMarker;
+
+public partial class PartialDeclaredEventHandler : INotificationHandler<PartialHandledEvent>
+{
+    public static int CallCount { get; private set; }
+    public static void Reset() => CallCount = 0;
+
+    public ValueTask HandleAsync(PartialHandledEvent notification, CancellationToken cancellationToken = default)
+    {
+        CallCount++;
+        return ValueTask.CompletedTask;
+    }
+}
+
+public partial class PartialDeclaredEventHandler : IPartialHandlerMarker;
+
+public record PartialHandledEvent(string Message) : INotification;
+
+// ── F3: one request type dispatched with two distinct response types ─────────────────
+// MultiResponseQuery is handled both as IRequest<int> and as IRequest<string>; each
+// response type must reach its own handler through the shared switch arm.
+
+public record MultiResponseQuery(int Value) : IRequest<int>, IRequest<string>;
+
+public sealed class MultiResponseIntHandler : IRequestHandler<MultiResponseQuery, int>
+{
+    public ValueTask<int> HandleAsync(MultiResponseQuery request, CancellationToken cancellationToken = default)
+    {
+        return ValueTask.FromResult(request.Value * 10);
+    }
+}
+
+public sealed class MultiResponseStringHandler : IRequestHandler<MultiResponseQuery, string>
+{
+    public ValueTask<string> HandleAsync(MultiResponseQuery request, CancellationToken cancellationToken = default)
+    {
+        return ValueTask.FromResult($"value:{request.Value}");
+    }
+}
+
+// ── PR #22 P2: multi-response request whose response type name has non-identifier chars ──
+// int[] renders as "int[]"; the response suffix reaches the generated Send_* method name,
+// so unsanitized brackets would emit an invalid identifier and fail this project's build.
+// The fixture existing and compiling is the regression guard.
+
+public record ArrayItemsQuery(int Count) : IRequest<int[]>, IRequest<string>;
+
+public sealed class ArrayItemsIntArrayHandler : IRequestHandler<ArrayItemsQuery, int[]>
+{
+    public ValueTask<int[]> HandleAsync(ArrayItemsQuery request, CancellationToken cancellationToken = default)
+    {
+        return ValueTask.FromResult(Enumerable.Range(0, request.Count).ToArray());
+    }
+}
+
+public sealed class ArrayItemsStringHandler : IRequestHandler<ArrayItemsQuery, string>
+{
+    public ValueTask<string> HandleAsync(ArrayItemsQuery request, CancellationToken cancellationToken = default)
+    {
+        return ValueTask.FromResult($"count:{request.Count}");
+    }
+}
+
+#endregion
+
+#region Parallel Cancellation Fixtures (F8)
+
+// Parallel + ContinueAndAggregate must surface a handler's OperationCanceledException
+// unwrapped (matching sequential semantics), never buried inside an AggregateException.
+[NotificationExecution(NotificationExecutionStrategy.Parallel)]
+[NotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
+public record ParallelCancellingEvent(string Message) : INotification;
+
+public sealed class ParallelCancellingHandler : INotificationHandler<ParallelCancellingEvent>
+{
+    public ValueTask HandleAsync(ParallelCancellingEvent notification, CancellationToken cancellationToken = default)
+    {
+        // Unrelated token: the publish CancellationToken itself is NOT cancelled.
+        throw new OperationCanceledException("handler-internal cancellation");
+    }
+}
+
+[NotificationHandlerOrder(1)]
+public sealed class ParallelCancellingSiblingHandler : INotificationHandler<ParallelCancellingEvent>
+{
+    public static bool WasCalled { get; private set; }
+    public static void Reset() => WasCalled = false;
+
+    public ValueTask HandleAsync(ParallelCancellingEvent notification, CancellationToken cancellationToken = default)
+    {
+        WasCalled = true;
+        return ValueTask.CompletedTask;
+    }
+}
+
+#endregion

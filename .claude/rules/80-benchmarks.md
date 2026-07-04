@@ -59,36 +59,17 @@ Do not sprinkle `.LogInformation` through handlers used by benchmarks — the
 `MediatorLite.IMediator` category already emits `LogDebug` for every
 request, so keep the benchmark's default filter at `Warning` or above.
 
-## Rule 4 — Parity harness lives in `BenchmarkParityGuard.cs`
+## Rule 4 — Keep MediatorLite/MediatR configurations at parity
 
-The REST API benchmark suite runs a parity check before any benchmark
-executes. Both mediator implementations must be configured with the same
-number of behaviors, notification handlers, and validators. Update the
-guard whenever you add or remove a registration:
+Both mediator implementations in a comparison suite must be configured with the
+same number of behaviors, notification handlers, and validators — otherwise the
+benchmark measures registration differences, not dispatch. When adding a new
+scenario, count the registrations on both sides and keep them equal.
 
-```51:77:tests/MediatorLite.RestApiBenchmarks/Hosting/BenchmarkParityGuard.cs
-    private static void ValidatePipelineParity(IServiceProvider serviceProvider, MediatorImplementation mediatorImplementation)
-    {
-        const int expectedBehaviorCount = 3;
-
-        if (mediatorImplementation == MediatorImplementation.MediatorLite)
-        {
-            var behaviorCount = serviceProvider
-                .GetServices<ML.IPipelineBehavior<CreateOrderCommand, CreateOrderResult>>()
-                .Count();
-
-            if (behaviorCount != expectedBehaviorCount)
-            {
-                throw new BenchmarkParityViolationException($"MediatorLite behavior count mismatch. Expected {expectedBehaviorCount}, got {behaviorCount}.");
-            }
-            ...
-        }
-```
-
-If a parity violation fires during `dotnet run -c Release` in
-`tests/MediatorLite.RestApiBenchmarks/`, fix the registration — do not bump
-the `expected*Count` constants without a matching change in the other
-mediator's pipeline.
+(The former `tests/MediatorLite.RestApiBenchmarks/` REST harness and its
+`BenchmarkParityGuard.cs` were removed from the repository. If a REST-style
+harness is reintroduced, restore an executable parity guard that fails fast on
+mismatched pipeline counts rather than relying on review.)
 
 ## Rule 5 — No shared state across benchmark classes
 

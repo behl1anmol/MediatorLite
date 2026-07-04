@@ -15,8 +15,11 @@ and notification. Consumers configure verbosity via standard
 builder.Logging.AddFilter("MediatorLite.IMediator", LogLevel.Information);
 ```
 
-- Always `LogDebug`. Do not introduce `LogInformation` / `LogWarning` calls
-  in generated code — the category-level filter is the only supported knob.
+- Start/success lines are always `LogDebug`. Do not introduce `LogInformation`
+  / `LogWarning` calls in generated code — the category-level filter is the
+  only supported knob. The single exception is the emitted `catch` block,
+  which logs the exception with `LogError(__ex, ...)` before rethrowing; that
+  is shipped behavior consumers alert on, so keep it.
 - Do not rename the category. The deleted `MediatorLoggingAttribute` (with
   its per-class `Enabled` / `IncludePayload` / `LogLevel`) was removed; do
   not reintroduce a per-type knob.

@@ -22,7 +22,7 @@ See `.claude/agents.md` for the full team roster, routing rules, and escalation 
 | Orchestrator | `orchestrator` | Team lead; DB owner; mode selector; single entry point |
 | Scrum Master | `scrum-master` | Read-only planner; DoR/DoD; standup digest |
 | Backend Developer | `backend-developer` | `src/MediatorLite*/**` author |
-| Frontend Developer | `frontend-developer` | `samples/**` and REST benchmark harness |
+| Frontend Developer | `frontend-developer` | `samples/**` and consumer reproductions |
 | Tester | `tester` | `tests/**` author; TDD enforcer |
 | DevOps | `devops` | CI/CD, hooks, publish, benchmarks, DB schema |
 | Code Reviewer | `code-reviewer` | Read-only diff reviewer; `reviews` table owner |
@@ -98,7 +98,7 @@ Code registers them automatically as skills from `.claude/skills/*/SKILL.md`.
 | `mediatorlite-tests` | Test layout; fixture patterns; `*Count` assertions |
 | `mediatorlite-benchmarks` | BenchmarkDotNet setup; MediatR comparison |
 | `mediatorlite-sample-sourcegen` | Canonical consumer wiring; `samples/**` |
-| `mediatorlite-rest-api-benchmarks` | `ApiBenchmarkHost`; REST harness |
+| `mediatorlite-rest-api-benchmarks` | Historical only — the REST harness project was removed from the repo |
 
 ---
 

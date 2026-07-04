@@ -12,7 +12,9 @@ public enum NotificationExecutionStrategy
     Sequential = 0,
 
     /// <summary>
-    /// Execute all handlers concurrently using Task.WhenAll.
+    /// Start all handlers before awaiting any of them (cooperative <see cref="ValueTask"/>
+    /// fan-out). Handlers overlap at their await suspension points; there is no thread
+    /// offload and no <c>Task.WhenAll</c>. Started handlers are awaited in start order.
     /// </summary>
     Parallel = 1,
 
@@ -106,7 +108,7 @@ public sealed class NotificationHandlerOrderAttribute(int order) : Attribute
 /// runtime effect.
 /// </para>
 /// </remarks>
-[AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+[AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, AllowMultiple = false, Inherited = false)]
 public sealed class NotificationExecutionAttribute(NotificationExecutionStrategy strategy) : Attribute
 {
     /// <summary>
@@ -131,7 +133,7 @@ public sealed class NotificationExecutionAttribute(NotificationExecutionStrategy
 /// runtime effect.
 /// </para>
 /// </remarks>
-[AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+[AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, AllowMultiple = false, Inherited = false)]
 public sealed class NotificationErrorAttribute(NotificationErrorStrategy strategy) : Attribute
 {
     /// <summary>

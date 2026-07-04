@@ -6,3 +6,4 @@
 Rule ID | Category | Severity | Notes
 --------|----------|----------|-------
 MEDL1001 | MediatorLite.Validation | Error | FluentValidation validators were found but the MediatorLite.FluentValidation package is not referenced.
+MEDL1002 | MediatorLite.Behaviors | Warning | An open generic pipeline behavior does not match the supported Behavior<TRequest, TResponse> shape and was not registered.

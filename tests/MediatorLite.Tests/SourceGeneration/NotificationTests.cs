@@ -89,7 +89,8 @@ public class NotificationTests
     [Fact]
     public async Task PublishAsync_WithNoHandlers_CompletesWithoutError()
     {
-        // Arrange - Create a notification type that has no handlers registered
+        // Arrange - OrphanEvent has no INotificationHandler<OrphanEvent> in this assembly,
+        // so publishing must hit the generated no-handler default arm and complete silently.
         var services = new ServiceCollection();
         services.AddMediatorLite();
         services.AddGeneratedHandlers();
@@ -99,8 +100,56 @@ public class NotificationTests
         var mediator = provider.GetRequiredService<IMediator>();
 
         // Act & Assert
-        Func<Task> act = async () => await mediator.PublishAsync(new UserCreatedEvent(1, "test@test.com"));
+        Func<Task> act = async () => await mediator.PublishAsync(new OrphanEvent("nobody listens"));
         await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task PublishAsync_ParallelAggregate_SurfacesOperationCanceledExceptionUnwrapped()
+    {
+        // Arrange - one parallel handler throws OperationCanceledException (for a token that
+        // is not the publish token), its sibling succeeds. Sequential publish surfaces the
+        // OCE unwrapped; parallel + ContinueAndAggregate must match instead of burying it
+        // inside an AggregateException. Every started handler still runs.
+        ParallelCancellingSiblingHandler.Reset();
+        var services = new ServiceCollection();
+        services.AddMediatorLite();
+        services.AddGeneratedHandlers();
+        services.AddLogging();
+
+        var provider = services.BuildServiceProvider();
+        var mediator = provider.GetRequiredService<IMediator>();
+
+        // Act
+        Func<Task> act = async () => await mediator.PublishAsync(new ParallelCancellingEvent("cancel"));
+
+        // Assert
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        ParallelCancellingSiblingHandler.WasCalled.Should().BeTrue(
+            "parallel fan-out starts every handler before awaiting any of them");
+    }
+
+    [Fact]
+    public async Task PublishAsync_PartialHandlerClass_InvokesHandlerExactlyOnce()
+    {
+        // Arrange - PartialDeclaredEventHandler is declared in two partial parts, each with
+        // a base list. The generator visits every declaration node, so without deduplication
+        // the handler would be registered — and invoked — once per part.
+        PartialDeclaredEventHandler.Reset();
+        var services = new ServiceCollection();
+        services.AddMediatorLite();
+        services.AddGeneratedHandlers();
+        services.AddLogging();
+
+        var provider = services.BuildServiceProvider();
+        var mediator = provider.GetRequiredService<IMediator>();
+
+        // Act
+        await mediator.PublishAsync(new PartialHandledEvent("once"));
+
+        // Assert
+        PartialDeclaredEventHandler.CallCount.Should().Be(1,
+            "a handler split across partial declarations must be discovered once, not once per part");
     }
 
     [Fact]

@@ -79,8 +79,12 @@ consumers can filter on the category:
             sb.AppendLine($"            __logger.LogDebug(\"Sending request {{RequestType}}\", \"{simpleRequest}\");");
 ```
 
-- Always `LogDebug`, never `LogInformation`/`LogError`. Level is a consumer
-  concern via `AddFilter("MediatorLite.IMediator", LogLevel.X)`.
+- Start/success lines are always `LogDebug`, never `LogInformation`. Level is a
+  consumer concern via `AddFilter("MediatorLite.IMediator", LogLevel.X)`.
+- The one exception: the emitted `catch` block logs the exception with
+  `LogError(__ex, ...)` before rethrowing. That is the existing shipped
+  behavior — do not downgrade it to `LogDebug` (consumers alert on it) and do
+  not add any other non-Debug call.
 - Skip the entire block when `[assembly: DisableMediatorLogging]` is present.
 
 ## Rule 5 — Tracing uses `ActivitySource "MediatorLite"`
