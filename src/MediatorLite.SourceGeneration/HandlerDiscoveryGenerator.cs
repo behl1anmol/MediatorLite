@@ -1323,7 +1323,9 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         foreach (var group in notificationGroups)
         {
             var notificationType = group.NotificationType;
-            var safeName = GetSafeTypeName(notificationType);
+            // Shared with the switch-arm emission above, so names stay in sync (including any
+            // collision-disambiguation suffix) — do not re-derive with GetSafeTypeName here.
+            var safeName = publishMethodSuffixes[notificationType];
             var handlersForNotification = group.Handlers;
 
             notificationsByType.TryGetValue(notificationType, out var perTypeOptions);

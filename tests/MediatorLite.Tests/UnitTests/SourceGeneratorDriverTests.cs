@@ -312,6 +312,54 @@ public class SourceGeneratorDriverTests
     }
 
     [Fact]
+    public void NotificationTypes_WhoseSanitizedNamesCollide_StillGenerateCompilableDispatch()
+    {
+        // Same collision as the request-type case above, but for notifications: the switch
+        // arms use the uniquified suffix (PublishAsync's `case ... : return Publish_{suffix}`),
+        // but the unrolled Publish_* method bodies must be emitted under that same uniquified
+        // suffix too — a prior fix threaded the suffix into the switch but re-derived the
+        // publisher method name with plain GetSafeTypeName, so the switch called a
+        // Publish_*_2 method that was never emitted while the real Publish_* methods still
+        // collided (CS0111 and a dangling call to a non-existent method).
+        const string source = """
+            using MediatorLite;
+
+            namespace App
+            {
+                public record User_Created(int Id) : INotification;
+
+                public sealed class User_CreatedHandler : INotificationHandler<User_Created>
+                {
+                    public ValueTask HandleAsync(User_Created notification, CancellationToken cancellationToken = default)
+                        => ValueTask.CompletedTask;
+                }
+            }
+
+            namespace App.User
+            {
+                public record Created(int Id) : INotification;
+
+                public sealed class CreatedHandler : INotificationHandler<Created>
+                {
+                    public ValueTask HandleAsync(Created notification, CancellationToken cancellationToken = default)
+                        => ValueTask.CompletedTask;
+                }
+            }
+            """;
+
+        var (runResult, updatedCompilation) = RunGeneratorAndUpdateCompilation(source);
+
+        var mediator = runResult.GeneratedTrees
+            .Select(t => t.ToString())
+            .Single(t => t.Contains("class SourceGeneratedMediator"));
+
+        mediator.Should().Contain("case global::App.User_Created")
+            .And.Contain("case global::App.User.Created", "both notification types must keep their own dispatch arm");
+
+        AssertGeneratedOutputCompiles(updatedCompilation);
+    }
+
+    [Fact]
     public void MultiResponseRequest_WithCollidingSanitizedResponseNames_StillGeneratesCompilableDispatch()
     {
         // Distinct request types that sanitize to the same name merely overload Send_* (legal).
