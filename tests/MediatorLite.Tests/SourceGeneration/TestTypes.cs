@@ -665,10 +665,12 @@ public sealed class ArrayItemsStringHandler : IRequestHandler<ArrayItemsQuery, s
 
 #endregion
 
-#region Parallel Cancellation Fixtures (F8)
+#region Handler-Internal Cancellation Fixtures (F8)
 
-// Parallel + ContinueAndAggregate must surface a handler's OperationCanceledException
-// unwrapped (matching sequential semantics), never buried inside an AggregateException.
+// ContinueAndAggregate treats a handler's own OperationCanceledException as an ordinary
+// fault when the publish CancellationToken is NOT cancelled: every fault is aggregated
+// (parallel) and remaining handlers still run (sequential). Only genuine cancellation of
+// the publish token surfaces an OperationCanceledException unwrapped.
 [NotificationExecution(NotificationExecutionStrategy.Parallel)]
 [NotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
 public record ParallelCancellingEvent(string Message) : INotification;
@@ -689,6 +691,42 @@ public sealed class ParallelCancellingSiblingHandler : INotificationHandler<Para
     public static void Reset() => WasCalled = false;
 
     public ValueTask HandleAsync(ParallelCancellingEvent notification, CancellationToken cancellationToken = default)
+    {
+        WasCalled = true;
+        return ValueTask.CompletedTask;
+    }
+}
+
+// A sibling that fails with an ordinary exception: its fault must never be lost to the
+// OCE-throwing sibling (the historical bug rethrew the OCE unwrapped and dropped this).
+[NotificationHandlerOrder(2)]
+public sealed class ParallelCancellingFaultingHandler : INotificationHandler<ParallelCancellingEvent>
+{
+    public ValueTask HandleAsync(ParallelCancellingEvent notification, CancellationToken cancellationToken = default)
+    {
+        throw new InvalidOperationException("sibling failure");
+    }
+}
+
+[NotificationError(NotificationErrorStrategy.ContinueAndAggregate)]
+public record SequentialCancellingEvent(string Message) : INotification;
+
+public sealed class SequentialCancellingFirstHandler : INotificationHandler<SequentialCancellingEvent>
+{
+    public ValueTask HandleAsync(SequentialCancellingEvent notification, CancellationToken cancellationToken = default)
+    {
+        // Unrelated token: the publish CancellationToken itself is NOT cancelled.
+        throw new OperationCanceledException("handler-internal cancellation");
+    }
+}
+
+[NotificationHandlerOrder(1)]
+public sealed class SequentialCancellingSecondHandler : INotificationHandler<SequentialCancellingEvent>
+{
+    public static bool WasCalled { get; private set; }
+    public static void Reset() => WasCalled = false;
+
+    public ValueTask HandleAsync(SequentialCancellingEvent notification, CancellationToken cancellationToken = default)
     {
         WasCalled = true;
         return ValueTask.CompletedTask;

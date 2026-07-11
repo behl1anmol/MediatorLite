@@ -69,10 +69,18 @@ public enum NotificationErrorStrategy
     /// All exceptions are collected and thrown as an <see cref="AggregateException"/>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// When combined with <see cref="NotificationExecutionStrategy.StopOnFirst"/>,
     /// a failing handler does not stop execution; the next handler is attempted.
     /// If all handlers fail, an <see cref="AggregateException"/> with all collected
     /// exceptions is thrown. If at least one handler succeeds, no exception is thrown.
+    /// </para>
+    /// <para>
+    /// A handler's own <see cref="OperationCanceledException"/> is treated as an ordinary
+    /// fault and aggregated like any other, unless the publish
+    /// <see cref="CancellationToken"/> itself is cancelled — genuine cancellation surfaces
+    /// as an unwrapped <see cref="OperationCanceledException"/>.
+    /// </para>
     /// </remarks>
     ContinueAndAggregate = 1
 }

@@ -1579,7 +1579,9 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 sb.AppendLine("                ct.ThrowIfCancellationRequested();");
                 sb.AppendLine($"                await h{i + 1}.HandleAsync(notification, ct).ConfigureAwait(false);");
                 sb.AppendLine("            }");
-                sb.AppendLine("            catch (OperationCanceledException) { throw; }");
+                sb.AppendLine("            // Only genuine cancellation of the publish token stops the loop; a handler's");
+                sb.AppendLine("            // own OperationCanceledException is an ordinary fault to aggregate.");
+                sb.AppendLine("            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }");
                 sb.AppendLine("            catch (Exception ex)");
                 sb.AppendLine("            {");
                 sb.AppendLine("                (exceptions ??= new List<Exception>()).Add(ex);");
@@ -1638,18 +1640,11 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             sb.AppendLine();
             sb.AppendLine("            if (exceptions is not null)");
             sb.AppendLine("            {");
-            sb.AppendLine("                // Prioritize cancellation - rethrow OperationCanceledException directly");
+            sb.AppendLine("                // Genuine cancellation of the publish token dominates and surfaces unwrapped.");
             sb.AppendLine("                ct.ThrowIfCancellationRequested();");
-            sb.AppendLine("                // Match sequential semantics: a handler's OperationCanceledException");
-            sb.AppendLine("                // surfaces unwrapped (first in start order), never inside an AggregateException.");
-            sb.AppendLine("                foreach (var __candidate in exceptions)");
-            sb.AppendLine("                {");
-            sb.AppendLine("                    if (__candidate is OperationCanceledException)");
-            sb.AppendLine("                    {");
-            sb.AppendLine("                        global::System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(__candidate).Throw();");
-            sb.AppendLine("                    }");
-            sb.AppendLine("                }");
-            sb.AppendLine("                // For handler failures, throw an AggregateException with all exceptions");
+            sb.AppendLine("                // Otherwise every fault is aggregated — including a handler's own");
+            sb.AppendLine("                // OperationCanceledException. Rethrowing an OCE unwrapped here would");
+            sb.AppendLine("                // silently drop its siblings' faults.");
             sb.AppendLine("                throw new AggregateException(exceptions);");
             sb.AppendLine("            }");
         }
@@ -1712,7 +1707,9 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 }
                 sb.AppendLine("                return; // Success — stop here");
                 sb.AppendLine("            }");
-                sb.AppendLine("            catch (OperationCanceledException) { throw; }");
+                sb.AppendLine("            // Only genuine cancellation of the publish token stops the fallback chain; a");
+                sb.AppendLine("            // handler's own OperationCanceledException is an ordinary fault to aggregate.");
+                sb.AppendLine("            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }");
                 sb.AppendLine("            catch (Exception ex)");
                 sb.AppendLine("            {");
                 sb.AppendLine("                (exceptions ??= new List<Exception>()).Add(ex);");
