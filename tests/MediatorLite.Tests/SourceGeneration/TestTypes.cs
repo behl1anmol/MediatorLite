@@ -383,6 +383,7 @@ public class GenericLoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRe
 public class ShortCircuitBehavior : IPipelineBehavior<ShortCircuitQuery, Unit>
 {
     public static bool Executed = false;
+    public static void Reset() => Executed = false;
     public ValueTask<Unit> HandleAsync(
         ShortCircuitQuery request,
         RequestHandlerDelegate<Unit> next,
@@ -397,6 +398,7 @@ public class ShortCircuitBehavior : IPipelineBehavior<ShortCircuitQuery, Unit>
 public class ShortCircuitLoggerBehavior : IPipelineBehavior<ShortCircuitQuery, Unit>
 {
     public static bool Executed = false;
+    public static void Reset() => Executed = false;
     public ValueTask<Unit> HandleAsync(
         ShortCircuitQuery request,
         RequestHandlerDelegate<Unit> next,

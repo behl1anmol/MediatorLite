@@ -216,9 +216,10 @@ public class ValidationTests
     [Fact]
     public void SourceGen_ReportsValidatorCount()
     {
-        // Assert - Source generator should report discovered validators
-        MediatorLiteRegistration.ValidatorCount.Should().BeGreaterThan(0,
-            "source generator should discover validators at compile time");
+        // Exact value pins generator discovery (rule 70 §4): update when adding a validator
+        // fixture. `> 0` would keep passing while discovery silently dropped validators.
+        MediatorLiteRegistration.ValidatorCount.Should().Be(1,
+            "the source generator must discover every validator in TestTypes.cs");
     }
 
     [Fact]

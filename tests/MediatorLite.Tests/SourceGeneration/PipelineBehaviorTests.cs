@@ -40,7 +40,10 @@ public class PipelineBehaviorTests
     [Fact]
     public async Task ShortCircuitBehavior_ShotCircuitSuccessfully()
     {
-        // Arrange
+        // Arrange - reset static tracking (rule 70 §6) so a prior dispatch of
+        // ShortCircuitQuery in the same process cannot mask a regression here.
+        ShortCircuitBehavior.Reset();
+        ShortCircuitLoggerBehavior.Reset();
         var services = new ServiceCollection();
         services.AddGeneratedHandlers();
         services.AddMediatorLite();
