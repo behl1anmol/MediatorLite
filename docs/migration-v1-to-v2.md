@@ -340,6 +340,23 @@ by **FluentValidation** via the opt-in **`MediatorLite.FluentValidation`** packa
   `AddValidatorsFromAssembly(...)`. The generator emits `FluentValidationBehavior<,>` as the
   outermost pipeline behavior. See [validation.md](validation.md).
 
+## Behavior Change: Cancellation Under ContinueAndAggregate (v2.x)
+
+A handler-thrown `OperationCanceledException` is now treated as an ordinary fault when
+the **publish** `CancellationToken` is not cancelled:
+
+- **Parallel + ContinueAndAggregate**: previously the first OCE was rethrown unwrapped
+  and any sibling handler faults were silently dropped. Now all faults — OCEs included —
+  arrive inside one `AggregateException`.
+- **Sequential / StopOnFirst + ContinueAndAggregate**: previously any handler OCE aborted
+  the publish and skipped the remaining handlers. Now remaining handlers keep running and
+  the OCE is aggregated.
+
+Genuine cancellation (the token you passed to `PublishAsync` is cancelled) still surfaces
+as an unwrapped `OperationCanceledException`. If you catch `OperationCanceledException`
+around `PublishAsync` to detect handler-internal cancellations, inspect
+`AggregateException.InnerExceptions` instead.
+
 ## Summary
 
 1. **Add source generator** package reference

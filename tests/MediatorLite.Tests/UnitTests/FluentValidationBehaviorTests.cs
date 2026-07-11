@@ -66,6 +66,26 @@ public class FluentValidationBehaviorTests
     }
 
     [Fact]
+    public async Task NullPropertyNameFailure_IsCoalescedToEmptyString()
+    {
+        // FluentValidation's low-level failure API allows a null PropertyName
+        // (e.g. ctx.AddFailure(new ValidationFailure(null, ...))). ValidationError.PropertyName
+        // is annotated non-null, so the mapping boundary must coalesce instead of smuggling
+        // a null through the annotation.
+        var validator = new InlineValidator<Ping>();
+        validator.RuleFor(x => x.Name).Custom((_, ctx) =>
+            ctx.AddFailure(new global::FluentValidation.Results.ValidationFailure(null!, "object-level failure")));
+
+        var behavior = new FluentValidationBehavior<Ping, string>([validator]);
+
+        Func<Task> act = async () => await behavior.HandleAsync(new Ping("x", 1), Next, default);
+
+        var exception = await act.Should().ThrowAsync<ValidationException>();
+        exception.Which.Errors.Should().ContainSingle()
+            .Which.PropertyName.Should().Be(string.Empty);
+    }
+
+    [Fact]
     public async Task MultipleValidators_AggregatesFailures()
     {
         var second = new InlineValidator<Ping>();

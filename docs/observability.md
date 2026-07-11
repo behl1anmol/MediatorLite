@@ -77,41 +77,19 @@ MediatorLite activities include these tags:
 | `error` | Boolean indicating error occurred |
 | `error.message` | Error message if applicable |
 
-## Diagnostic Events
+## Diagnostic Events (reserved — not currently emitted)
 
-Subscribe to diagnostic events:
+`MediatorDiagnostics.Listener` (a `DiagnosticListener` named `"MediatorLite"`) and the
+event-name constants under `MediatorDiagnostics.Events` (`MediatorLite.RequestStarted`,
+`MediatorLite.RequestCompleted`, `MediatorLite.RequestFailed`,
+`MediatorLite.NotificationPublished`, `MediatorLite.NotificationHandlerStarted`,
+`MediatorLite.NotificationHandlerCompleted`) are a **reserved surface**: no MediatorLite
+code writes to the listener today, so subscribing to it observes nothing.
 
-```csharp
-DiagnosticListener.AllListeners.Subscribe(listener =>
-{
-    if (listener.Name == "MediatorLite")
-    {
-        listener.Subscribe(kvp =>
-        {
-            switch (kvp.Key)
-            {
-                case "MediatorLite.RequestStarted":
-                    Console.WriteLine($"Request started: {kvp.Value}");
-                    break;
-                case "MediatorLite.RequestCompleted":
-                    Console.WriteLine($"Request completed: {kvp.Value}");
-                    break;
-            }
-        });
-    }
-});
-```
+Use the two live instrumentation channels instead:
 
-### Available Events
-
-| Event | Description |
-|-------|-------------|
-| `MediatorLite.RequestStarted` | Request handling began |
-| `MediatorLite.RequestCompleted` | Request handling completed |
-| `MediatorLite.RequestFailed` | Request handling failed |
-| `MediatorLite.NotificationPublished` | Notification published |
-| `MediatorLite.NotificationHandlerStarted` | Handler execution started |
-| `MediatorLite.NotificationHandlerCompleted` | Handler execution completed |
+- **Logging** — the `MediatorLite.IMediator` logger category (see above).
+- **Tracing** — the `"MediatorLite"` `ActivitySource` (see above).
 
 ## Custom Logging Behavior
 

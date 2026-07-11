@@ -137,6 +137,16 @@ Invariants:
   handlers cannot be stopped. The strategy only decides which fault surfaces:
   `ContinueAndAggregate` throws an `AggregateException` of all faults;
   `StopOnFirstError` rethrows the first fault (in start order), unwrapped.
+- **Cancellation is special only when it is genuine.** A handler's own
+  `OperationCanceledException` (its internal timeout/linked token — the publish
+  token is not cancelled) is an ordinary fault: under `ContinueAndAggregate` it
+  is aggregated with its siblings' faults (never rethrown unwrapped — that would
+  silently drop the sibling faults), and in `Sequential`/`StopOnFirst` modes the
+  remaining handlers still run. Only when the **publish** `CancellationToken` is
+  actually cancelled does an unwrapped `OperationCanceledException` surface (and
+  sequential execution stop). Pinned by the
+  `PublishAsync_*Aggregate_HandlerInternalOce_*` and
+  `PublishAsync_ParallelAggregate_GenuineCancellation_*` tests.
 - `[NotificationHandlerOrder]` fixes **start order** (hence await order), not
   completion order.
 

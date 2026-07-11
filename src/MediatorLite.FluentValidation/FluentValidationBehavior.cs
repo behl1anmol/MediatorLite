@@ -52,7 +52,7 @@ public sealed class FluentValidationBehavior<TRequest, TResponse> : IPipelineBeh
     {
         if (_validators.Length == 0)
         {
-            return await next();
+            return await next().ConfigureAwait(false);
         }
 
         // Lazily allocated: the happy path (all valid) allocates nothing here.
@@ -71,9 +71,11 @@ public sealed class FluentValidationBehavior<TRequest, TResponse> : IPipelineBeh
             for (var i = 0; i < failures.Count; i++)
             {
                 var failure = failures[i];
+                // FluentValidation's low-level failure API permits null PropertyName /
+                // ErrorMessage; ValidationError annotates both non-null, so coalesce here.
                 errors.Add(new ValidationError(
-                    failure.PropertyName,
-                    failure.ErrorMessage,
+                    failure.PropertyName ?? string.Empty,
+                    failure.ErrorMessage ?? string.Empty,
                     failure.AttemptedValue));
             }
         }
@@ -83,6 +85,6 @@ public sealed class FluentValidationBehavior<TRequest, TResponse> : IPipelineBeh
             throw new ValidationException(errors);
         }
 
-        return await next();
+        return await next().ConfigureAwait(false);
     }
 }

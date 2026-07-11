@@ -229,3 +229,18 @@ catch (AggregateException ex)
 3. **Use StopOnFirst** for fallback/circuit-breaker patterns
 4. **Use `ContinueAndAggregate`** in production to ensure resilience
 5. **Handle exceptions** in handlers to prevent cascade failures
+
+## Notification Inheritance
+
+Dispatch matches the notification's **runtime type** against the single most-specific
+handled type — it does not fan out across the type hierarchy:
+
+- Publishing a `DerivedNote` when only `BaseNote` has handlers runs the `BaseNote`
+  handlers (the runtime type falls through to the base arm).
+- Publishing a `DerivedNote` when **both** `DerivedNote` and `BaseNote` have handlers
+  runs **only** the `DerivedNote` handlers; the `BaseNote` handlers do not fire.
+
+This mirrors the previous `GetType()`-keyed dispatch and is intentional. If a handler
+must observe both the base and the derived notification, register it for both types
+(one class can implement `INotificationHandler<BaseNote>` and
+`INotificationHandler<DerivedNote>`).
