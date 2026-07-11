@@ -61,6 +61,21 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
 
+    /// <summary>
+    /// Reported when more than one handler class implements
+    /// <c>IRequestHandler&lt;TRequest, TResponse&gt;</c> for the same (request, response) pair.
+    /// All of them are registered, but dispatch resolves the interface from DI, so only the
+    /// last registration is ever invoked — the others are silently dead code.
+    /// </summary>
+    private static readonly DiagnosticDescriptor DuplicateRequestHandlers = new(
+        id: "MEDL1003",
+        title: "Multiple handlers registered for the same request type",
+        messageFormat: "Request type '{0}' has multiple handlers ({1}); only '{2}' (the last registered) "
+            + "is invoked at dispatch time. Remove the unused handler(s) or split the request types.",
+        category: "MediatorLite.Handlers",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         // Find all class declarations that might be handlers
@@ -118,6 +133,17 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
     }
 
     /// <summary>
+    /// Matches an attribute by simple name AND containing namespace. Matching on
+    /// <c>AttributeClass.Name</c> alone would let a same-named attribute from any other
+    /// namespace silently change generator behavior (e.g. a foreign
+    /// <c>DisableMediatorLoggingAttribute</c> turning off all generated logging).
+    /// </summary>
+    private static bool IsMediatorLiteAttribute(AttributeData attr, string simpleName)
+        => attr.AttributeClass is { } attrClass
+           && attrClass.Name == simpleName
+           && attrClass.ContainingNamespace?.ToDisplayString() == "MediatorLite";
+
+    /// <summary>
     /// Reads assembly-level defaults for notification strategies from
     /// <see cref="DefaultNotificationExecutionAttribute"/> and <see cref="DefaultNotificationErrorAttribute"/>.
     /// </summary>
@@ -130,24 +156,23 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
 
         foreach (var attr in compilation.Assembly.GetAttributes())
         {
-            var name = attr.AttributeClass?.Name;
-            if (name == "DefaultNotificationExecutionAttribute"
+            if (IsMediatorLiteAttribute(attr, "DefaultNotificationExecutionAttribute")
                 && attr.ConstructorArguments.Length > 0
                 && attr.ConstructorArguments[0].Value is int es)
             {
                 execution = es;
             }
-            else if (name == "DefaultNotificationErrorAttribute"
+            else if (IsMediatorLiteAttribute(attr, "DefaultNotificationErrorAttribute")
                 && attr.ConstructorArguments.Length > 0
                 && attr.ConstructorArguments[0].Value is int ers)
             {
                 error = ers;
             }
-            else if (name == "DisableMediatorLoggingAttribute")
+            else if (IsMediatorLiteAttribute(attr, "DisableMediatorLoggingAttribute"))
             {
                 loggingDisabled = true;
             }
-            else if (name == "DisableMediatorTracingAttribute")
+            else if (IsMediatorLiteAttribute(attr, "DisableMediatorTracingAttribute"))
             {
                 tracingDisabled = true;
             }
@@ -224,14 +249,13 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
 
         foreach (var attr in typeSymbol.GetAttributes())
         {
-            var name = attr.AttributeClass?.Name;
-            if (name == "NotificationExecutionAttribute"
+            if (IsMediatorLiteAttribute(attr, "NotificationExecutionAttribute")
                 && attr.ConstructorArguments.Length > 0
                 && attr.ConstructorArguments[0].Value is int es)
             {
                 executionStrategy = es;
             }
-            else if (name == "NotificationErrorAttribute"
+            else if (IsMediatorLiteAttribute(attr, "NotificationErrorAttribute")
                 && attr.ConstructorArguments.Length > 0
                 && attr.ConstructorArguments[0].Value is int ers)
             {
@@ -254,7 +278,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             return null;
 
         var hasSkipAttribute = classSymbol.GetAttributes()
-            .Any(a => a.AttributeClass?.Name == "MediatorGenerationAttribute"
+            .Any(a => IsMediatorLiteAttribute(a, "MediatorGenerationAttribute")
                       && a.NamedArguments.Any(arg => arg.Key == "Skip" && arg.Value.Value is true));
 
         if (hasSkipAttribute)
@@ -322,7 +346,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         // Extract BehaviorOrderAttribute if present
         int behaviorOrder = 0;
         var orderAttr = classSymbol.GetAttributes()
-            .FirstOrDefault(a => a.AttributeClass?.Name == "BehaviorOrderAttribute");
+            .FirstOrDefault(a => IsMediatorLiteAttribute(a, "BehaviorOrderAttribute"));
         if (orderAttr != null && orderAttr.ConstructorArguments.Length > 0)
         {
             behaviorOrder = (int)(orderAttr.ConstructorArguments[0].Value ?? 0);
@@ -414,7 +438,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             return null;
 
         var hasSkipAttribute = classSymbol.GetAttributes()
-            .Any(a => a.AttributeClass?.Name == "MediatorGenerationAttribute"
+            .Any(a => IsMediatorLiteAttribute(a, "MediatorGenerationAttribute")
                       && a.NamedArguments.Any(arg => arg.Key == "Skip" && arg.Value.Value is true));
 
         if (hasSkipAttribute)
@@ -508,7 +532,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             return null;
 
         var hasSkipAttribute = classSymbol.GetAttributes()
-            .Any(a => a.AttributeClass?.Name == "MediatorGenerationAttribute"
+            .Any(a => IsMediatorLiteAttribute(a, "MediatorGenerationAttribute")
                       && a.NamedArguments.Any(arg => arg.Key == "Skip" && arg.Value.Value is true));
 
         if (hasSkipAttribute)
@@ -516,7 +540,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
 
         int? handlerOrder = null;
         var orderAttr = classSymbol.GetAttributes()
-            .FirstOrDefault(a => a.AttributeClass?.Name == "NotificationHandlerOrderAttribute");
+            .FirstOrDefault(a => IsMediatorLiteAttribute(a, "NotificationHandlerOrderAttribute"));
         if (orderAttr != null && orderAttr.ConstructorArguments.Length > 0)
         {
             handlerOrder = orderAttr.ConstructorArguments[0].Value as int?;
@@ -603,6 +627,23 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         {
             GenerateEmptyRegistration(context);
             return;
+        }
+
+        // Silent last-wins is easy to hit by accident (a copied handler class left behind):
+        // surface every duplicated (request, response) pair so the dead handlers are visible.
+        var duplicateGroups = validHandlers
+            .SelectMany(h => h.RequestHandlers.Select(r => (Handler: h, Interface: r)))
+            .GroupBy(x => (x.Interface.RequestType, x.Interface.ResponseType))
+            .Where(g => g.Count() > 1);
+        foreach (var group in duplicateGroups)
+        {
+            var handlerNames = group.Select(x => StripGlobalPrefix(x.Handler.ClassName)).ToList();
+            context.ReportDiagnostic(Diagnostic.Create(
+                DuplicateRequestHandlers,
+                Location.None,
+                StripGlobalPrefix(group.Key.RequestType),
+                string.Join(", ", handlerNames),
+                handlerNames[handlerNames.Count - 1]));
         }
 
         var expandedBehaviors = ExpandBehaviors(validBehaviors, validHandlers);
@@ -1745,14 +1786,15 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// Strips a leading "global::" prefix for use in emitted string literals (tag values,
-    /// log message arguments). The returned value is suitable to embed inside a C# string literal.
+    /// Strips every "global::" prefix for use in emitted string literals (tag values, log
+    /// message arguments, diagnostic messages). Stripping only a leading prefix would leave
+    /// inner prefixes on generic type arguments (<c>Ns.Query&lt;global::System.String&gt;</c>)
+    /// and on tuple types (which start with '('). Display-only — never used for emitted code,
+    /// where the prefix must stay. The returned value is suitable to embed inside a C# string
+    /// literal (type display strings never contain '"' or '\').
     /// </summary>
     private static string StripGlobalPrefix(string typeName)
-    {
-        const string prefix = "global::";
-        return typeName.StartsWith(prefix) ? typeName.Substring(prefix.Length) : typeName;
-    }
+        => typeName.Replace("global::", "");
 
     /// <summary>
     /// Computes the simple display name of a fully-qualified type for log messages and

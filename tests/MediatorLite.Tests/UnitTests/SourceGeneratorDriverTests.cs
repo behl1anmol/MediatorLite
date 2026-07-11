@@ -355,6 +355,128 @@ public class SourceGeneratorDriverTests
     }
 
     [Fact]
+    public void ForeignSameNamedAttributes_DoNotChangeGeneratorBehavior()
+    {
+        // Attribute discovery must match namespace + name. A same-named attribute from a
+        // foreign namespace (here: DisableMediatorLogging and NotificationExecution) must not
+        // flip generator behavior.
+        const string source = """
+            using MediatorLite;
+
+            [assembly: Foreign.DisableMediatorLogging]
+
+            namespace Foreign
+            {
+                [AttributeUsage(AttributeTargets.Assembly)]
+                public sealed class DisableMediatorLoggingAttribute : Attribute { }
+
+                [AttributeUsage(AttributeTargets.Class)]
+                public sealed class NotificationExecutionAttribute(int strategy) : Attribute
+                {
+                    public int Strategy { get; } = strategy;
+                }
+            }
+
+            namespace DriverTests
+            {
+                [Foreign.NotificationExecution(1)] // would be Parallel if honored
+                public record ForeignAttributedEvent(string Message) : INotification;
+
+                public sealed class ForeignAttributedEventHandler1 : INotificationHandler<ForeignAttributedEvent>
+                {
+                    public ValueTask HandleAsync(ForeignAttributedEvent notification, CancellationToken cancellationToken = default)
+                        => ValueTask.CompletedTask;
+                }
+
+                public sealed class ForeignAttributedEventHandler2 : INotificationHandler<ForeignAttributedEvent>
+                {
+                    public ValueTask HandleAsync(ForeignAttributedEvent notification, CancellationToken cancellationToken = default)
+                        => ValueTask.CompletedTask;
+                }
+            }
+            """;
+
+        var (runResult, updatedCompilation) = RunGeneratorAndUpdateCompilation(HandlerSource, source);
+
+        var mediator = runResult.GeneratedTrees
+            .Select(t => t.ToString())
+            .Single(t => t.Contains("class SourceGeneratedMediator"));
+
+        mediator.Should().Contain("LogDebug",
+            "a foreign DisableMediatorLoggingAttribute must not disable generated logging");
+        mediator.Should().NotContain("vt1",
+            "a foreign NotificationExecutionAttribute must not switch the event to Parallel");
+
+        AssertGeneratedOutputCompiles(updatedCompilation);
+    }
+
+    [Fact]
+    public void DuplicateHandlersForSameRequestAndResponse_ReportMedl1003()
+    {
+        const string duplicateSource = """
+            using MediatorLite;
+
+            namespace DriverTests;
+
+            public sealed class PingQueryHandler2 : IRequestHandler<PingQuery, int>
+            {
+                public ValueTask<int> HandleAsync(PingQuery request, CancellationToken cancellationToken = default)
+                    => ValueTask.FromResult(request.Value + 1);
+            }
+            """;
+
+        var (runResult, updatedCompilation) = RunGeneratorAndUpdateCompilation(HandlerSource, duplicateSource);
+
+        runResult.Diagnostics.Should().ContainSingle(d => d.Id == "MEDL1003")
+            .Which.GetMessage().Should().Contain("PingQuery").And.Contain("PingQueryHandler2");
+
+        AssertGeneratedOutputCompiles(updatedCompilation);
+    }
+
+    [Fact]
+    public void SingleHandlerPerRequest_DoesNotReportMedl1003()
+    {
+        var (runResult, _) = RunGenerator(HandlerSource);
+
+        runResult.Diagnostics.Should().NotContain(d => d.Id == "MEDL1003");
+    }
+
+    [Fact]
+    public void GenericRequestType_TagLiterals_ContainNoGlobalPrefix()
+    {
+        // Display strings in emitted tag/log literals must strip every global:: prefix,
+        // including the ones nested inside generic type arguments.
+        const string source = """
+            using MediatorLite;
+
+            namespace DriverTests;
+
+            public record Payload(int Value);
+
+            public record GenericQuery<T>(T Value) : IRequest<int>;
+
+            public sealed class GenericQueryPayloadHandler : IRequestHandler<GenericQuery<Payload>, int>
+            {
+                public ValueTask<int> HandleAsync(GenericQuery<Payload> request, CancellationToken cancellationToken = default)
+                    => ValueTask.FromResult(0);
+            }
+            """;
+
+        var (runResult, updatedCompilation) = RunGeneratorAndUpdateCompilation(source);
+
+        var mediator = runResult.GeneratedTrees
+            .Select(t => t.ToString())
+            .Single(t => t.Contains("class SourceGeneratedMediator"));
+
+        mediator.Should().Contain("\"DriverTests.GenericQuery<DriverTests.Payload>\"",
+            "the RequestType tag literal must be fully display-formatted");
+        mediator.Should().NotContain("\"DriverTests.GenericQuery<global::",
+            "tag string literals must not leak an inner global:: prefix");
+
+        AssertGeneratedOutputCompiles(updatedCompilation);
+    }
+
+    [Fact]
     public void UnrelatedEdit_LeavesGeneratorOutputsCached()
     {
         // The pipeline models must have value equality end-to-end: an edit that does not
