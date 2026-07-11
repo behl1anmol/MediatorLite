@@ -105,12 +105,12 @@ public class NotificationTests
     }
 
     [Fact]
-    public async Task PublishAsync_ParallelAggregate_SurfacesOperationCanceledExceptionUnwrapped()
+    public async Task PublishAsync_ParallelAggregate_HandlerInternalOce_AggregatesAllFaults()
     {
-        // Arrange - one parallel handler throws OperationCanceledException (for a token that
-        // is not the publish token), its sibling succeeds. Sequential publish surfaces the
-        // OCE unwrapped; parallel + ContinueAndAggregate must match instead of burying it
-        // inside an AggregateException. Every started handler still runs.
+        // Arrange - one parallel handler throws OperationCanceledException for a token that
+        // is not the publish token, another sibling throws InvalidOperationException, a third
+        // succeeds. ContinueAndAggregate must surface BOTH faults in one AggregateException:
+        // the historical bug rethrew the OCE unwrapped and silently dropped the sibling fault.
         ParallelCancellingSiblingHandler.Reset();
         var services = new ServiceCollection();
         services.AddMediatorLite();
@@ -124,9 +124,62 @@ public class NotificationTests
         Func<Task> act = async () => await mediator.PublishAsync(new ParallelCancellingEvent("cancel"));
 
         // Assert
-        await act.Should().ThrowAsync<OperationCanceledException>();
+        var thrown = await act.Should().ThrowAsync<AggregateException>();
+        thrown.Which.InnerExceptions.Should().HaveCount(2)
+            .And.ContainSingle(e => e is OperationCanceledException)
+            .And.ContainSingle(e => e is InvalidOperationException);
         ParallelCancellingSiblingHandler.WasCalled.Should().BeTrue(
             "parallel fan-out starts every handler before awaiting any of them");
+    }
+
+    [Fact]
+    public async Task PublishAsync_ParallelAggregate_GenuineCancellation_SurfacesOceUnwrapped()
+    {
+        // Arrange - when the PUBLISH token really is cancelled, cancellation dominates:
+        // an unwrapped OperationCanceledException surfaces instead of an AggregateException.
+        ParallelCancellingSiblingHandler.Reset();
+        var services = new ServiceCollection();
+        services.AddMediatorLite();
+        services.AddGeneratedHandlers();
+        services.AddLogging();
+
+        var provider = services.BuildServiceProvider();
+        var mediator = provider.GetRequiredService<IMediator>();
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        // Act
+        Func<Task> act = async () => await mediator.PublishAsync(new ParallelCancellingEvent("cancel"), cts.Token);
+
+        // Assert
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task PublishAsync_SequentialAggregate_HandlerInternalOce_DoesNotSkipRemainingHandlers()
+    {
+        // Arrange - the first sequential handler throws OperationCanceledException for its own
+        // internal reason (the publish token is NOT cancelled). ContinueAndAggregate is
+        // documented to keep executing all handlers and aggregate the faults; the historical
+        // bug rethrew any OCE immediately and skipped the remaining handlers.
+        SequentialCancellingSecondHandler.Reset();
+        var services = new ServiceCollection();
+        services.AddMediatorLite();
+        services.AddGeneratedHandlers();
+        services.AddLogging();
+
+        var provider = services.BuildServiceProvider();
+        var mediator = provider.GetRequiredService<IMediator>();
+
+        // Act
+        Func<Task> act = async () => await mediator.PublishAsync(new SequentialCancellingEvent("cancel"));
+
+        // Assert
+        var thrown = await act.Should().ThrowAsync<AggregateException>();
+        thrown.Which.InnerExceptions.Should().ContainSingle(e => e is OperationCanceledException);
+        SequentialCancellingSecondHandler.WasCalled.Should().BeTrue(
+            "ContinueAndAggregate must keep executing handlers after a handler-internal cancellation");
     }
 
     [Fact]

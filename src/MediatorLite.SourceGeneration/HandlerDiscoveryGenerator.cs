@@ -51,11 +51,28 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
     private static readonly DiagnosticDescriptor UnsupportedOpenBehaviorShape = new(
         id: "MEDL1002",
         title: "Open generic pipeline behavior has an unsupported shape",
-        messageFormat: "Pipeline behavior '{0}' implements an open IPipelineBehavior<,> but does not match "
-            + "the supported shape Behavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse> "
+        messageFormat: "Pipeline behavior '{0}' has type parameters that cannot be bound from its "
+            + "IPipelineBehavior<,> interface. Generic behavior classes are only supported in the canonical "
+            + "shape Behavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse> "
             + "with no constraints beyond 'where TRequest : IRequest<TResponse>'. The behavior was not "
-            + "registered. Close the behavior over concrete types or remove the extra type parameters/constraints.",
+            + "registered. Close the behavior over concrete types (as a non-generic class) or use the "
+            + "canonical open shape.",
         category: "MediatorLite.Behaviors",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
+    /// <summary>
+    /// Reported when more than one handler class implements
+    /// <c>IRequestHandler&lt;TRequest, TResponse&gt;</c> for the same (request, response) pair.
+    /// All of them are registered, but dispatch resolves the interface from DI, so only the
+    /// last registration is ever invoked — the others are silently dead code.
+    /// </summary>
+    private static readonly DiagnosticDescriptor DuplicateRequestHandlers = new(
+        id: "MEDL1003",
+        title: "Multiple handlers registered for the same request type",
+        messageFormat: "Request type '{0}' has multiple handlers ({1}); only '{2}' (the last registered) "
+            + "is invoked at dispatch time. Remove the unused handler(s) or split the request types.",
+        category: "MediatorLite.Handlers",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
 
@@ -116,6 +133,17 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
     }
 
     /// <summary>
+    /// Matches an attribute by simple name AND containing namespace. Matching on
+    /// <c>AttributeClass.Name</c> alone would let a same-named attribute from any other
+    /// namespace silently change generator behavior (e.g. a foreign
+    /// <c>DisableMediatorLoggingAttribute</c> turning off all generated logging).
+    /// </summary>
+    private static bool IsMediatorLiteAttribute(AttributeData attr, string simpleName)
+        => attr.AttributeClass is { } attrClass
+           && attrClass.Name == simpleName
+           && attrClass.ContainingNamespace?.ToDisplayString() == "MediatorLite";
+
+    /// <summary>
     /// Reads assembly-level defaults for notification strategies from
     /// <see cref="DefaultNotificationExecutionAttribute"/> and <see cref="DefaultNotificationErrorAttribute"/>.
     /// </summary>
@@ -128,24 +156,23 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
 
         foreach (var attr in compilation.Assembly.GetAttributes())
         {
-            var name = attr.AttributeClass?.Name;
-            if (name == "DefaultNotificationExecutionAttribute"
+            if (IsMediatorLiteAttribute(attr, "DefaultNotificationExecutionAttribute")
                 && attr.ConstructorArguments.Length > 0
                 && attr.ConstructorArguments[0].Value is int es)
             {
                 execution = es;
             }
-            else if (name == "DefaultNotificationErrorAttribute"
+            else if (IsMediatorLiteAttribute(attr, "DefaultNotificationErrorAttribute")
                 && attr.ConstructorArguments.Length > 0
                 && attr.ConstructorArguments[0].Value is int ers)
             {
                 error = ers;
             }
-            else if (name == "DisableMediatorLoggingAttribute")
+            else if (IsMediatorLiteAttribute(attr, "DisableMediatorLoggingAttribute"))
             {
                 loggingDisabled = true;
             }
-            else if (name == "DisableMediatorTracingAttribute")
+            else if (IsMediatorLiteAttribute(attr, "DisableMediatorTracingAttribute"))
             {
                 tracingDisabled = true;
             }
@@ -199,25 +226,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         if (!implementsNotification)
             return null;
 
-        int? executionStrategy = null;
-        int? errorStrategy = null;
-
-        foreach (var attr in typeSymbol.GetAttributes())
-        {
-            var name = attr.AttributeClass?.Name;
-            if (name == "NotificationExecutionAttribute"
-                && attr.ConstructorArguments.Length > 0
-                && attr.ConstructorArguments[0].Value is int es)
-            {
-                executionStrategy = es;
-            }
-            else if (name == "NotificationErrorAttribute"
-                && attr.ConstructorArguments.Length > 0
-                && attr.ConstructorArguments[0].Value is int ers)
-            {
-                errorStrategy = ers;
-            }
-        }
+        var (executionStrategy, errorStrategy) = ReadNotificationStrategyAttributes(typeSymbol);
 
         if (executionStrategy is null && errorStrategy is null)
             return null;
@@ -226,6 +235,35 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             TypeName: typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             ExecutionStrategy: executionStrategy,
             ErrorStrategy: errorStrategy);
+    }
+
+    /// <summary>
+    /// Reads <c>[NotificationExecution]</c> / <c>[NotificationError]</c> off a notification
+    /// type symbol. Symbol-based (not syntax-based) so it works for notification types declared
+    /// in referenced assemblies, whose declaration syntax is not part of this compilation.
+    /// </summary>
+    private static (int? ExecutionStrategy, int? ErrorStrategy) ReadNotificationStrategyAttributes(ITypeSymbol typeSymbol)
+    {
+        int? executionStrategy = null;
+        int? errorStrategy = null;
+
+        foreach (var attr in typeSymbol.GetAttributes())
+        {
+            if (IsMediatorLiteAttribute(attr, "NotificationExecutionAttribute")
+                && attr.ConstructorArguments.Length > 0
+                && attr.ConstructorArguments[0].Value is int es)
+            {
+                executionStrategy = es;
+            }
+            else if (IsMediatorLiteAttribute(attr, "NotificationErrorAttribute")
+                && attr.ConstructorArguments.Length > 0
+                && attr.ConstructorArguments[0].Value is int ers)
+            {
+                errorStrategy = ers;
+            }
+        }
+
+        return (executionStrategy, errorStrategy);
     }
 
     private static bool IsBehaviorCandidate(SyntaxNode node) => IsHandlerCandidate(node);
@@ -240,7 +278,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             return null;
 
         var hasSkipAttribute = classSymbol.GetAttributes()
-            .Any(a => a.AttributeClass?.Name == "MediatorGenerationAttribute"
+            .Any(a => IsMediatorLiteAttribute(a, "MediatorGenerationAttribute")
                       && a.NamedArguments.Any(arg => arg.Key == "Skip" && arg.Value.Value is true));
 
         if (hasSkipAttribute)
@@ -278,6 +316,21 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                         continue;
                     }
 
+                    // Non-canonical shapes where a type parameter is not a *top-level*
+                    // interface argument also cannot be emitted:
+                    //  - a parameter nested inside an argument (IPipelineBehavior<Wrap<T>, R>)
+                    //    would emit `Wrap<T>` with T unbound;
+                    //  - a generic class whose interface is fully closed
+                    //    (Behavior<TUnused> : IPipelineBehavior<Req, Res>) would emit the
+                    //    class display name `Behavior<TUnused>` with TUnused unbound.
+                    // Both produce CS0246 in the generated files, so they get MEDL1002 too.
+                    if (!isInterfaceOpen
+                        && (typeArgs.Any(ContainsTypeParameter) || classSymbol.TypeParameters.Length > 0))
+                    {
+                        hasUnsupportedOpenShape = true;
+                        continue;
+                    }
+
                     behaviorInterfaces.Add(new BehaviorInterfaceInfo(
                         InterfaceType: iface.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                         RequestType: isInterfaceOpen ? null : typeArgs[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
@@ -293,7 +346,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         // Extract BehaviorOrderAttribute if present
         int behaviorOrder = 0;
         var orderAttr = classSymbol.GetAttributes()
-            .FirstOrDefault(a => a.AttributeClass?.Name == "BehaviorOrderAttribute");
+            .FirstOrDefault(a => IsMediatorLiteAttribute(a, "BehaviorOrderAttribute"));
         if (orderAttr != null && orderAttr.ConstructorArguments.Length > 0)
         {
             behaviorOrder = (int)(orderAttr.ConstructorArguments[0].Value ?? 0);
@@ -354,6 +407,21 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                || parameter.HasConstructorConstraint;
     }
 
+    /// <summary>
+    /// Whether a type parameter occurs anywhere inside <paramref name="type"/> — not just at
+    /// the top level. Emitting any type that still contains a type parameter into the generated
+    /// registration or pipeline produces unbound identifiers (CS0246), so such shapes must be
+    /// rejected rather than emitted.
+    /// </summary>
+    private static bool ContainsTypeParameter(ITypeSymbol type)
+        => type switch
+        {
+            ITypeParameterSymbol => true,
+            IArrayTypeSymbol array => ContainsTypeParameter(array.ElementType),
+            INamedTypeSymbol named => named.TypeArguments.Any(ContainsTypeParameter),
+            _ => false,
+        };
+
     private static bool IsValidatorCandidate(SyntaxNode node) => IsHandlerCandidate(node);
 
     private static ValidatorInfo? GetValidatorInfo(GeneratorSyntaxContext context, CancellationToken ct)
@@ -370,7 +438,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             return null;
 
         var hasSkipAttribute = classSymbol.GetAttributes()
-            .Any(a => a.AttributeClass?.Name == "MediatorGenerationAttribute"
+            .Any(a => IsMediatorLiteAttribute(a, "MediatorGenerationAttribute")
                       && a.NamedArguments.Any(arg => arg.Key == "Skip" && arg.Value.Value is true));
 
         if (hasSkipAttribute)
@@ -409,9 +477,12 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// Collects the fully-qualified names of all base classes of a type (excluding object).
-    /// Used to order switch arms most-derived-first so type-pattern dispatch preserves
-    /// runtime-type specificity when message types inherit from each other.
+    /// Collects the fully-qualified names of all base classes (excluding object) and all
+    /// implemented interfaces of a type. Used to order switch arms most-derived-first so
+    /// type-pattern dispatch preserves runtime-type specificity when message types inherit
+    /// from each other. Interfaces are included because message types can themselves be
+    /// interfaces (e.g. <c>IRequestHandler&lt;IFoo, T&gt;</c>): without them, a concrete
+    /// implementor's arm could be emitted after the interface's arm and be subsumed (CS8120).
     /// </summary>
     private static EquatableArray<string> GetBaseTypeNames(ITypeSymbol type)
     {
@@ -421,6 +492,10 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         {
             result.Add(current.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
             current = current.BaseType;
+        }
+        foreach (var iface in type.AllInterfaces)
+        {
+            result.Add(iface.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
         }
         return new EquatableArray<string>(result.ToArray());
     }
@@ -457,7 +532,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             return null;
 
         var hasSkipAttribute = classSymbol.GetAttributes()
-            .Any(a => a.AttributeClass?.Name == "MediatorGenerationAttribute"
+            .Any(a => IsMediatorLiteAttribute(a, "MediatorGenerationAttribute")
                       && a.NamedArguments.Any(arg => arg.Key == "Skip" && arg.Value.Value is true));
 
         if (hasSkipAttribute)
@@ -465,7 +540,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
 
         int? handlerOrder = null;
         var orderAttr = classSymbol.GetAttributes()
-            .FirstOrDefault(a => a.AttributeClass?.Name == "NotificationHandlerOrderAttribute");
+            .FirstOrDefault(a => IsMediatorLiteAttribute(a, "NotificationHandlerOrderAttribute"));
         if (orderAttr != null && orderAttr.ConstructorArguments.Length > 0)
         {
             handlerOrder = orderAttr.ConstructorArguments[0].Value as int?;
@@ -498,11 +573,18 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 var typeArgs = iface.TypeArguments;
                 if (typeArgs.Length == 1)
                 {
+                    // Strategy attributes are read from the notification type symbol here (not
+                    // only from the notification-declaration syntax pipeline) so they are
+                    // honored when the notification type lives in a referenced assembly.
+                    var (notifExecution, notifError) = ReadNotificationStrategyAttributes(typeArgs[0]);
+
                     notificationHandlerInterfaces.Add(new NotificationHandlerInterfaceInfo(
                         InterfaceType: iface.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                         NotificationType: typeArgs[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                         Order: handlerOrder,
-                        BaseTypes: GetBaseTypeNames(typeArgs[0])));
+                        BaseTypes: GetBaseTypeNames(typeArgs[0]),
+                        ExecutionStrategy: notifExecution,
+                        ErrorStrategy: notifError));
                 }
             }
         }
@@ -545,6 +627,23 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         {
             GenerateEmptyRegistration(context);
             return;
+        }
+
+        // Silent last-wins is easy to hit by accident (a copied handler class left behind):
+        // surface every duplicated (request, response) pair so the dead handlers are visible.
+        var duplicateGroups = validHandlers
+            .SelectMany(h => h.RequestHandlers.Select(r => (Handler: h, Interface: r)))
+            .GroupBy(x => (x.Interface.RequestType, x.Interface.ResponseType))
+            .Where(g => g.Count() > 1);
+        foreach (var group in duplicateGroups)
+        {
+            var handlerNames = group.Select(x => StripGlobalPrefix(x.Handler.ClassName)).ToList();
+            context.ReportDiagnostic(Diagnostic.Create(
+                DuplicateRequestHandlers,
+                Location.None,
+                StripGlobalPrefix(group.Key.RequestType),
+                string.Join(", ", handlerNames),
+                handlerNames[handlerNames.Count - 1]));
         }
 
         var expandedBehaviors = ExpandBehaviors(validBehaviors, validHandlers);
@@ -1006,6 +1105,48 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             g => g.RequestType,
             g => g.BaseTypes);
 
+        // Method-name suffixes are sanitized type names, and sanitization can collide
+        // (App.Get_User vs App.Get.User both become App_Get_User). Distinct request types
+        // merely overload Send_*, but a multi-response request whose response names collide
+        // would emit two methods differing only by return type (CS0111). Uniquify every
+        // suffix deterministically up front; both the switch arms and the pipeline methods
+        // read from these maps so the names always stay in sync.
+        var sendMethodSuffixes = new Dictionary<(string RequestType, string ResponseType), string>();
+        var usedSendSuffixes = new HashSet<string>();
+        foreach (var group in dispatchGroups)
+        {
+            var multipleResponses = group.Entries.Count > 1;
+            foreach (var (_, iface) in group.Entries)
+            {
+                var baseSuffix = multipleResponses
+                    ? $"{GetSafeTypeName(group.RequestType)}_{GetSafeTypeName(iface.ResponseType!)}"
+                    : GetSafeTypeName(group.RequestType);
+                var suffix = baseSuffix;
+                var counter = 2;
+                while (!usedSendSuffixes.Add(suffix))
+                {
+                    suffix = $"{baseSuffix}_{counter++}";
+                }
+
+                sendMethodSuffixes[(group.RequestType, iface.ResponseType!)] = suffix;
+            }
+        }
+
+        var publishMethodSuffixes = new Dictionary<string, string>();
+        var usedPublishSuffixes = new HashSet<string>();
+        foreach (var group in notificationGroups)
+        {
+            var baseSuffix = GetSafeTypeName(group.NotificationType);
+            var suffix = baseSuffix;
+            var counter = 2;
+            while (!usedPublishSuffixes.Add(suffix))
+            {
+                suffix = $"{baseSuffix}_{counter++}";
+            }
+
+            publishMethodSuffixes[group.NotificationType] = suffix;
+        }
+
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated />");
         sb.AppendLine("#nullable enable");
@@ -1054,7 +1195,8 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             if (group.Entries.Count == 1)
             {
                 var iface = group.Entries[0].Interface;
-                sb.AppendLine($"                    var vt = Send_{safeName}(r_{safeName}, cancellationToken);");
+                var sendSuffix = sendMethodSuffixes[(group.RequestType, iface.ResponseType!)];
+                sb.AppendLine($"                    var vt = Send_{sendSuffix}(r_{safeName}, cancellationToken);");
                 sb.AppendLine($"                    if (typeof(TResponse) == typeof({iface.ResponseType}))");
                 sb.AppendLine("                    {");
                 sb.AppendLine("                        // SAFETY: guarded by the exact type-equality check above, this is an");
@@ -1068,7 +1210,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             {
                 foreach (var (_, iface) in group.Entries)
                 {
-                    var sendName = $"Send_{safeName}_{GetSafeTypeName(iface.ResponseType!)}";
+                    var sendName = $"Send_{sendMethodSuffixes[(group.RequestType, iface.ResponseType!)]}";
                     sb.AppendLine($"                    if (typeof(TResponse) == typeof({iface.ResponseType}))");
                     sb.AppendLine("                    {");
                     sb.AppendLine("                        // SAFETY: identity reinterpret guarded by the exact type-equality check.");
@@ -1081,7 +1223,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 sb.AppendLine("                    // response type is assignable to the requested TResponse.");
                 foreach (var (_, iface) in group.Entries)
                 {
-                    var sendName = $"Send_{safeName}_{GetSafeTypeName(iface.ResponseType!)}";
+                    var sendName = $"Send_{sendMethodSuffixes[(group.RequestType, iface.ResponseType!)]}";
                     sb.AppendLine($"                    if (typeof({iface.ResponseType}).IsAssignableTo(typeof(TResponse)))");
                     sb.AppendLine("                    {");
                     sb.AppendLine($"                        return SlowCast<{iface.ResponseType}, TResponse>({sendName}(r_{safeName}, cancellationToken));");
@@ -1122,8 +1264,9 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         foreach (var group in notificationGroups)
         {
             var safeName = GetSafeTypeName(group.NotificationType);
+            var publishSuffix = publishMethodSuffixes[group.NotificationType];
             sb.AppendLine($"                case {group.NotificationType} n_{safeName}:");
-            sb.AppendLine($"                    return Publish_{safeName}(n_{safeName}, cancellationToken);");
+            sb.AppendLine($"                    return Publish_{publishSuffix}(n_{safeName}, cancellationToken);");
         }
         sb.AppendLine("                case null:");
         sb.AppendLine("                    throw new ArgumentNullException(nameof(notification));");
@@ -1141,17 +1284,14 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
 
         foreach (var group in dispatchGroups)
         {
-            var multipleResponses = group.Entries.Count > 1;
             foreach (var (_, iface) in group.Entries)
             {
                 var requestType = iface.RequestType;
                 var responseType = iface.ResponseType!;
 
-                // Multi-response request types get one Send_* method per response type; the
-                // name must stay in sync with the switch-arm emission above.
-                var safeName = multipleResponses
-                    ? $"{GetSafeTypeName(requestType)}_{GetSafeTypeName(responseType)}"
-                    : GetSafeTypeName(requestType);
+                // The suffix map is shared with the switch-arm emission above, so names stay
+                // in sync (including any collision-disambiguation suffix).
+                var safeName = sendMethodSuffixes[(requestType, responseType)];
 
                 // Get behaviors for this request type, sorted by order
                 var key = (requestType, responseType);
@@ -1183,10 +1323,25 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         foreach (var group in notificationGroups)
         {
             var notificationType = group.NotificationType;
-            var safeName = GetSafeTypeName(notificationType);
+            // Shared with the switch-arm emission above, so names stay in sync (including any
+            // collision-disambiguation suffix) — do not re-derive with GetSafeTypeName here.
+            var safeName = publishMethodSuffixes[notificationType];
             var handlersForNotification = group.Handlers;
 
             notificationsByType.TryGetValue(notificationType, out var perTypeOptions);
+            if (perTypeOptions is null)
+            {
+                // The notification type is declared in a referenced assembly, so the
+                // syntax-based pipeline never saw it. Fall back to the strategies the handler
+                // discovery read off the type symbol (identical for in-compilation types).
+                var carried = handlersForNotification[0].Interface;
+                if (carried.ExecutionStrategy is not null || carried.ErrorStrategy is not null)
+                {
+                    perTypeOptions = new NotificationTypeInfo(
+                        notificationType, carried.ExecutionStrategy, carried.ErrorStrategy);
+                }
+            }
+
             var (executionStrategy, errorStrategy) = ResolveStrategies(perTypeOptions, assemblyDefaults);
 
             GenerateUnrolledNotificationPublisher(
@@ -1467,7 +1622,9 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 sb.AppendLine("                ct.ThrowIfCancellationRequested();");
                 sb.AppendLine($"                await h{i + 1}.HandleAsync(notification, ct).ConfigureAwait(false);");
                 sb.AppendLine("            }");
-                sb.AppendLine("            catch (OperationCanceledException) { throw; }");
+                sb.AppendLine("            // Only genuine cancellation of the publish token stops the loop; a handler's");
+                sb.AppendLine("            // own OperationCanceledException is an ordinary fault to aggregate.");
+                sb.AppendLine("            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }");
                 sb.AppendLine("            catch (Exception ex)");
                 sb.AppendLine("            {");
                 sb.AppendLine("                (exceptions ??= new List<Exception>()).Add(ex);");
@@ -1526,18 +1683,11 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             sb.AppendLine();
             sb.AppendLine("            if (exceptions is not null)");
             sb.AppendLine("            {");
-            sb.AppendLine("                // Prioritize cancellation - rethrow OperationCanceledException directly");
+            sb.AppendLine("                // Genuine cancellation of the publish token dominates and surfaces unwrapped.");
             sb.AppendLine("                ct.ThrowIfCancellationRequested();");
-            sb.AppendLine("                // Match sequential semantics: a handler's OperationCanceledException");
-            sb.AppendLine("                // surfaces unwrapped (first in start order), never inside an AggregateException.");
-            sb.AppendLine("                foreach (var __candidate in exceptions)");
-            sb.AppendLine("                {");
-            sb.AppendLine("                    if (__candidate is OperationCanceledException)");
-            sb.AppendLine("                    {");
-            sb.AppendLine("                        global::System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(__candidate).Throw();");
-            sb.AppendLine("                    }");
-            sb.AppendLine("                }");
-            sb.AppendLine("                // For handler failures, throw an AggregateException with all exceptions");
+            sb.AppendLine("                // Otherwise every fault is aggregated — including a handler's own");
+            sb.AppendLine("                // OperationCanceledException. Rethrowing an OCE unwrapped here would");
+            sb.AppendLine("                // silently drop its siblings' faults.");
             sb.AppendLine("                throw new AggregateException(exceptions);");
             sb.AppendLine("            }");
         }
@@ -1600,7 +1750,9 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 }
                 sb.AppendLine("                return; // Success — stop here");
                 sb.AppendLine("            }");
-                sb.AppendLine("            catch (OperationCanceledException) { throw; }");
+                sb.AppendLine("            // Only genuine cancellation of the publish token stops the fallback chain; a");
+                sb.AppendLine("            // handler's own OperationCanceledException is an ordinary fault to aggregate.");
+                sb.AppendLine("            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }");
                 sb.AppendLine("            catch (Exception ex)");
                 sb.AppendLine("            {");
                 sb.AppendLine("                (exceptions ??= new List<Exception>()).Add(ex);");
@@ -1636,14 +1788,15 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// Strips a leading "global::" prefix for use in emitted string literals (tag values,
-    /// log message arguments). The returned value is suitable to embed inside a C# string literal.
+    /// Strips every "global::" prefix for use in emitted string literals (tag values, log
+    /// message arguments, diagnostic messages). Stripping only a leading prefix would leave
+    /// inner prefixes on generic type arguments (<c>Ns.Query&lt;global::System.String&gt;</c>)
+    /// and on tuple types (which start with '('). Display-only — never used for emitted code,
+    /// where the prefix must stay. The returned value is suitable to embed inside a C# string
+    /// literal (type display strings never contain '"' or '\').
     /// </summary>
     private static string StripGlobalPrefix(string typeName)
-    {
-        const string prefix = "global::";
-        return typeName.StartsWith(prefix) ? typeName.Substring(prefix.Length) : typeName;
-    }
+        => typeName.Replace("global::", "");
 
     /// <summary>
     /// Computes the simple display name of a fully-qualified type for log messages and
@@ -1680,7 +1833,9 @@ internal sealed record NotificationHandlerInterfaceInfo(
     string InterfaceType,
     string NotificationType,
     int? Order,
-    EquatableArray<string> BaseTypes = default);
+    EquatableArray<string> BaseTypes = default,
+    int? ExecutionStrategy = null,
+    int? ErrorStrategy = null);
 
 internal sealed record NotificationTypeInfo(
     string TypeName,

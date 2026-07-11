@@ -4,13 +4,17 @@ on:
   push:
     branches: [ main, develop ]
     paths-ignore:
-      - '.github/skills/**'
-      - '.github/copilot-instructions'
+      - '.claude/skills/**'
+      - '.agents/skills/**'
+      - '.cursor/skills/**'
+      - '.github/copilot-instructions.md'
   pull_request:
     branches: [ main, develop ]
     paths-ignore:
-      - '.github/skills/**'
-      - '.github/copilot-instructions'
+      - '.claude/skills/**'
+      - '.agents/skills/**'
+      - '.cursor/skills/**'
+      - '.github/copilot-instructions.md'
 
 env:
   DOTNET_VERSION: '10.0.x'

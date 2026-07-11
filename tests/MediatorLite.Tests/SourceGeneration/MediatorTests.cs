@@ -12,20 +12,29 @@ namespace MediatorLite.Tests.SourceGeneration;
 /// </summary>
 public class MediatorTests
 {
+    // The exact values pin generator discovery over TestTypes.cs: when adding a fixture
+    // handler/behavior/validator, update the corresponding count here (rule 70 §4). A `> 0`
+    // assertion would keep passing while the generator silently drops discovery of records,
+    // partials, or multi-response handlers.
     [Fact]
     public void AddGeneratedHandlers_RegistersRequestHandlers()
     {
-        // Assert that source generator discovered our handlers
-        MediatorLiteRegistration.RequestHandlerCount.Should().BeGreaterThan(0,
-            "Source generator should discover request handlers at compile-time");
+        MediatorLiteRegistration.RequestHandlerCount.Should().Be(13,
+            "the source generator must discover every request handler in TestTypes.cs");
     }
 
     [Fact]
     public void AddGeneratedHandlers_RegistersNotificationHandlers()
     {
-        // Assert that source generator discovered notification handlers
-        MediatorLiteRegistration.NotificationHandlerCount.Should().BeGreaterThan(0,
-            "Source generator should discover notification handlers at compile-time");
+        MediatorLiteRegistration.NotificationHandlerCount.Should().Be(24,
+            "the source generator must discover every notification handler in TestTypes.cs");
+    }
+
+    [Fact]
+    public void AddGeneratedHandlers_RegistersBehaviors()
+    {
+        MediatorLiteRegistration.BehaviorCount.Should().Be(31,
+            "the source generator must register every discovered behavior (validation behaviors included)");
     }
 
     [Fact]

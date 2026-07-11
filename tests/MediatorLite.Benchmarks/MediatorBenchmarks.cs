@@ -544,8 +544,10 @@ public class NotificationBenchmarks
 {
     private IServiceProvider _mediatorLiteProvider = null!;
     private IServiceProvider _mediatrProvider = null!;
+    private IServiceProvider _mediatrParallelProvider = null!;
     private MediatorLite.IMediator _mediatorLite = null!;
     private MediatR.IMediator _mediatr = null!;
+    private MediatR.IMediator _mediatrParallel = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -561,7 +563,7 @@ public class NotificationBenchmarks
         _mediatorLiteProvider = mediatorLiteServices.BuildServiceProvider();
         _mediatorLite = _mediatorLiteProvider.GetRequiredService<MediatorLite.IMediator>();
 
-        // Setup MediatR
+        // Setup MediatR (sequential — ForeachAwaitPublisher is the default)
         var mediatrServices = new ServiceCollection();
         mediatrServices.AddMediatR(cfg =>
         {
@@ -569,12 +571,31 @@ public class NotificationBenchmarks
         });
         _mediatrProvider = mediatrServices.BuildServiceProvider();
         _mediatr = _mediatrProvider.GetRequiredService<MediatR.IMediator>();
+
+        // Setup MediatR (parallel counterpart, rule 80 §2 parity): the publisher is a
+        // container-wide setting in MediatR, so the parallel variant needs its own provider.
+        // TaskWhenAllPublisher is MediatR's closest equivalent to MediatorLite's Parallel
+        // strategy (start everything, then await), same 3 handlers on both sides.
+        var mediatrParallelServices = new ServiceCollection();
+        mediatrParallelServices.AddMediatR(cfg =>
+        {
+            cfg.RegisterServicesFromAssemblyContaining<MediatorBenchmarks>();
+            cfg.NotificationPublisherType = typeof(MediatR.NotificationPublishers.TaskWhenAllPublisher);
+        });
+        _mediatrParallelProvider = mediatrParallelServices.BuildServiceProvider();
+        _mediatrParallel = _mediatrParallelProvider.GetRequiredService<MediatR.IMediator>();
     }
 
     [Benchmark(Baseline = true)]
     public async Task MediatR_Notification()
     {
         await _mediatr.Publish(new MediatorBenchmarks.MediatRNotification(1));
+    }
+
+    [Benchmark]
+    public async Task MediatR_Parallel_Notification()
+    {
+        await _mediatrParallel.Publish(new MediatorBenchmarks.MediatRNotification(1));
     }
 
     [Benchmark]
@@ -594,5 +615,6 @@ public class NotificationBenchmarks
     {
         (_mediatorLiteProvider as IDisposable)?.Dispose();
         (_mediatrProvider as IDisposable)?.Dispose();
+        (_mediatrParallelProvider as IDisposable)?.Dispose();
     }
 }

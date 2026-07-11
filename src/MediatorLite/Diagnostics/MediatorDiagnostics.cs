@@ -15,6 +15,11 @@ public static class MediatorActivitySource
     /// <summary>
     /// The version of the activity source.
     /// </summary>
+    /// <remarks>
+    /// Deliberately a fixed constant, not the assembly version: consumers filter and assert
+    /// on it, so it only changes when the tracing *schema* (activity names/tags) changes.
+    /// It does not track the package version.
+    /// </remarks>
     public const string Version = "1.0.0";
 
     /// <summary>
@@ -77,16 +82,32 @@ public static class MediatorActivitySource
 /// <summary>
 /// Diagnostic events for MediatorLite operations.
 /// </summary>
+/// <remarks>
+/// <b>Reserved surface — no events are currently emitted.</b> Neither the runtime nor the
+/// source-generated dispatch writes to <see cref="Listener"/>; subscribing to it today
+/// observes nothing. All shipped instrumentation flows through
+/// <see cref="MediatorActivitySource"/> (logging via the <c>MediatorLite.IMediator</c>
+/// category, tracing via the <c>"MediatorLite"</c> <see cref="System.Diagnostics.ActivitySource"/>).
+/// The listener and <see cref="Events"/> names are kept for binary compatibility and possible
+/// future use.
+/// </remarks>
 public static class MediatorDiagnostics
 {
     /// <summary>
     /// DiagnosticListener for MediatorLite events.
     /// </summary>
+    /// <remarks>
+    /// Reserved: no MediatorLite code currently writes events to this listener. Use
+    /// <see cref="MediatorActivitySource"/> for tracing instead.
+    /// </remarks>
     public static readonly DiagnosticListener Listener = new("MediatorLite");
 
     /// <summary>
     /// Event name constants.
     /// </summary>
+    /// <remarks>
+    /// Reserved: these event names are not currently emitted anywhere.
+    /// </remarks>
     public static class Events
     {
         /// <summary>Request started event.</summary>

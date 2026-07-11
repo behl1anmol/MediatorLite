@@ -107,6 +107,14 @@ Rules:
 
 ## Rule 4 — Do not add a parallel instrumentation stack
 
-Prometheus, metrics, or custom `DiagnosticSource` wiring must go through the
-existing `MediatorDiagnostics.Listener` / `MediatorActivitySource` surface.
-Adding a second `ActivitySource` inside MediatorLite is not allowed.
+Prometheus, metrics, or custom instrumentation must go through the existing
+`MediatorActivitySource` surface. Adding a second `ActivitySource` inside
+MediatorLite is not allowed.
+
+Note: `MediatorDiagnostics.Listener` and the `MediatorDiagnostics.Events`
+names are a **reserved, currently-silent surface** — no runtime or generated
+code writes to that `DiagnosticListener` today, so do not point consumers at
+it and do not start emitting to it ad hoc. Wiring it up for real is a design
+decision (it adds work to every dispatch); until then the only live
+instrumentation is the `MediatorLite.IMediator` log category and the
+`"MediatorLite"` `ActivitySource`.
