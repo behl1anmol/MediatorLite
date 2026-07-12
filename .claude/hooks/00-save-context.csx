@@ -22,6 +22,14 @@ var sw = Stopwatch.StartNew();
 try
 {
     var sid = Environment.GetEnvironmentVariable("MEDIATORLITE_SESSION_ID") ?? ContextDb.EnsureSession();
+
+    // Session ids are Guid "N" strings (see ContextDb.EnsureSession), but the env var is
+    // external input: validate before it reaches a file name, and parameterize the queries
+    // below like every other query in the hook layer.
+    if (!System.Text.RegularExpressions.Regex.IsMatch(sid, "^[0-9a-fA-F-]{1,64}$"))
+        throw new InvalidOperationException(
+            $"MEDIATORLITE_SESSION_ID '{sid}' is not a valid session id; refusing to snapshot.");
+
     var snapDir = Path.Combine(Path.GetDirectoryName(ContextDb.DbPath)!, "snapshots");
     Directory.CreateDirectory(snapDir);
     var stamp = DateTime.UtcNow.ToString("yyyyMMddTHHmmssZ");
@@ -31,13 +39,13 @@ try
     {
         ["session_id"] = sid,
         ["taken_at"]   = DateTime.UtcNow.ToString("o"),
-        ["sessions"]   = DumpTable($"SELECT * FROM sessions WHERE id = '{sid}'"),
-        ["messages"]   = DumpTable($"SELECT * FROM agent_messages WHERE session_id = '{sid}' ORDER BY id"),
-        ["plans"]      = DumpTable($"SELECT * FROM plans WHERE session_id = '{sid}' ORDER BY id"),
-        ["decisions"]  = DumpTable($"SELECT * FROM decisions WHERE session_id = '{sid}' ORDER BY id"),
-        ["mistakes"]   = DumpTable($"SELECT * FROM mistakes WHERE session_id = '{sid}' ORDER BY id"),
-        ["reviews"]    = DumpTable($"SELECT * FROM reviews WHERE session_id = '{sid}' ORDER BY id"),
-        ["backlog"]    = DumpTable($"SELECT * FROM sprint_backlog WHERE session_id = '{sid}' ORDER BY id")
+        ["sessions"]   = DumpTable("SELECT * FROM sessions WHERE id = $sid", sid),
+        ["messages"]   = DumpTable("SELECT * FROM agent_messages WHERE session_id = $sid ORDER BY id", sid),
+        ["plans"]      = DumpTable("SELECT * FROM plans WHERE session_id = $sid ORDER BY id", sid),
+        ["decisions"]  = DumpTable("SELECT * FROM decisions WHERE session_id = $sid ORDER BY id", sid),
+        ["mistakes"]   = DumpTable("SELECT * FROM mistakes WHERE session_id = $sid ORDER BY id", sid),
+        ["reviews"]    = DumpTable("SELECT * FROM reviews WHERE session_id = $sid ORDER BY id", sid),
+        ["backlog"]    = DumpTable("SELECT * FROM sprint_backlog WHERE session_id = $sid ORDER BY id", sid)
     };
 
     File.WriteAllText(outPath, JsonSerializer.Serialize(snapshot, new JsonSerializerOptions { WriteIndented = true }));
@@ -61,13 +69,14 @@ catch (Exception ex)
     try { ContextDb.LogHookEvent("00-save-context.csx", "beforeCompaction", "fail", sw.ElapsedMilliseconds, new { error = ex.Message }); } catch { }
 }
 
-static List<Dictionary<string, object?>> DumpTable(string sql)
+static List<Dictionary<string, object?>> DumpTable(string sql, string sid)
 {
     var rows = new List<Dictionary<string, object?>>();
     using var conn = new SqliteConnection(ContextDb.ConnectionString);
     conn.Open();
     using var cmd = conn.CreateCommand();
     cmd.CommandText = sql;
+    cmd.Parameters.AddWithValue("$sid", sid);
     using var r = cmd.ExecuteReader();
     while (r.Read())
     {
