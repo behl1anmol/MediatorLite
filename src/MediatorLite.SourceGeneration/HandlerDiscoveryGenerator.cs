@@ -1290,11 +1290,15 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 }
 
                 sb.AppendLine("                    // Covariant dispatch (IRequest<out T>): pick the pipeline whose concrete");
-                sb.AppendLine("                    // response type is assignable to the requested TResponse.");
+                sb.AppendLine("                    // response type is assignable to the requested TResponse. Value-type");
+                sb.AppendLine("                    // responses are excluded: variance only exists for reference conversions,");
+                sb.AppendLine("                    // so an IRequest<TResponse> reference can never originate from a");
+                sb.AppendLine("                    // value-type response interface — but IsAssignableTo alone would match");
+                sb.AppendLine("                    // one via boxing and silently run the wrong pipeline.");
                 foreach (var (_, iface) in group.Entries)
                 {
                     var sendName = $"Send_{sendMethodSuffixes[(group.RequestType, iface.ResponseType!)]}";
-                    sb.AppendLine($"                    if (typeof({iface.ResponseType}).IsAssignableTo(typeof(TResponse)))");
+                    sb.AppendLine($"                    if (!typeof({iface.ResponseType}).IsValueType && typeof({iface.ResponseType}).IsAssignableTo(typeof(TResponse)))");
                     sb.AppendLine("                    {");
                     sb.AppendLine($"                        return SlowCast<{iface.ResponseType}, TResponse>({sendName}(r_{safeName}, cancellationToken));");
                     sb.AppendLine("                    }");

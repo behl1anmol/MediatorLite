@@ -325,4 +325,30 @@ public class MediatorTests
         arrayResult.Should().Equal(0, 1, 2);
         stringResult.Should().Be("count:3");
     }
+
+    [Fact]
+    public async Task SendAsync_CovariantMultiResponseRequest_PicksVarianceCompatiblePipeline()
+    {
+        // Arrange - MultiResponseQuery implements IRequest<int> and IRequest<string>. An
+        // IRequest<object> reference can only exist through the string interface, because
+        // IRequest<out T> variance never applies to value types (IRequest<int> is not an
+        // IRequest<object>). Dispatch must therefore pick the string pipeline. The int
+        // pipeline used to win because the emitted fallback tested
+        // typeof(int).IsAssignableTo(typeof(object)), which is true via boxing — returning
+        // a boxed 50 instead of "value:5" with no error.
+        var services = new ServiceCollection();
+        services.AddGeneratedHandlers();
+        services.AddMediatorLite();
+        services.AddLogging();
+
+        var provider = services.BuildServiceProvider();
+        var mediator = provider.GetRequiredService<IMediator>();
+
+        // Act
+        IRequest<object> request = new MultiResponseQuery(5);
+        var result = await mediator.SendAsync(request);
+
+        // Assert
+        result.Should().Be("value:5");
+    }
 }
