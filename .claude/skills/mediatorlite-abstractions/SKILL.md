@@ -449,7 +449,7 @@ public sealed class MediatorGenerationAttribute : Attribute
 }
 ```
 
-The generator still honors `[MediatorGeneration(Skip = true)]` when present (see `GetHandlerInfo`, `GetBehaviorInfo`, `GetValidatorInfo` in the generator), but **do not use it in new code**.
+The generator **ignores** `[MediatorGeneration(Skip = true)]`; discovery in `GetHandlerInfo`, `GetBehaviorInfo`, and `GetValidatorInfo` is unconditional. The attribute type is kept for binary compatibility but has no effect — do not use it.
 
 #### Observability opt-outs (assembly-level, no-arg)
 

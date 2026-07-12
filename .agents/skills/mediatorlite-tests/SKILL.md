@@ -333,7 +333,7 @@ public class ValidatedCommandCustomValidator : IValidator<ValidatedCommand>
 - Assert on `MediatorLiteRegistration.RequestHandlerCount` etc. whenever a PR adds a whole new category.
 
 **Don't:**
-- Don't add `[MediatorGeneration(Skip = true)]` to new test types — the attribute is obsolete (still honored for legacy compatibility, see the generator's `GetHandlerInfo`).
+- Don't add `[MediatorGeneration(Skip = true)]` to new test types — the attribute is obsolete and the generator ignores it entirely (discovery in `GetHandlerInfo` is unconditional); a "skipped" handler is registered like any other.
 - Don't share mutable instance state between handlers; use static fields + `Reset()`.
 - Don't expect dispatch without `AddGeneratedHandlers()` — without it the only `IMediator` is the [ThrowingMediator](src/MediatorLite/Internal/ThrowingMediator.cs) fallback (registered by `AddMediatorLite()`), which throws with a specific setup-guidance message on every dispatch.
 - Don't put `[NotificationExecution]` on a notification handler — the generator only reads it off the `INotification` implementation.
@@ -372,7 +372,7 @@ public class ValidatedCommandCustomValidator : IValidator<ValidatedCommand>
 
 - **Static state bleeds across tests**: xUnit creates a new instance per test but static fields persist. Always `Reset()` before acting. Parallelism at the test class level can race static state — keep handlers dedicated to one notification or guard with per-test names.
 - **Test projects target `net10.0`** (see [Directory.Build.props](Directory.Build.props)) with warnings-as-errors. Any new type that would produce a nullable-ref warning fails the build.
-- **`[MediatorGeneration(Skip = true)]` is obsolete** (documented in [Attributes.cs](src/MediatorLite.Abstractions/Abstractions/Attributes.cs)). The generator still honors it as a safety valve but never add it to new test types.
+- **`[MediatorGeneration(Skip = true)]` is obsolete and inert** (documented in [Attributes.cs](src/MediatorLite.Abstractions/Abstractions/Attributes.cs)). The generator ignores it entirely — a "skipped" handler is registered like any other. Never add it to new test types.
 - **`MediatorLiteRegistration` is generated per-assembly**. The counts reflect handlers in `MediatorLite.Tests` **only** — not downstream projects. Likewise, changing a handler in another assembly does not regenerate the tests' registration.
 - **Generator projects must be `netstandard2.0`**; test types, however, target `net10.0`. Stay on the test-assembly side when writing dependent code.
 - **`[NotificationHandlerOrder(n)]` with equal values**: order is **stable but not strictly defined** by the spec — in practice the generator orders by `OrderBy(h => h.Order ?? 0)` which preserves discovery order for ties. Do not rely on a specific tie-break.
