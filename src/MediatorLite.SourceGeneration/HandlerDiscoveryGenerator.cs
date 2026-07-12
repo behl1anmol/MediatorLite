@@ -819,6 +819,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             .SelectMany(h => h.RequestHandlers.Select(r => (r.RequestType, r.ResponseType!)))
             .Distinct()
             .ToList();
+        var handledPairs = new HashSet<(string, string)>(requestResponsePairs);
 
         foreach (var behavior in behaviors)
         {
@@ -848,6 +849,12 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 }
                 else if (!behaviorInterface.IsOpenGeneric)
                 {
+                    // A closed behavior bound to a (request, response) pair with no handler
+                    // in this compilation has no pipeline to run in — registering it would
+                    // be dead wiring and inflate BehaviorCount. Same policy as validators.
+                    if (!handledPairs.Contains((behaviorInterface.RequestType!, behaviorInterface.ResponseType!)))
+                        continue;
+
                     expanded.Add(new ExpandedBehaviorInfo(
                         BehaviorTypeName: behavior.ClassName,
                         RequestType: behaviorInterface.RequestType!,

@@ -666,6 +666,40 @@ public class SourceGeneratorDriverTests
     }
 
     [Fact]
+    public void ClosedBehaviorForUnhandledRequestType_IsNotRegisteredOrCounted()
+    {
+        // A closed behavior bound to a request type with no handler in the compilation can
+        // never be resolved by any generated pipeline. It used to be registered in DI and
+        // counted in BehaviorCount anyway (dead wiring), while validators in the same
+        // situation were filtered out — the policies now match.
+        const string source = """
+            using MediatorLite;
+
+            namespace DriverTests;
+
+            public record RetiredCommand(int Id) : IRequest<int>;
+
+            public sealed class RetiredAuditBehavior : IPipelineBehavior<RetiredCommand, int>
+            {
+                public ValueTask<int> HandleAsync(
+                    RetiredCommand request,
+                    RequestHandlerDelegate<int> next,
+                    CancellationToken cancellationToken = default)
+                    => next();
+            }
+            """;
+
+        var (runResult, updatedCompilation) = RunGeneratorAndUpdateCompilation(HandlerSource, source);
+
+        var generated = string.Join("\n", runResult.GeneratedTrees.Select(t => t.ToString()));
+        generated.Should().NotContain("RetiredAuditBehavior",
+            "a closed behavior whose request type has no handler can never run and must not be wired");
+        generated.Should().Contain("public static int BehaviorCount => 0;");
+
+        AssertGeneratedOutputCompiles(updatedCompilation);
+    }
+
+    [Fact]
     public void ValidatorImplementingMultipleValidatorInterfaces_WiresValidationForEveryRequestType()
     {
         // One validator class may validate several request types (IValidator<A> +
