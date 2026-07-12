@@ -7,14 +7,14 @@ nav_order: 8
 
 Performance comparisons between MediatorLite and [MediatR](https://github.com/jbogard/MediatR) across four scenarios: simple request dispatch, single pipeline behavior, multiple pipeline behaviors, and notification publishing.
 
-> Last updated: 2026-07-11 — automated via CI.
+> Last updated: 2026-07-12 — automated via CI.
 {: .note }
 
 ## Environment
 
 ```
 BenchmarkDotNet v0.15.8, Linux Ubuntu 24.04.4 LTS (Noble Numbat)
-AMD EPYC 7763 3.24GHz, 1 CPU, 4 logical and 2 physical cores
+AMD EPYC 7763 2.45GHz, 1 CPU, 4 logical and 2 physical cores
 .NET SDK 10.0.301
   [Host]     : .NET 10.0.9 (10.0.9, 10.0.926.27113), X64 RyuJIT x86-64-v3
   Job-YFEFPZ : .NET 10.0.9 (10.0.9, 10.0.926.27113), X64 RyuJIT x86-64-v3
@@ -30,8 +30,8 @@ Baseline scenario: a single request dispatched to a single handler with no pipel
 
 | Method                     | Mean      | Error    | StdDev   | Ratio | RatioSD | Gen0   | Allocated | Alloc Ratio |
 |--------------------------- |----------:|---------:|---------:|------:|--------:|-------:|----------:|------------:|
-| MediatR_SimpleRequest      | 115.05 ns | 2.855 ns | 1.888 ns |  1.00 |    0.02 | 0.0196 |     328 B |        1.00 |
-| MediatorLite_SimpleRequest |  55.73 ns | 1.032 ns | 0.614 ns |  0.48 |    0.01 | 0.0091 |     152 B |        0.46 |
+| MediatR_SimpleRequest      | 111.70 ns | 2.056 ns | 1.360 ns |  1.00 |    0.02 | 0.0196 |     328 B |        1.00 |
+| MediatorLite_SimpleRequest |  54.67 ns | 0.469 ns | 0.279 ns |  0.49 |    0.01 | 0.0091 |     152 B |        0.46 |
 
 ---
 
@@ -39,10 +39,10 @@ Baseline scenario: a single request dispatched to a single handler with no pipel
 
 Request dispatched through one open pipeline behavior (simulating a logging or tracing layer).
 
-| Method                    | Mean     | Error   | StdDev  | Ratio | RatioSD | Gen0   | Allocated | Alloc Ratio |
-|-------------------------- |---------:|--------:|--------:|------:|--------:|-------:|----------:|------------:|
-| MediatR_WithBehavior      | 221.2 ns | 4.34 ns | 2.87 ns |  1.00 |    0.02 | 0.0381 |     640 B |        1.00 |
-| MediatorLite_WithBehavior | 104.1 ns | 2.10 ns | 1.39 ns |  0.47 |    0.01 | 0.0167 |     280 B |        0.44 |
+| Method                    | Mean      | Error    | StdDev   | Ratio | RatioSD | Gen0   | Allocated | Alloc Ratio |
+|-------------------------- |----------:|---------:|---------:|------:|--------:|-------:|----------:|------------:|
+| MediatR_WithBehavior      | 211.91 ns | 4.655 ns | 3.079 ns |  1.00 |    0.02 | 0.0381 |     640 B |        1.00 |
+| MediatorLite_WithBehavior |  98.71 ns | 1.700 ns | 1.125 ns |  0.47 |    0.01 | 0.0167 |     280 B |        0.44 |
 
 ---
 
@@ -52,8 +52,8 @@ Request dispatched through three behaviors (logging, validation, metrics) — a 
 
 | Method                             | Mean     | Error   | StdDev  | Ratio | Gen0   | Allocated | Alloc Ratio |
 |----------------------------------- |---------:|--------:|--------:|------:|-------:|----------:|------------:|
-| MediatR_WithMultipleBehaviors      | 348.6 ns | 4.84 ns | 3.20 ns |  1.00 | 0.0639 |    1072 B |        1.00 |
-| MediatorLite_WithMultipleBehaviors | 266.8 ns | 1.90 ns | 1.13 ns |  0.77 | 0.0291 |     488 B |        0.46 |
+| MediatR_WithMultipleBehaviors      | 348.3 ns | 3.91 ns | 2.04 ns |  1.00 | 0.0639 |    1072 B |        1.00 |
+| MediatorLite_WithMultipleBehaviors | 283.8 ns | 2.34 ns | 1.40 ns |  0.81 | 0.0291 |     488 B |        0.46 |
 
 ---
 
@@ -63,10 +63,10 @@ A notification published to three handlers, comparing MediatR against MediatorLi
 
 | Method                               | Mean     | Error   | StdDev  | Ratio | RatioSD | Gen0   | Allocated | Alloc Ratio |
 |------------------------------------- |---------:|--------:|--------:|------:|--------:|-------:|----------:|------------:|
-| MediatR_Notification                 | 205.4 ns | 5.39 ns | 3.57 ns |  1.00 |    0.02 | 0.0367 |     616 B |        1.00 |
-| MediatR_Parallel_Notification        | 297.5 ns | 4.86 ns | 3.22 ns |  1.45 |    0.03 | 0.0582 |     976 B |        1.58 |
-| MediatorLite_Sequential_Notification | 138.9 ns | 0.41 ns | 0.24 ns |  0.68 |    0.01 | 0.0057 |      96 B |        0.16 |
-| MediatorLite_Parallel_Notification   | 135.8 ns | 0.40 ns | 0.24 ns |  0.66 |    0.01 | 0.0057 |      96 B |        0.16 |
+| MediatR_Notification                 | 206.4 ns | 2.76 ns | 1.64 ns |  1.00 |    0.01 | 0.0367 |     616 B |        1.00 |
+| MediatR_Parallel_Notification        | 294.7 ns | 9.53 ns | 6.31 ns |  1.43 |    0.03 | 0.0582 |     976 B |        1.58 |
+| MediatorLite_Sequential_Notification | 139.0 ns | 1.32 ns | 0.87 ns |  0.67 |    0.01 | 0.0057 |      96 B |        0.16 |
+| MediatorLite_Parallel_Notification   | 155.4 ns | 0.93 ns | 0.61 ns |  0.75 |    0.01 | 0.0057 |      96 B |        0.16 |
 
 ---
 
