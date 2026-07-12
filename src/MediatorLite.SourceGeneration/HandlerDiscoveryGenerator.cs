@@ -492,6 +492,11 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         if (hasSkipAttribute)
             return null;
 
+        // A validator class may implement IValidator<T> for several request types; collect
+        // every match — stopping at the first would silently leave the remaining request
+        // types unvalidated.
+        List<ValidatorTargetInfo>? targets = null;
+
         foreach (var iface in classSymbol.AllInterfaces)
         {
             if (!iface.IsGenericType)
@@ -514,14 +519,18 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             if (typeArgs[0].TypeKind == TypeKind.TypeParameter)
                 continue;
 
-            return new ValidatorInfo(
-                ClassName: classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                Namespace: classSymbol.ContainingNamespace?.ToDisplayString() ?? "",
+            (targets ??= []).Add(new ValidatorTargetInfo(
                 InterfaceType: iface.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                RequestType: typeArgs[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+                RequestType: typeArgs[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)));
         }
 
-        return null;
+        if (targets is null)
+            return null;
+
+        return new ValidatorInfo(
+            ClassName: classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            Namespace: classSymbol.ContainingNamespace?.ToDisplayString() ?? "",
+            Targets: new EquatableArray<ValidatorTargetInfo>(targets.ToArray()));
     }
 
     /// <summary>
@@ -778,7 +787,8 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         List<ValidatorInfo> validators)
     {
         var result = new List<(string RequestType, string ResponseType)>();
-        var requestTypesWithValidators = new HashSet<string>(validators.Select(v => v.RequestType));
+        var requestTypesWithValidators = new HashSet<string>(
+            validators.SelectMany(v => v.Targets).Select(t => t.RequestType));
 
         var requestResponsePairs = handlers
             .SelectMany(h => h.RequestHandlers.Select(r => (r.RequestType, ResponseType: r.ResponseType!)))
@@ -1030,17 +1040,19 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
 
         // Register discovered FluentValidation validators against their FluentValidation.IValidator<T>
         // service type so FluentValidationBehavior<T,_> can resolve them. No assembly scanning.
-        // Only validators whose request type has a generated pipeline (i.e. a handler in this
-        // compilation) are registered: a validator for an unhandled request type is never resolved,
-        // so registering it would be dead wiring (and could reference inaccessible types).
+        // A class registers once per IValidator<T> it implements. Only registrations whose
+        // request type has a generated pipeline (i.e. a handler in this compilation) are
+        // emitted: a validator for an unhandled request type is never resolved, so
+        // registering it would be dead wiring (and could reference inaccessible types).
         var validatedRequestTypes = new HashSet<string>(requestTypesWithValidation.Select(t => t.RequestType));
-        var validatorsToRegister = validators
-            .Where(v => validatedRequestTypes.Contains(v.RequestType))
+        var validatorRegistrations = validators
+            .SelectMany(v => v.Targets.Select(t => (v.ClassName, t.InterfaceType, t.RequestType)))
+            .Where(r => validatedRequestTypes.Contains(r.RequestType))
             .ToList();
 
-        foreach (var validator in validatorsToRegister)
+        foreach (var (className, interfaceType, _) in validatorRegistrations)
         {
-            sb.AppendLine($"            services.AddTransient<{validator.InterfaceType}, {validator.ClassName}>();");
+            sb.AppendLine($"            services.AddTransient<{interfaceType}, {className}>();");
         }
 
         sb.AppendLine("            return services;");
@@ -1091,7 +1103,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine();
 
         // --- Diagnostic counts ---
-        var totalValidatorCount = validatorsToRegister.Count;
+        var totalValidatorCount = validatorRegistrations.Count;
         var nonValidationBehaviorCount = expandedBehaviors
             .Count(b => !b.BehaviorTypeName.StartsWith("global::MediatorLite.FluentValidation.FluentValidationBehavior<"));
 
@@ -1952,5 +1964,8 @@ internal sealed record ExpandedBehaviorInfo(
 internal sealed record ValidatorInfo(
     string ClassName,
     string Namespace,
+    EquatableArray<ValidatorTargetInfo> Targets);
+
+internal sealed record ValidatorTargetInfo(
     string InterfaceType,
     string RequestType);

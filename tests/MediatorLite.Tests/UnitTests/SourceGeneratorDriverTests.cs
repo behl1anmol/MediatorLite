@@ -666,6 +666,67 @@ public class SourceGeneratorDriverTests
     }
 
     [Fact]
+    public void ValidatorImplementingMultipleValidatorInterfaces_WiresValidationForEveryRequestType()
+    {
+        // One validator class may validate several request types (IValidator<A> +
+        // IValidator<B>). Discovery used to stop at the first matching interface, so B's
+        // requests reached their handler unvalidated — silently, with no diagnostic.
+        const string source = """
+            using FluentValidation;
+            using FluentValidation.Results;
+            using MediatorLite;
+
+            namespace DriverTests;
+
+            public record CreateOrder(string Name) : IRequest<int>;
+            public record UpdateOrder(string Name) : IRequest<int>;
+
+            public sealed class CreateOrderHandler : IRequestHandler<CreateOrder, int>
+            {
+                public ValueTask<int> HandleAsync(CreateOrder request, CancellationToken cancellationToken = default)
+                    => ValueTask.FromResult(1);
+            }
+
+            public sealed class UpdateOrderHandler : IRequestHandler<UpdateOrder, int>
+            {
+                public ValueTask<int> HandleAsync(UpdateOrder request, CancellationToken cancellationToken = default)
+                    => ValueTask.FromResult(2);
+            }
+
+            public sealed class SharedRulesValidator : AbstractValidator<CreateOrder>, IValidator<UpdateOrder>
+            {
+                public ValidationResult Validate(UpdateOrder instance) => new();
+
+                public Task<ValidationResult> ValidateAsync(UpdateOrder instance, CancellationToken cancellation = default)
+                    => Task.FromResult(new ValidationResult());
+            }
+            """;
+
+        var compilation = CreateCompilation(
+            [source],
+            [
+                MetadataReference.CreateFromFile(typeof(global::FluentValidation.IValidator).Assembly.Location),
+                MetadataReference.CreateFromFile(typeof(global::MediatorLite.FluentValidation.FluentValidationBehavior<,>).Assembly.Location),
+            ]);
+
+        var driver = CSharpGeneratorDriver.Create(new HandlerDiscoveryGenerator());
+        var ranDriver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var updatedCompilation, out _);
+        var runResult = ranDriver.GetRunResult();
+
+        var generated = string.Join("\n", runResult.GeneratedTrees.Select(t => t.ToString()));
+
+        generated.Should().Contain("global::FluentValidation.IValidator<global::DriverTests.CreateOrder>, global::DriverTests.SharedRulesValidator")
+            .And.Contain("global::FluentValidation.IValidator<global::DriverTests.UpdateOrder>, global::DriverTests.SharedRulesValidator",
+                "the validator must be registered for every IValidator<T> it implements");
+        generated.Should().Contain("FluentValidationBehavior<global::DriverTests.CreateOrder, int>")
+            .And.Contain("FluentValidationBehavior<global::DriverTests.UpdateOrder, int>",
+                "both handled request types have a validator, so both pipelines must validate");
+        generated.Should().Contain("public static int ValidatorCount => 2;");
+
+        AssertGeneratedOutputCompiles(updatedCompilation);
+    }
+
+    [Fact]
     public void UnrelatedEdit_LeavesGeneratorOutputsCached()
     {
         // The pipeline models must have value equality end-to-end: an edit that does not
