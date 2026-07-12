@@ -76,6 +76,22 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
 
+    /// <summary>
+    /// Reported when a handler class is generic or nested inside a generic type. Its
+    /// fully-qualified name contains unbound type parameters, so emitting it into the
+    /// generated registration/dispatch would produce code that fails to compile (CS0246)
+    /// inside a .g.cs file. The handler is skipped and surfaced here instead.
+    /// </summary>
+    private static readonly DiagnosticDescriptor UnsupportedGenericHandler = new(
+        id: "MEDL1004",
+        title: "Generic handler classes are not supported",
+        messageFormat: "Handler '{0}' is generic or nested inside a generic type, so the source "
+            + "generator cannot emit a closed registration for it; the handler was not registered. "
+            + "Make the handler a non-generic class that is not nested inside a generic type.",
+        category: "MediatorLite.Handlers",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         // Find all class declarations that might be handlers
@@ -277,13 +293,6 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         if (classSymbol is null || classSymbol.IsAbstract || !classSymbol.IsReferenceType)
             return null;
 
-        var hasSkipAttribute = classSymbol.GetAttributes()
-            .Any(a => IsMediatorLiteAttribute(a, "MediatorGenerationAttribute")
-                      && a.NamedArguments.Any(arg => arg.Key == "Skip" && arg.Value.Value is true));
-
-        if (hasSkipAttribute)
-            return null;
-
         var behaviorInterfaces = new List<BehaviorInterfaceInfo>();
         bool isOpenGeneric = classSymbol.IsGenericType && classSymbol.IsUnboundGenericType == false
                              && classSymbol.TypeParameters.Length > 0;
@@ -322,10 +331,12 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                     //    would emit `Wrap<T>` with T unbound;
                     //  - a generic class whose interface is fully closed
                     //    (Behavior<TUnused> : IPipelineBehavior<Req, Res>) would emit the
-                    //    class display name `Behavior<TUnused>` with TUnused unbound.
-                    // Both produce CS0246 in the generated files, so they get MEDL1002 too.
+                    //    class display name `Behavior<TUnused>` with TUnused unbound —
+                    //    the same applies when the behavior is nested inside a generic
+                    //    type (Outer<T>.Inner), hence HasTypeParametersInScope.
+                    // All produce CS0246 in the generated files, so they get MEDL1002 too.
                     if (!isInterfaceOpen
-                        && (typeArgs.Any(ContainsTypeParameter) || classSymbol.TypeParameters.Length > 0))
+                        && (typeArgs.Any(ContainsTypeParameter) || HasTypeParametersInScope(classSymbol)))
                     {
                         hasUnsupportedOpenShape = true;
                         continue;
@@ -372,6 +383,12 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         if (classSymbol.TypeParameters.Length != 2)
             return false;
 
+        // A behavior nested inside a generic type cannot be expanded: its display name is
+        // truncated at the *first* '<' (the outer type's), so the emitted closed type would
+        // name the outer type instead of the behavior.
+        if (classSymbol.ContainingType is { } containing && HasTypeParametersInScope(containing))
+            return false;
+
         var requestParam = classSymbol.TypeParameters[0];
         var responseParam = classSymbol.TypeParameters[1];
 
@@ -408,6 +425,28 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
     }
 
     /// <summary>
+    /// Whether the type — or any type it is nested inside — declares type parameters. The
+    /// fully-qualified display string of such a type contains those parameters (e.g.
+    /// <c>Handler&lt;TUnused&gt;</c> or <c>Outer&lt;T&gt;.Inner</c>), so emitting it into the
+    /// generated registration or dispatch produces unbound identifiers (CS0246). Discovery
+    /// must skip these types (surfacing a diagnostic) instead of emitting broken code.
+    /// Checked explicitly across the containing-type chain rather than relying on
+    /// <c>INamedTypeSymbol.IsGenericType</c> semantics.
+    /// </summary>
+    private static bool HasTypeParametersInScope(INamedTypeSymbol symbol)
+    {
+        for (INamedTypeSymbol? current = symbol; current is not null; current = current.ContainingType)
+        {
+            if (current.TypeParameters.Length > 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Whether a type parameter occurs anywhere inside <paramref name="type"/> — not just at
     /// the top level. Emitting any type that still contains a type parameter into the generated
     /// registration or pipeline produces unbound identifiers (CS0246), so such shapes must be
@@ -433,16 +472,16 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         if (classSymbol is null || classSymbol.IsAbstract || !classSymbol.IsReferenceType)
             return null;
 
-        // Skip open generic validators (e.g., a user's own generic AbstractValidator<T>)
-        if (classSymbol.IsGenericType)
+        // Skip generic validators (e.g., a user's own generic AbstractValidator<T>) and
+        // validators nested inside generic types — their display names carry unbound type
+        // parameters and cannot be emitted.
+        if (HasTypeParametersInScope(classSymbol))
             return null;
 
-        var hasSkipAttribute = classSymbol.GetAttributes()
-            .Any(a => IsMediatorLiteAttribute(a, "MediatorGenerationAttribute")
-                      && a.NamedArguments.Any(arg => arg.Key == "Skip" && arg.Value.Value is true));
-
-        if (hasSkipAttribute)
-            return null;
+        // A validator class may implement IValidator<T> for several request types; collect
+        // every match — stopping at the first would silently leave the remaining request
+        // types unvalidated.
+        List<ValidatorTargetInfo>? targets = null;
 
         foreach (var iface in classSymbol.AllInterfaces)
         {
@@ -466,14 +505,18 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             if (typeArgs[0].TypeKind == TypeKind.TypeParameter)
                 continue;
 
-            return new ValidatorInfo(
-                ClassName: classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                Namespace: classSymbol.ContainingNamespace?.ToDisplayString() ?? "",
+            (targets ??= []).Add(new ValidatorTargetInfo(
                 InterfaceType: iface.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                RequestType: typeArgs[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+                RequestType: typeArgs[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)));
         }
 
-        return null;
+        if (targets is null)
+            return null;
+
+        return new ValidatorInfo(
+            ClassName: classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            Namespace: classSymbol.ContainingNamespace?.ToDisplayString() ?? "",
+            Targets: new EquatableArray<ValidatorTargetInfo>(targets.ToArray()));
     }
 
     /// <summary>
@@ -531,13 +574,6 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         if (classSymbol is null || classSymbol.IsAbstract || !classSymbol.IsReferenceType)
             return null;
 
-        var hasSkipAttribute = classSymbol.GetAttributes()
-            .Any(a => IsMediatorLiteAttribute(a, "MediatorGenerationAttribute")
-                      && a.NamedArguments.Any(arg => arg.Key == "Skip" && arg.Value.Value is true));
-
-        if (hasSkipAttribute)
-            return null;
-
         int? handlerOrder = null;
         var orderAttr = classSymbol.GetAttributes()
             .FirstOrDefault(a => IsMediatorLiteAttribute(a, "NotificationHandlerOrderAttribute"));
@@ -592,6 +628,20 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         if (requestHandlerInterfaces.Count == 0 && notificationHandlerInterfaces.Count == 0)
             return null;
 
+        // A generic handler (or one nested inside a generic type) cannot be emitted: its
+        // display name carries unbound type parameters, producing CS0246 in the generated
+        // files. Keep the class name for the MEDL1004 report but carry no interfaces so
+        // nothing downstream registers or dispatches it.
+        if (HasTypeParametersInScope(classSymbol))
+        {
+            return new HandlerInfo(
+                ClassName: classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                Namespace: classSymbol.ContainingNamespace?.ToDisplayString() ?? "",
+                RequestHandlers: new EquatableArray<HandlerInterfaceInfo>([]),
+                NotificationHandlers: new EquatableArray<NotificationHandlerInterfaceInfo>([]),
+                HasUnsupportedGenericShape: true);
+        }
+
         return new HandlerInfo(
             ClassName: classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             Namespace: classSymbol.ContainingNamespace?.ToDisplayString() ?? "",
@@ -622,6 +672,14 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             context.ReportDiagnostic(Diagnostic.Create(
                 UnsupportedOpenBehaviorShape, Location.None, StripGlobalPrefix(behavior.ClassName)));
         }
+
+        foreach (var handler in validHandlers.Where(h => h.HasUnsupportedGenericShape))
+        {
+            context.ReportDiagnostic(Diagnostic.Create(
+                UnsupportedGenericHandler, Location.None, StripGlobalPrefix(handler.ClassName)));
+        }
+
+        validHandlers = validHandlers.Where(h => !h.HasUnsupportedGenericShape).ToList();
 
         if (validHandlers.Count == 0)
         {
@@ -708,7 +766,8 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         List<ValidatorInfo> validators)
     {
         var result = new List<(string RequestType, string ResponseType)>();
-        var requestTypesWithValidators = new HashSet<string>(validators.Select(v => v.RequestType));
+        var requestTypesWithValidators = new HashSet<string>(
+            validators.SelectMany(v => v.Targets).Select(t => t.RequestType));
 
         var requestResponsePairs = handlers
             .SelectMany(h => h.RequestHandlers.Select(r => (r.RequestType, ResponseType: r.ResponseType!)))
@@ -739,6 +798,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             .SelectMany(h => h.RequestHandlers.Select(r => (r.RequestType, r.ResponseType!)))
             .Distinct()
             .ToList();
+        var handledPairs = new HashSet<(string, string)>(requestResponsePairs);
 
         foreach (var behavior in behaviors)
         {
@@ -768,6 +828,12 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 }
                 else if (!behaviorInterface.IsOpenGeneric)
                 {
+                    // A closed behavior bound to a (request, response) pair with no handler
+                    // in this compilation has no pipeline to run in — registering it would
+                    // be dead wiring and inflate BehaviorCount. Same policy as validators.
+                    if (!handledPairs.Contains((behaviorInterface.RequestType!, behaviorInterface.ResponseType!)))
+                        continue;
+
                     expanded.Add(new ExpandedBehaviorInfo(
                         BehaviorTypeName: behavior.ClassName,
                         RequestType: behaviorInterface.RequestType!,
@@ -960,17 +1026,19 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
 
         // Register discovered FluentValidation validators against their FluentValidation.IValidator<T>
         // service type so FluentValidationBehavior<T,_> can resolve them. No assembly scanning.
-        // Only validators whose request type has a generated pipeline (i.e. a handler in this
-        // compilation) are registered: a validator for an unhandled request type is never resolved,
-        // so registering it would be dead wiring (and could reference inaccessible types).
+        // A class registers once per IValidator<T> it implements. Only registrations whose
+        // request type has a generated pipeline (i.e. a handler in this compilation) are
+        // emitted: a validator for an unhandled request type is never resolved, so
+        // registering it would be dead wiring (and could reference inaccessible types).
         var validatedRequestTypes = new HashSet<string>(requestTypesWithValidation.Select(t => t.RequestType));
-        var validatorsToRegister = validators
-            .Where(v => validatedRequestTypes.Contains(v.RequestType))
+        var validatorRegistrations = validators
+            .SelectMany(v => v.Targets.Select(t => (v.ClassName, t.InterfaceType, t.RequestType)))
+            .Where(r => validatedRequestTypes.Contains(r.RequestType))
             .ToList();
 
-        foreach (var validator in validatorsToRegister)
+        foreach (var (className, interfaceType, _) in validatorRegistrations)
         {
-            sb.AppendLine($"            services.AddTransient<{validator.InterfaceType}, {validator.ClassName}>();");
+            sb.AppendLine($"            services.AddTransient<{interfaceType}, {className}>();");
         }
 
         sb.AppendLine("            return services;");
@@ -1021,7 +1089,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         sb.AppendLine();
 
         // --- Diagnostic counts ---
-        var totalValidatorCount = validatorsToRegister.Count;
+        var totalValidatorCount = validatorRegistrations.Count;
         var nonValidationBehaviorCount = expandedBehaviors
             .Count(b => !b.BehaviorTypeName.StartsWith("global::MediatorLite.FluentValidation.FluentValidationBehavior<"));
 
@@ -1220,11 +1288,15 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 }
 
                 sb.AppendLine("                    // Covariant dispatch (IRequest<out T>): pick the pipeline whose concrete");
-                sb.AppendLine("                    // response type is assignable to the requested TResponse.");
+                sb.AppendLine("                    // response type is assignable to the requested TResponse. Value-type");
+                sb.AppendLine("                    // responses are excluded: variance only exists for reference conversions,");
+                sb.AppendLine("                    // so an IRequest<TResponse> reference can never originate from a");
+                sb.AppendLine("                    // value-type response interface — but IsAssignableTo alone would match");
+                sb.AppendLine("                    // one via boxing and silently run the wrong pipeline.");
                 foreach (var (_, iface) in group.Entries)
                 {
                     var sendName = $"Send_{sendMethodSuffixes[(group.RequestType, iface.ResponseType!)]}";
-                    sb.AppendLine($"                    if (typeof({iface.ResponseType}).IsAssignableTo(typeof(TResponse)))");
+                    sb.AppendLine($"                    if (!typeof({iface.ResponseType}).IsValueType && typeof({iface.ResponseType}).IsAssignableTo(typeof(TResponse)))");
                     sb.AppendLine("                    {");
                     sb.AppendLine($"                        return SlowCast<{iface.ResponseType}, TResponse>({sendName}(r_{safeName}, cancellationToken));");
                     sb.AppendLine("                    }");
@@ -1653,6 +1725,11 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         List<(HandlerInfo Handler, NotificationHandlerInterfaceInfo Interface)> handlers,
         int errorStrategy)
     {
+        // An already-cancelled publish token must be rejected before any handler starts,
+        // matching the entry check every other execution strategy performs. In-flight
+        // cancellation stays cooperative (handlers observe the token themselves).
+        sb.AppendLine("            ct.ThrowIfCancellationRequested();");
+
         // Resolve handlers
         for (int i = 0; i < handlers.Count; i++)
         {
@@ -1821,7 +1898,8 @@ internal sealed record HandlerInfo(
     string ClassName,
     string Namespace,
     EquatableArray<HandlerInterfaceInfo> RequestHandlers,
-    EquatableArray<NotificationHandlerInterfaceInfo> NotificationHandlers);
+    EquatableArray<NotificationHandlerInterfaceInfo> NotificationHandlers,
+    bool HasUnsupportedGenericShape = false);
 
 internal sealed record HandlerInterfaceInfo(
     string InterfaceType,
@@ -1872,5 +1950,8 @@ internal sealed record ExpandedBehaviorInfo(
 internal sealed record ValidatorInfo(
     string ClassName,
     string Namespace,
+    EquatableArray<ValidatorTargetInfo> Targets);
+
+internal sealed record ValidatorTargetInfo(
     string InterfaceType,
     string RequestType);

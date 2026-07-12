@@ -150,15 +150,10 @@ services
 
 ### Excluding Types from Source Generation
 
-Use `[MediatorGeneration(Skip = true)]` to exclude specific handlers:
-
-```csharp
-[MediatorGeneration(Skip = true)]
-public class TestOnlyHandler : IRequestHandler<TestQuery, string>
-{
-    // This handler will NOT be registered by AddGeneratedHandlers()
-}
-```
+Discovery is unconditional: every concrete handler in the compilation is registered. The
+legacy `[MediatorGeneration(Skip = true)]` attribute is obsolete and has **no effect**. To
+keep a handler out of registration, move it to an assembly the source generator does not
+run on (for example, a test-support project).
 
 ### Configurable Handler Execution (v2 Attributes)
 

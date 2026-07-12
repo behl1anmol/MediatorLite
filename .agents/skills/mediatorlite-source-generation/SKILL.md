@@ -610,7 +610,7 @@ Two generated files per compilation with handlers:
 
 ## Pitfalls & gotchas
 
-- **`[MediatorGeneration(Skip = true)]` is silently honored** in `GetHandlerInfo`, `GetBehaviorInfo`, and `GetValidatorInfo`. The attribute is marked `[Obsolete]` in `Attributes.cs` but the generator still respects it — remove any usage during migrations.
+- **`[MediatorGeneration(Skip = true)]` is ignored** by `GetHandlerInfo`, `GetBehaviorInfo`, and `GetValidatorInfo` — discovery is unconditional. The attribute type stays in `Attributes.cs` (marked `[Obsolete]`) for binary compatibility only; remove any usage during migrations.
 - **Validator open generics are excluded**. If you implement `MyValidator<T> : IValidator<T>`, it will **not** be auto-registered. Register it manually or make it closed.
 - **`HasDataAnnotationAttributes` only scans direct property attributes**, not fields or nested object properties. If you need nested validation, wire a custom `IValidator<T>`.
 - **Dispatcher keys use `typeof(requestType)` with the runtime type from `Mediator.SendAsync`** — abstract/base class requests are **not** registered, only closed concrete types implementing `IRequest<TResponse>` (for which a handler exists).

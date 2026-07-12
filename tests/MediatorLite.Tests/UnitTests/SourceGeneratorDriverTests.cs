@@ -165,6 +165,147 @@ public class SourceGeneratorDriverTests
     }
 
     [Fact]
+    public void GenericHandlerClass_WithClosedInterface_ReportsMedl1004_AndIsNotEmitted()
+    {
+        // The class is generic but the IRequestHandler<,> interface is fully closed. The
+        // class's fully-qualified display name (`UnusedParamHandler<TUnused>`) would be pasted
+        // verbatim into the generated registration, where TUnused is an unknown identifier
+        // (CS0246) — the consumer's build breaks inside a .g.cs file.
+        const string handlerSource = """
+            using MediatorLite;
+
+            namespace DriverTests;
+
+            public sealed class UnusedParamHandler<TUnused> : IRequestHandler<PingQuery, int>
+            {
+                public ValueTask<int> HandleAsync(PingQuery request, CancellationToken cancellationToken = default)
+                    => ValueTask.FromResult(request.Value);
+            }
+            """;
+
+        var (runResult, updatedCompilation) = RunGeneratorAndUpdateCompilation(HandlerSource, handlerSource);
+
+        runResult.Diagnostics.Should().ContainSingle(d => d.Id == "MEDL1004")
+            .Which.GetMessage().Should().Contain("UnusedParamHandler");
+
+        var generated = string.Join("\n", runResult.GeneratedTrees.Select(t => t.ToString()));
+        generated.Should().NotContain("UnusedParamHandler",
+            "a generic handler class must be skipped, not emitted as non-compiling code");
+
+        AssertGeneratedOutputCompiles(updatedCompilation);
+    }
+
+    [Fact]
+    public void OpenGenericHandlers_ReportMedl1004_AndAreNotEmitted()
+    {
+        // Open generic handlers (the MediatR pattern) cannot be closed by this generator:
+        // the interface type arguments are the class's own type parameters, so emission
+        // would produce `case TReq r_TReq:` and registrations full of unbound identifiers.
+        const string handlerSource = """
+            using MediatorLite;
+
+            namespace DriverTests;
+
+            public sealed class OpenRequestHandler<TReq, TRes> : IRequestHandler<TReq, TRes>
+                where TReq : IRequest<TRes>
+            {
+                public ValueTask<TRes> HandleAsync(TReq request, CancellationToken cancellationToken = default)
+                    => ValueTask.FromResult(default(TRes)!);
+            }
+
+            public sealed class OpenNotificationHandler<TNotification> : INotificationHandler<TNotification>
+                where TNotification : INotification
+            {
+                public ValueTask HandleAsync(TNotification notification, CancellationToken cancellationToken = default)
+                    => ValueTask.CompletedTask;
+            }
+            """;
+
+        var (runResult, updatedCompilation) = RunGeneratorAndUpdateCompilation(HandlerSource, handlerSource);
+
+        var medl1004 = runResult.Diagnostics.Where(d => d.Id == "MEDL1004").ToList();
+        medl1004.Should().HaveCount(2);
+        medl1004.Select(d => d.GetMessage()).Should()
+            .Contain(m => m.Contains("OpenRequestHandler"))
+            .And.Contain(m => m.Contains("OpenNotificationHandler"));
+
+        var generated = string.Join("\n", runResult.GeneratedTrees.Select(t => t.ToString()));
+        generated.Should().NotContain("OpenRequestHandler").And.NotContain("OpenNotificationHandler",
+            "open generic handlers must be skipped, not emitted as non-compiling code");
+
+        AssertGeneratedOutputCompiles(updatedCompilation);
+    }
+
+    [Fact]
+    public void HandlerNestedInGenericOuterType_ReportsMedl1004_AndIsNotEmitted()
+    {
+        // The handler itself is non-generic, but its containing type is generic, so its
+        // fully-qualified display name (`Outer<T>.InnerHandler`) still contains an unbound
+        // type parameter when emitted.
+        const string handlerSource = """
+            using MediatorLite;
+
+            namespace DriverTests;
+
+            public static class Outer<T>
+            {
+                public sealed class InnerHandler : IRequestHandler<PingQuery, int>
+                {
+                    public ValueTask<int> HandleAsync(PingQuery request, CancellationToken cancellationToken = default)
+                        => ValueTask.FromResult(request.Value);
+                }
+            }
+            """;
+
+        var (runResult, updatedCompilation) = RunGeneratorAndUpdateCompilation(HandlerSource, handlerSource);
+
+        runResult.Diagnostics.Should().ContainSingle(d => d.Id == "MEDL1004")
+            .Which.GetMessage().Should().Contain("InnerHandler");
+
+        var generated = string.Join("\n", runResult.GeneratedTrees.Select(t => t.ToString()));
+        generated.Should().NotContain("InnerHandler",
+            "a handler nested inside a generic type must be skipped, not emitted as non-compiling code");
+
+        AssertGeneratedOutputCompiles(updatedCompilation);
+    }
+
+    [Fact]
+    public void BehaviorNestedInGenericOuterType_ReportsMedl1002_AndIsNotEmitted()
+    {
+        // Same nesting hole for behaviors: the class's own type-parameter list is empty, so
+        // the pre-existing closed-interface check missed it, but the display name
+        // (`Outer<T>.InnerBehavior`) still carries the outer type's parameter.
+        const string behaviorSource = """
+            using MediatorLite;
+
+            namespace DriverTests;
+
+            public static class BehaviorOuter<T>
+            {
+                public sealed class InnerBehavior : IPipelineBehavior<PingQuery, int>
+                {
+                    public ValueTask<int> HandleAsync(
+                        PingQuery request,
+                        RequestHandlerDelegate<int> next,
+                        CancellationToken cancellationToken = default)
+                        => next();
+                }
+            }
+            """;
+
+        var (runResult, updatedCompilation) = RunGeneratorAndUpdateCompilation(HandlerSource, behaviorSource);
+
+        runResult.Diagnostics.Should().ContainSingle(d => d.Id == "MEDL1002")
+            .Which.GetMessage().Should().Contain("InnerBehavior");
+
+        var generated = string.Join("\n", runResult.GeneratedTrees.Select(t => t.ToString()));
+        generated.Should().NotContain("InnerBehavior",
+            "a behavior nested inside a generic type must be skipped, not emitted as non-compiling code");
+
+        AssertGeneratedOutputCompiles(updatedCompilation);
+    }
+
+    [Fact]
     public void NotificationStrategyAttributes_OnTypeFromReferencedAssembly_AreHonored()
     {
         // Standard consumer layout: notification contracts live in a referenced assembly,
@@ -520,6 +661,133 @@ public class SourceGeneratorDriverTests
             "the RequestType tag literal must be fully display-formatted");
         mediator.Should().NotContain("\"DriverTests.GenericQuery<global::",
             "tag string literals must not leak an inner global:: prefix");
+
+        AssertGeneratedOutputCompiles(updatedCompilation);
+    }
+
+    [Fact]
+    public void ObsoleteMediatorGenerationSkip_IsIgnored_HandlerIsStillDiscovered()
+    {
+        // v2 discovery is unconditional (rule 70 §3). The obsolete
+        // [MediatorGeneration(Skip = true)] must have no effect on the generator; consumers
+        // who need to exclude a type move it to a non-compiled assembly instead.
+        const string source = """
+            using MediatorLite;
+
+            namespace DriverTests;
+
+            public record SkippedQuery(int Value) : IRequest<int>;
+
+            #pragma warning disable CS0618 // MediatorGenerationAttribute is obsolete
+            [MediatorGeneration(Skip = true)]
+            #pragma warning restore CS0618
+            public sealed class SkippedQueryHandler : IRequestHandler<SkippedQuery, int>
+            {
+                public ValueTask<int> HandleAsync(SkippedQuery request, CancellationToken cancellationToken = default)
+                    => ValueTask.FromResult(request.Value);
+            }
+            """;
+
+        var (runResult, updatedCompilation) = RunGeneratorAndUpdateCompilation(HandlerSource, source);
+
+        var generated = string.Join("\n", runResult.GeneratedTrees.Select(t => t.ToString()));
+        generated.Should().Contain("SkippedQueryHandler",
+            "discovery is unconditional: the obsolete [MediatorGeneration(Skip = true)] has no effect");
+
+        AssertGeneratedOutputCompiles(updatedCompilation);
+    }
+
+    [Fact]
+    public void ClosedBehaviorForUnhandledRequestType_IsNotRegisteredOrCounted()
+    {
+        // A closed behavior bound to a request type with no handler in the compilation can
+        // never be resolved by any generated pipeline. It used to be registered in DI and
+        // counted in BehaviorCount anyway (dead wiring), while validators in the same
+        // situation were filtered out — the policies now match.
+        const string source = """
+            using MediatorLite;
+
+            namespace DriverTests;
+
+            public record RetiredCommand(int Id) : IRequest<int>;
+
+            public sealed class RetiredAuditBehavior : IPipelineBehavior<RetiredCommand, int>
+            {
+                public ValueTask<int> HandleAsync(
+                    RetiredCommand request,
+                    RequestHandlerDelegate<int> next,
+                    CancellationToken cancellationToken = default)
+                    => next();
+            }
+            """;
+
+        var (runResult, updatedCompilation) = RunGeneratorAndUpdateCompilation(HandlerSource, source);
+
+        var generated = string.Join("\n", runResult.GeneratedTrees.Select(t => t.ToString()));
+        generated.Should().NotContain("RetiredAuditBehavior",
+            "a closed behavior whose request type has no handler can never run and must not be wired");
+        generated.Should().Contain("public static int BehaviorCount => 0;");
+
+        AssertGeneratedOutputCompiles(updatedCompilation);
+    }
+
+    [Fact]
+    public void ValidatorImplementingMultipleValidatorInterfaces_WiresValidationForEveryRequestType()
+    {
+        // One validator class may validate several request types (IValidator<A> +
+        // IValidator<B>). Discovery used to stop at the first matching interface, so B's
+        // requests reached their handler unvalidated — silently, with no diagnostic.
+        const string source = """
+            using FluentValidation;
+            using FluentValidation.Results;
+            using MediatorLite;
+
+            namespace DriverTests;
+
+            public record CreateOrder(string Name) : IRequest<int>;
+            public record UpdateOrder(string Name) : IRequest<int>;
+
+            public sealed class CreateOrderHandler : IRequestHandler<CreateOrder, int>
+            {
+                public ValueTask<int> HandleAsync(CreateOrder request, CancellationToken cancellationToken = default)
+                    => ValueTask.FromResult(1);
+            }
+
+            public sealed class UpdateOrderHandler : IRequestHandler<UpdateOrder, int>
+            {
+                public ValueTask<int> HandleAsync(UpdateOrder request, CancellationToken cancellationToken = default)
+                    => ValueTask.FromResult(2);
+            }
+
+            public sealed class SharedRulesValidator : AbstractValidator<CreateOrder>, IValidator<UpdateOrder>
+            {
+                public ValidationResult Validate(UpdateOrder instance) => new();
+
+                public Task<ValidationResult> ValidateAsync(UpdateOrder instance, CancellationToken cancellation = default)
+                    => Task.FromResult(new ValidationResult());
+            }
+            """;
+
+        var compilation = CreateCompilation(
+            [source],
+            [
+                MetadataReference.CreateFromFile(typeof(global::FluentValidation.IValidator).Assembly.Location),
+                MetadataReference.CreateFromFile(typeof(global::MediatorLite.FluentValidation.FluentValidationBehavior<,>).Assembly.Location),
+            ]);
+
+        var driver = CSharpGeneratorDriver.Create(new HandlerDiscoveryGenerator());
+        var ranDriver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var updatedCompilation, out _);
+        var runResult = ranDriver.GetRunResult();
+
+        var generated = string.Join("\n", runResult.GeneratedTrees.Select(t => t.ToString()));
+
+        generated.Should().Contain("global::FluentValidation.IValidator<global::DriverTests.CreateOrder>, global::DriverTests.SharedRulesValidator")
+            .And.Contain("global::FluentValidation.IValidator<global::DriverTests.UpdateOrder>, global::DriverTests.SharedRulesValidator",
+                "the validator must be registered for every IValidator<T> it implements");
+        generated.Should().Contain("FluentValidationBehavior<global::DriverTests.CreateOrder, int>")
+            .And.Contain("FluentValidationBehavior<global::DriverTests.UpdateOrder, int>",
+                "both handled request types have a validator, so both pipelines must validate");
+        generated.Should().Contain("public static int ValidatorCount => 2;");
 
         AssertGeneratedOutputCompiles(updatedCompilation);
     }

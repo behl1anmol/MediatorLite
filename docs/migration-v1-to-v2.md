@@ -216,9 +216,12 @@ public class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TReques
 public class LoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse> { }
 ```
 
-#### `[MediatorGeneration(Skip = true)]` - Obsolete
+#### `[MediatorGeneration(Skip = true)]` - Obsolete and Inert
 
-This attribute is obsolete in v2 and is retained only for legacy compatibility. Avoid using it for new code.
+The attribute type is retained for binary compatibility, but the v2 generator **ignores
+it**: discovery is unconditional, so a handler marked `Skip = true` is registered like any
+other. If you relied on `Skip` to keep a handler out of registration, move that handler to
+an assembly the source generator does not run on (for example, a test-support project).
 
 ### Step 5: Verify Generated Code
 
@@ -288,11 +291,12 @@ services.AddLogging(b => b.AddFilter("MediatorLite.IMediator", LogLevel.Informat
 
 ### Issue: Handlers Not Discovered
 
-**Cause:** Handler marked with `[MediatorGeneration(Skip = true)]` or not implementing correct interface.
+**Cause:** Handler not implementing the correct interface, or the handler is generic /
+nested inside a generic type (surfaced as warning `MEDL1004`).
 
-**Fix:** 
-1. Remove `[MediatorGeneration(Skip = true)]` or register manually
-2. Verify handler implements `IRequestHandler<TRequest, TResponse>`
+**Fix:**
+1. Verify the handler implements `IRequestHandler<TRequest, TResponse>`
+2. Make the handler a non-generic class that is not nested inside a generic type
 
 ### Issue: Behaviors Executing in Wrong Order
 

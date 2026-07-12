@@ -736,3 +736,38 @@ public sealed class SequentialCancellingSecondHandler : INotificationHandler<Seq
 }
 
 #endregion
+
+#region Parallel pre-cancelled token fixtures (B3)
+
+// Parallel publishing must reject an already-cancelled publish token before starting any
+// handler, matching the Sequential/StopOnFirst entry check. These handlers are deliberately
+// ct-agnostic and synchronous so the only cancellation check in play is the mediator's own.
+[NotificationExecution(NotificationExecutionStrategy.Parallel)]
+public record ParallelPreCancelEvent(string Message) : INotification;
+
+public sealed class ParallelPreCancelHandler1 : INotificationHandler<ParallelPreCancelEvent>
+{
+    public static bool WasCalled { get; private set; }
+    public static void Reset() => WasCalled = false;
+
+    public ValueTask HandleAsync(ParallelPreCancelEvent notification, CancellationToken cancellationToken = default)
+    {
+        WasCalled = true;
+        return ValueTask.CompletedTask;
+    }
+}
+
+[NotificationHandlerOrder(1)]
+public sealed class ParallelPreCancelHandler2 : INotificationHandler<ParallelPreCancelEvent>
+{
+    public static bool WasCalled { get; private set; }
+    public static void Reset() => WasCalled = false;
+
+    public ValueTask HandleAsync(ParallelPreCancelEvent notification, CancellationToken cancellationToken = default)
+    {
+        WasCalled = true;
+        return ValueTask.CompletedTask;
+    }
+}
+
+#endregion
