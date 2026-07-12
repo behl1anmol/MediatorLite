@@ -299,6 +299,36 @@ public class NotificationTests
     }
 
     [Fact]
+    public async Task PublishAsync_Parallel_WithPreCancelledToken_ThrowsOceWithoutRunningHandlers()
+    {
+        // Arrange - the handlers are ct-agnostic, so only the mediator's own entry check can
+        // reject the pre-cancelled token. Sequential/StopOnFirst already did; Parallel used to
+        // run every handler to completion and report success.
+        ParallelPreCancelHandler1.Reset();
+        ParallelPreCancelHandler2.Reset();
+
+        var services = new ServiceCollection();
+        services.AddGeneratedHandlers();
+        services.AddMediatorLite();
+        services.AddLogging();
+
+        var provider = services.BuildServiceProvider();
+        var mediator = provider.GetRequiredService<IMediator>();
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        // Act & Assert
+        Func<Task> act = async () => await mediator.PublishAsync(new ParallelPreCancelEvent("x"), cts.Token);
+        await act.Should().ThrowAsync<OperationCanceledException>();
+
+        ParallelPreCancelHandler1.WasCalled.Should().BeFalse(
+            "no handler may start under an already-cancelled publish token");
+        ParallelPreCancelHandler2.WasCalled.Should().BeFalse(
+            "no handler may start under an already-cancelled publish token");
+    }
+
+    [Fact]
     public async Task PublishAsync_PerNotificationAttribute_WinsOverLibraryDefaults()
     {
         // Arrange - UserCreatedEvent has no per-type attribute, so it falls back to library defaults

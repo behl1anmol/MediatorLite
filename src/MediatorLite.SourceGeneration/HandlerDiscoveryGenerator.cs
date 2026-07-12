@@ -1727,6 +1727,11 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         List<(HandlerInfo Handler, NotificationHandlerInterfaceInfo Interface)> handlers,
         int errorStrategy)
     {
+        // An already-cancelled publish token must be rejected before any handler starts,
+        // matching the entry check every other execution strategy performs. In-flight
+        // cancellation stays cooperative (handlers observe the token themselves).
+        sb.AppendLine("            ct.ThrowIfCancellationRequested();");
+
         // Resolve handlers
         for (int i = 0; i < handlers.Count; i++)
         {

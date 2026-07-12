@@ -26,7 +26,7 @@ public class MediatorTests
     [Fact]
     public void AddGeneratedHandlers_RegistersNotificationHandlers()
     {
-        MediatorLiteRegistration.NotificationHandlerCount.Should().Be(24,
+        MediatorLiteRegistration.NotificationHandlerCount.Should().Be(26,
             "the source generator must discover every notification handler in TestTypes.cs");
     }
 
