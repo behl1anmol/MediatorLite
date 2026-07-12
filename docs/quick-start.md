@@ -128,16 +128,10 @@ services.AddMediatorLite();  // Without AddGeneratedHandlers(), dispatch throws 
 
 ### Excluding Types from Source Generation
 
-Use `[MediatorGeneration(Skip = true)]` to prevent a handler from being discovered by the source generator:
-
-```csharp
-[MediatorGeneration(Skip = true)]
-public class TestOnlyHandler : IRequestHandler<TestQuery, string>
-{
-    // This handler will NOT be registered by AddGeneratedHandlers()
-    // Register it manually if needed
-}
-```
+Discovery is unconditional: every concrete handler in the compilation is registered. The
+legacy `[MediatorGeneration(Skip = true)]` attribute is obsolete and has **no effect**. To
+keep a handler out of registration, move it to an assembly the source generator does not
+run on (for example, a test-support project).
 
 ## 3. Send Requests
 

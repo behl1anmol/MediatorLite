@@ -666,6 +666,38 @@ public class SourceGeneratorDriverTests
     }
 
     [Fact]
+    public void ObsoleteMediatorGenerationSkip_IsIgnored_HandlerIsStillDiscovered()
+    {
+        // v2 discovery is unconditional (rule 70 §3). The obsolete
+        // [MediatorGeneration(Skip = true)] must have no effect on the generator; consumers
+        // who need to exclude a type move it to a non-compiled assembly instead.
+        const string source = """
+            using MediatorLite;
+
+            namespace DriverTests;
+
+            public record SkippedQuery(int Value) : IRequest<int>;
+
+            #pragma warning disable CS0618 // MediatorGenerationAttribute is obsolete
+            [MediatorGeneration(Skip = true)]
+            #pragma warning restore CS0618
+            public sealed class SkippedQueryHandler : IRequestHandler<SkippedQuery, int>
+            {
+                public ValueTask<int> HandleAsync(SkippedQuery request, CancellationToken cancellationToken = default)
+                    => ValueTask.FromResult(request.Value);
+            }
+            """;
+
+        var (runResult, updatedCompilation) = RunGeneratorAndUpdateCompilation(HandlerSource, source);
+
+        var generated = string.Join("\n", runResult.GeneratedTrees.Select(t => t.ToString()));
+        generated.Should().Contain("SkippedQueryHandler",
+            "discovery is unconditional: the obsolete [MediatorGeneration(Skip = true)] has no effect");
+
+        AssertGeneratedOutputCompiles(updatedCompilation);
+    }
+
+    [Fact]
     public void ClosedBehaviorForUnhandledRequestType_IsNotRegisteredOrCounted()
     {
         // A closed behavior bound to a request type with no handler in the compilation can

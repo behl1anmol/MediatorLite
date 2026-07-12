@@ -293,13 +293,6 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         if (classSymbol is null || classSymbol.IsAbstract || !classSymbol.IsReferenceType)
             return null;
 
-        var hasSkipAttribute = classSymbol.GetAttributes()
-            .Any(a => IsMediatorLiteAttribute(a, "MediatorGenerationAttribute")
-                      && a.NamedArguments.Any(arg => arg.Key == "Skip" && arg.Value.Value is true));
-
-        if (hasSkipAttribute)
-            return null;
-
         var behaviorInterfaces = new List<BehaviorInterfaceInfo>();
         bool isOpenGeneric = classSymbol.IsGenericType && classSymbol.IsUnboundGenericType == false
                              && classSymbol.TypeParameters.Length > 0;
@@ -485,13 +478,6 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         if (HasTypeParametersInScope(classSymbol))
             return null;
 
-        var hasSkipAttribute = classSymbol.GetAttributes()
-            .Any(a => IsMediatorLiteAttribute(a, "MediatorGenerationAttribute")
-                      && a.NamedArguments.Any(arg => arg.Key == "Skip" && arg.Value.Value is true));
-
-        if (hasSkipAttribute)
-            return null;
-
         // A validator class may implement IValidator<T> for several request types; collect
         // every match — stopping at the first would silently leave the remaining request
         // types unvalidated.
@@ -586,13 +572,6 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         var classSymbol = semanticModel.GetDeclaredSymbol(typeDecl, ct) as INamedTypeSymbol;
 
         if (classSymbol is null || classSymbol.IsAbstract || !classSymbol.IsReferenceType)
-            return null;
-
-        var hasSkipAttribute = classSymbol.GetAttributes()
-            .Any(a => IsMediatorLiteAttribute(a, "MediatorGenerationAttribute")
-                      && a.NamedArguments.Any(arg => arg.Key == "Skip" && arg.Value.Value is true));
-
-        if (hasSkipAttribute)
             return null;
 
         int? handlerOrder = null;

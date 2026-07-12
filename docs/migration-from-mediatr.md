@@ -313,15 +313,9 @@ The source-generated mediator provides:
 
 ### Excluding Types
 
-Use `[MediatorGeneration(Skip = true)]` to exclude a type from source generation:
-
-```csharp
-[MediatorGeneration(Skip = true)]
-public class TestHandler : IRequestHandler<TestQuery, string>
-{
-    // Not registered by AddGeneratedHandlers()
-}
-```
+Discovery is unconditional — there is no per-type opt-out attribute (the legacy
+`[MediatorGeneration(Skip = true)]` is obsolete and has no effect). To exclude a type from
+registration, move it to an assembly the source generator does not run on.
 
 ### Diagnostics
 
