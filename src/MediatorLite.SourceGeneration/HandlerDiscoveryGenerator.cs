@@ -76,6 +76,22 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
 
+    /// <summary>
+    /// Reported when a handler class is generic or nested inside a generic type. Its
+    /// fully-qualified name contains unbound type parameters, so emitting it into the
+    /// generated registration/dispatch would produce code that fails to compile (CS0246)
+    /// inside a .g.cs file. The handler is skipped and surfaced here instead.
+    /// </summary>
+    private static readonly DiagnosticDescriptor UnsupportedGenericHandler = new(
+        id: "MEDL1004",
+        title: "Generic handler classes are not supported",
+        messageFormat: "Handler '{0}' is generic or nested inside a generic type, so the source "
+            + "generator cannot emit a closed registration for it; the handler was not registered. "
+            + "Make the handler a non-generic class that is not nested inside a generic type.",
+        category: "MediatorLite.Handlers",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         // Find all class declarations that might be handlers
@@ -322,10 +338,12 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                     //    would emit `Wrap<T>` with T unbound;
                     //  - a generic class whose interface is fully closed
                     //    (Behavior<TUnused> : IPipelineBehavior<Req, Res>) would emit the
-                    //    class display name `Behavior<TUnused>` with TUnused unbound.
-                    // Both produce CS0246 in the generated files, so they get MEDL1002 too.
+                    //    class display name `Behavior<TUnused>` with TUnused unbound —
+                    //    the same applies when the behavior is nested inside a generic
+                    //    type (Outer<T>.Inner), hence HasTypeParametersInScope.
+                    // All produce CS0246 in the generated files, so they get MEDL1002 too.
                     if (!isInterfaceOpen
-                        && (typeArgs.Any(ContainsTypeParameter) || classSymbol.TypeParameters.Length > 0))
+                        && (typeArgs.Any(ContainsTypeParameter) || HasTypeParametersInScope(classSymbol)))
                     {
                         hasUnsupportedOpenShape = true;
                         continue;
@@ -372,6 +390,12 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         if (classSymbol.TypeParameters.Length != 2)
             return false;
 
+        // A behavior nested inside a generic type cannot be expanded: its display name is
+        // truncated at the *first* '<' (the outer type's), so the emitted closed type would
+        // name the outer type instead of the behavior.
+        if (classSymbol.ContainingType is { } containing && HasTypeParametersInScope(containing))
+            return false;
+
         var requestParam = classSymbol.TypeParameters[0];
         var responseParam = classSymbol.TypeParameters[1];
 
@@ -408,6 +432,28 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
     }
 
     /// <summary>
+    /// Whether the type — or any type it is nested inside — declares type parameters. The
+    /// fully-qualified display string of such a type contains those parameters (e.g.
+    /// <c>Handler&lt;TUnused&gt;</c> or <c>Outer&lt;T&gt;.Inner</c>), so emitting it into the
+    /// generated registration or dispatch produces unbound identifiers (CS0246). Discovery
+    /// must skip these types (surfacing a diagnostic) instead of emitting broken code.
+    /// Checked explicitly across the containing-type chain rather than relying on
+    /// <c>INamedTypeSymbol.IsGenericType</c> semantics.
+    /// </summary>
+    private static bool HasTypeParametersInScope(INamedTypeSymbol symbol)
+    {
+        for (INamedTypeSymbol? current = symbol; current is not null; current = current.ContainingType)
+        {
+            if (current.TypeParameters.Length > 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Whether a type parameter occurs anywhere inside <paramref name="type"/> — not just at
     /// the top level. Emitting any type that still contains a type parameter into the generated
     /// registration or pipeline produces unbound identifiers (CS0246), so such shapes must be
@@ -433,8 +479,10 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         if (classSymbol is null || classSymbol.IsAbstract || !classSymbol.IsReferenceType)
             return null;
 
-        // Skip open generic validators (e.g., a user's own generic AbstractValidator<T>)
-        if (classSymbol.IsGenericType)
+        // Skip generic validators (e.g., a user's own generic AbstractValidator<T>) and
+        // validators nested inside generic types — their display names carry unbound type
+        // parameters and cannot be emitted.
+        if (HasTypeParametersInScope(classSymbol))
             return null;
 
         var hasSkipAttribute = classSymbol.GetAttributes()
@@ -592,6 +640,20 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         if (requestHandlerInterfaces.Count == 0 && notificationHandlerInterfaces.Count == 0)
             return null;
 
+        // A generic handler (or one nested inside a generic type) cannot be emitted: its
+        // display name carries unbound type parameters, producing CS0246 in the generated
+        // files. Keep the class name for the MEDL1004 report but carry no interfaces so
+        // nothing downstream registers or dispatches it.
+        if (HasTypeParametersInScope(classSymbol))
+        {
+            return new HandlerInfo(
+                ClassName: classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                Namespace: classSymbol.ContainingNamespace?.ToDisplayString() ?? "",
+                RequestHandlers: new EquatableArray<HandlerInterfaceInfo>([]),
+                NotificationHandlers: new EquatableArray<NotificationHandlerInterfaceInfo>([]),
+                HasUnsupportedGenericShape: true);
+        }
+
         return new HandlerInfo(
             ClassName: classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             Namespace: classSymbol.ContainingNamespace?.ToDisplayString() ?? "",
@@ -622,6 +684,14 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             context.ReportDiagnostic(Diagnostic.Create(
                 UnsupportedOpenBehaviorShape, Location.None, StripGlobalPrefix(behavior.ClassName)));
         }
+
+        foreach (var handler in validHandlers.Where(h => h.HasUnsupportedGenericShape))
+        {
+            context.ReportDiagnostic(Diagnostic.Create(
+                UnsupportedGenericHandler, Location.None, StripGlobalPrefix(handler.ClassName)));
+        }
+
+        validHandlers = validHandlers.Where(h => !h.HasUnsupportedGenericShape).ToList();
 
         if (validHandlers.Count == 0)
         {
@@ -1821,7 +1891,8 @@ internal sealed record HandlerInfo(
     string ClassName,
     string Namespace,
     EquatableArray<HandlerInterfaceInfo> RequestHandlers,
-    EquatableArray<NotificationHandlerInterfaceInfo> NotificationHandlers);
+    EquatableArray<NotificationHandlerInterfaceInfo> NotificationHandlers,
+    bool HasUnsupportedGenericShape = false);
 
 internal sealed record HandlerInterfaceInfo(
     string InterfaceType,

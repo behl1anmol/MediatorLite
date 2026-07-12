@@ -165,6 +165,147 @@ public class SourceGeneratorDriverTests
     }
 
     [Fact]
+    public void GenericHandlerClass_WithClosedInterface_ReportsMedl1004_AndIsNotEmitted()
+    {
+        // The class is generic but the IRequestHandler<,> interface is fully closed. The
+        // class's fully-qualified display name (`UnusedParamHandler<TUnused>`) would be pasted
+        // verbatim into the generated registration, where TUnused is an unknown identifier
+        // (CS0246) — the consumer's build breaks inside a .g.cs file.
+        const string handlerSource = """
+            using MediatorLite;
+
+            namespace DriverTests;
+
+            public sealed class UnusedParamHandler<TUnused> : IRequestHandler<PingQuery, int>
+            {
+                public ValueTask<int> HandleAsync(PingQuery request, CancellationToken cancellationToken = default)
+                    => ValueTask.FromResult(request.Value);
+            }
+            """;
+
+        var (runResult, updatedCompilation) = RunGeneratorAndUpdateCompilation(HandlerSource, handlerSource);
+
+        runResult.Diagnostics.Should().ContainSingle(d => d.Id == "MEDL1004")
+            .Which.GetMessage().Should().Contain("UnusedParamHandler");
+
+        var generated = string.Join("\n", runResult.GeneratedTrees.Select(t => t.ToString()));
+        generated.Should().NotContain("UnusedParamHandler",
+            "a generic handler class must be skipped, not emitted as non-compiling code");
+
+        AssertGeneratedOutputCompiles(updatedCompilation);
+    }
+
+    [Fact]
+    public void OpenGenericHandlers_ReportMedl1004_AndAreNotEmitted()
+    {
+        // Open generic handlers (the MediatR pattern) cannot be closed by this generator:
+        // the interface type arguments are the class's own type parameters, so emission
+        // would produce `case TReq r_TReq:` and registrations full of unbound identifiers.
+        const string handlerSource = """
+            using MediatorLite;
+
+            namespace DriverTests;
+
+            public sealed class OpenRequestHandler<TReq, TRes> : IRequestHandler<TReq, TRes>
+                where TReq : IRequest<TRes>
+            {
+                public ValueTask<TRes> HandleAsync(TReq request, CancellationToken cancellationToken = default)
+                    => ValueTask.FromResult(default(TRes)!);
+            }
+
+            public sealed class OpenNotificationHandler<TNotification> : INotificationHandler<TNotification>
+                where TNotification : INotification
+            {
+                public ValueTask HandleAsync(TNotification notification, CancellationToken cancellationToken = default)
+                    => ValueTask.CompletedTask;
+            }
+            """;
+
+        var (runResult, updatedCompilation) = RunGeneratorAndUpdateCompilation(HandlerSource, handlerSource);
+
+        var medl1004 = runResult.Diagnostics.Where(d => d.Id == "MEDL1004").ToList();
+        medl1004.Should().HaveCount(2);
+        medl1004.Select(d => d.GetMessage()).Should()
+            .Contain(m => m.Contains("OpenRequestHandler"))
+            .And.Contain(m => m.Contains("OpenNotificationHandler"));
+
+        var generated = string.Join("\n", runResult.GeneratedTrees.Select(t => t.ToString()));
+        generated.Should().NotContain("OpenRequestHandler").And.NotContain("OpenNotificationHandler",
+            "open generic handlers must be skipped, not emitted as non-compiling code");
+
+        AssertGeneratedOutputCompiles(updatedCompilation);
+    }
+
+    [Fact]
+    public void HandlerNestedInGenericOuterType_ReportsMedl1004_AndIsNotEmitted()
+    {
+        // The handler itself is non-generic, but its containing type is generic, so its
+        // fully-qualified display name (`Outer<T>.InnerHandler`) still contains an unbound
+        // type parameter when emitted.
+        const string handlerSource = """
+            using MediatorLite;
+
+            namespace DriverTests;
+
+            public static class Outer<T>
+            {
+                public sealed class InnerHandler : IRequestHandler<PingQuery, int>
+                {
+                    public ValueTask<int> HandleAsync(PingQuery request, CancellationToken cancellationToken = default)
+                        => ValueTask.FromResult(request.Value);
+                }
+            }
+            """;
+
+        var (runResult, updatedCompilation) = RunGeneratorAndUpdateCompilation(HandlerSource, handlerSource);
+
+        runResult.Diagnostics.Should().ContainSingle(d => d.Id == "MEDL1004")
+            .Which.GetMessage().Should().Contain("InnerHandler");
+
+        var generated = string.Join("\n", runResult.GeneratedTrees.Select(t => t.ToString()));
+        generated.Should().NotContain("InnerHandler",
+            "a handler nested inside a generic type must be skipped, not emitted as non-compiling code");
+
+        AssertGeneratedOutputCompiles(updatedCompilation);
+    }
+
+    [Fact]
+    public void BehaviorNestedInGenericOuterType_ReportsMedl1002_AndIsNotEmitted()
+    {
+        // Same nesting hole for behaviors: the class's own type-parameter list is empty, so
+        // the pre-existing closed-interface check missed it, but the display name
+        // (`Outer<T>.InnerBehavior`) still carries the outer type's parameter.
+        const string behaviorSource = """
+            using MediatorLite;
+
+            namespace DriverTests;
+
+            public static class BehaviorOuter<T>
+            {
+                public sealed class InnerBehavior : IPipelineBehavior<PingQuery, int>
+                {
+                    public ValueTask<int> HandleAsync(
+                        PingQuery request,
+                        RequestHandlerDelegate<int> next,
+                        CancellationToken cancellationToken = default)
+                        => next();
+                }
+            }
+            """;
+
+        var (runResult, updatedCompilation) = RunGeneratorAndUpdateCompilation(HandlerSource, behaviorSource);
+
+        runResult.Diagnostics.Should().ContainSingle(d => d.Id == "MEDL1002")
+            .Which.GetMessage().Should().Contain("InnerBehavior");
+
+        var generated = string.Join("\n", runResult.GeneratedTrees.Select(t => t.ToString()));
+        generated.Should().NotContain("InnerBehavior",
+            "a behavior nested inside a generic type must be skipped, not emitted as non-compiling code");
+
+        AssertGeneratedOutputCompiles(updatedCompilation);
+    }
+
+    [Fact]
     public void NotificationStrategyAttributes_OnTypeFromReferencedAssembly_AreHonored()
     {
         // Standard consumer layout: notification contracts live in a referenced assembly,
