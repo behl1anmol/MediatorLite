@@ -827,6 +827,131 @@ public class SourceGeneratorDriverTests
             "an edit that changes no discovered model must not regenerate sources");
     }
 
+    [Fact]
+    public void ClassConstrainedOpenBehavior_OverReferenceRequest_IsRegistered_AndReportsNoMedl1002()
+    {
+        // `where TRequest : class, IRequest<TResponse>` is a common MediatR-style shape. It is
+        // satisfiable by every reference-type request, so it must expand (not be rejected via
+        // MEDL1002). PingQuery from HandlerSource is a record => reference type.
+        const string behaviorSource = """
+            using MediatorLite;
+
+            namespace DriverTests;
+
+            public sealed class RefLoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
+                where TRequest : class, IRequest<TResponse>
+            {
+                public ValueTask<TResponse> HandleAsync(
+                    TRequest request,
+                    RequestHandlerDelegate<TResponse> next,
+                    CancellationToken cancellationToken = default)
+                    => next();
+            }
+            """;
+
+        var (runResult, updatedCompilation) = RunGeneratorAndUpdateCompilation(HandlerSource, behaviorSource);
+
+        runResult.Diagnostics.Should().NotContain(d => d.Id == "MEDL1002",
+            "a `where TRequest : class` open behavior is expandable and must not be rejected");
+        var generated = string.Join("\n", runResult.GeneratedTrees.Select(t => t.ToString()));
+        generated.Should().Contain("RefLoggingBehavior<global::DriverTests.PingQuery, int>",
+            "the class-constrained behavior must expand over the reference-type request");
+
+        AssertGeneratedOutputCompiles(updatedCompilation);
+    }
+
+    [Fact]
+    public void ClassConstrainedOpenBehavior_SkipsValueTypeRequests_AndStillCompiles()
+    {
+        // The same behavior must NOT be expanded over a value-type request: substituting a
+        // struct into `where TRequest : class` would emit a CS0452-violating closed type.
+        // Expansion filters value-type requests so the behavior applies only to reference
+        // requests, and AssertGeneratedOutputCompiles is the hard guard against CS0452.
+        const string source = """
+            using MediatorLite;
+
+            namespace DriverTests;
+
+            public readonly record struct StructQuery(int Value) : IRequest<int>;
+
+            public sealed class StructQueryHandler : IRequestHandler<StructQuery, int>
+            {
+                public ValueTask<int> HandleAsync(StructQuery request, CancellationToken cancellationToken = default)
+                    => ValueTask.FromResult(request.Value);
+            }
+
+            public sealed class RefOnlyBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
+                where TRequest : class, IRequest<TResponse>
+            {
+                public ValueTask<TResponse> HandleAsync(
+                    TRequest request,
+                    RequestHandlerDelegate<TResponse> next,
+                    CancellationToken cancellationToken = default)
+                    => next();
+            }
+            """;
+
+        // HandlerSource contributes the reference-type PingQuery; `source` adds the struct request.
+        var (runResult, updatedCompilation) = RunGeneratorAndUpdateCompilation(HandlerSource, source);
+
+        var generated = string.Join("\n", runResult.GeneratedTrees.Select(t => t.ToString()));
+        generated.Should().Contain("RefOnlyBehavior<global::DriverTests.PingQuery, int>",
+            "the class-constrained behavior must expand over the reference-type request");
+        generated.Should().NotContain("RefOnlyBehavior<global::DriverTests.StructQuery, int>",
+            "a `where TRequest : class` behavior must not be expanded over a value-type request");
+
+        AssertGeneratedOutputCompiles(updatedCompilation);
+    }
+
+    [Fact]
+    public void CovariantMultiResponseFallback_EmitsMostDerivedResponseFirst()
+    {
+        // A single request implementing IRequest<Dog> and IRequest<Puppy> (Puppy : Dog : Animal),
+        // dispatched via a common base with no exact handler, falls through to the covariant
+        // IsAssignableTo chain. That chain must test the most-derived response (Puppy) before its
+        // base (Dog), so the more specific pipeline is preferred over the base one.
+        const string source = """
+            using MediatorLite;
+
+            namespace DriverTests;
+
+            public class Animal { }
+            public class Dog : Animal { }
+            public class Puppy : Dog { }
+
+            public record BeastQuery(int Id) : IRequest<Dog>, IRequest<Puppy>;
+
+            public sealed class BeastDogHandler : IRequestHandler<BeastQuery, Dog>
+            {
+                public ValueTask<Dog> HandleAsync(BeastQuery request, CancellationToken cancellationToken = default)
+                    => ValueTask.FromResult(new Dog());
+            }
+
+            public sealed class BeastPuppyHandler : IRequestHandler<BeastQuery, Puppy>
+            {
+                public ValueTask<Puppy> HandleAsync(BeastQuery request, CancellationToken cancellationToken = default)
+                    => ValueTask.FromResult(new Puppy());
+            }
+            """;
+
+        var (runResult, updatedCompilation) = RunGeneratorAndUpdateCompilation(source);
+
+        var mediator = runResult.GeneratedTrees
+            .Select(t => t.ToString())
+            .Single(t => t.Contains("class SourceGeneratedMediator"));
+
+        var puppyAssignable = mediator.IndexOf(
+            "typeof(global::DriverTests.Puppy).IsAssignableTo(typeof(TResponse))", StringComparison.Ordinal);
+        var dogAssignable = mediator.IndexOf(
+            "typeof(global::DriverTests.Dog).IsAssignableTo(typeof(TResponse))", StringComparison.Ordinal);
+        puppyAssignable.Should().BeGreaterThan(-1);
+        dogAssignable.Should().BeGreaterThan(-1);
+        puppyAssignable.Should().BeLessThan(dogAssignable,
+            "the covariant fallback must emit the most-derived response candidate first");
+
+        AssertGeneratedOutputCompiles(updatedCompilation);
+    }
+
     private static (GeneratorDriverRunResult RunResult, Compilation Compilation) RunGenerator(params string[] sources)
     {
         var compilation = CreateCompilation(sources);

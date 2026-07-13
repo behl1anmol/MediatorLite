@@ -54,9 +54,9 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         messageFormat: "Pipeline behavior '{0}' has type parameters that cannot be bound from its "
             + "IPipelineBehavior<,> interface. Generic behavior classes are only supported in the canonical "
             + "shape Behavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse> "
-            + "with no constraints beyond 'where TRequest : IRequest<TResponse>'. The behavior was not "
-            + "registered. Close the behavior over concrete types (as a non-generic class) or use the "
-            + "canonical open shape.",
+            + "with no constraints beyond 'where TRequest : IRequest<TResponse>' (optionally combined with "
+            + "'where TRequest : class'). The behavior was not registered. Close the behavior over concrete "
+            + "types (as a non-generic class) or use the canonical open shape.",
         category: "MediatorLite.Behaviors",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
@@ -363,13 +363,24 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             behaviorOrder = (int)(orderAttr.ConstructorArguments[0].Value ?? 0);
         }
 
+        // An open behavior carrying `where TRequest : class` must not be expanded over value-type
+        // requests — ExpandBehaviors filters those out to avoid emitting a CS0452-violating closed
+        // type. Any *supported* open IPipelineBehavior<,> interface guarantees TypeParameters[0] is
+        // the request param (IsSupportedOpenShape rejects declaration/interface order mismatches),
+        // so reading the reference-type constraint off it is correct; if no open interface survives
+        // discovery there is no open expansion and the flag is simply unused.
+        bool requestMustBeReferenceType = isOpenGeneric
+            && classSymbol.TypeParameters.Length == 2
+            && classSymbol.TypeParameters[0].HasReferenceTypeConstraint;
+
         return new BehaviorInfo(
             ClassName: classSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             Namespace: classSymbol.ContainingNamespace?.ToDisplayString() ?? "",
             BehaviorInterfaces: new EquatableArray<BehaviorInterfaceInfo>(behaviorInterfaces.ToArray()),
             IsOpenGeneric: isOpenGeneric,
             Order: behaviorOrder,
-            HasUnsupportedOpenShape: hasUnsupportedOpenShape);
+            HasUnsupportedOpenShape: hasUnsupportedOpenShape,
+            RequestMustBeReferenceType: requestMustBeReferenceType);
     }
 
     /// <summary>
@@ -398,7 +409,12 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             return false;
         }
 
-        if (HasSpecialConstraints(requestParam) || HasSpecialConstraints(responseParam)
+        // The request param may carry `class` (HasReferenceTypeConstraint): it is satisfiable by
+        // every reference-type request, and expansion (ExpandBehaviors) skips any value-type
+        // request for such a behavior so no CS0452 is ever emitted. All other special
+        // constraints on the request param, and any special constraint on the response param,
+        // still make the shape unexpandable.
+        if (HasDisallowedRequestConstraints(requestParam) || HasSpecialConstraints(responseParam)
             || responseParam.ConstraintTypes.Length > 0)
         {
             return false;
@@ -419,6 +435,14 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         static bool HasSpecialConstraints(ITypeParameterSymbol parameter)
             => parameter.HasReferenceTypeConstraint
                || parameter.HasValueTypeConstraint
+               || parameter.HasNotNullConstraint
+               || parameter.HasUnmanagedTypeConstraint
+               || parameter.HasConstructorConstraint;
+
+        // Same as HasSpecialConstraints but tolerates the `class` constraint, which is safe to
+        // expand over reference-type requests (value-type requests are filtered at expansion).
+        static bool HasDisallowedRequestConstraints(ITypeParameterSymbol parameter)
+            => parameter.HasValueTypeConstraint
                || parameter.HasNotNullConstraint
                || parameter.HasUnmanagedTypeConstraint
                || parameter.HasConstructorConstraint;
@@ -601,7 +625,9 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                         InterfaceType: iface.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                         RequestType: typeArgs[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                         ResponseType: typeArgs[1].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                        BaseTypes: GetBaseTypeNames(typeArgs[0])));
+                        BaseTypes: GetBaseTypeNames(typeArgs[0]),
+                        RequestIsValueType: typeArgs[0].IsValueType,
+                        ResponseBaseTypes: GetBaseTypeNames(typeArgs[1])));
                 }
             }
             else if (originalDef == "MediatorLite.INotificationHandler<TNotification>")
@@ -800,6 +826,14 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             .ToList();
         var handledPairs = new HashSet<(string, string)>(requestResponsePairs);
 
+        // Request types that are value types cannot be substituted into an open behavior
+        // constrained `where TRequest : class` (CS0452), so such pairings are skipped below.
+        var valueTypeRequests = new HashSet<string>(
+            handlers
+                .SelectMany(h => h.RequestHandlers)
+                .Where(r => r.RequestIsValueType)
+                .Select(r => r.RequestType));
+
         foreach (var behavior in behaviors)
         {
             foreach (var behaviorInterface in behavior.BehaviorInterfaces)
@@ -808,6 +842,9 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 {
                     foreach (var (requestType, responseType) in requestResponsePairs)
                     {
+                        if (behavior.RequestMustBeReferenceType && valueTypeRequests.Contains(requestType))
+                            continue;
+
                         var baseTypeName = behavior.ClassName;
                         var genericMarkerIndex = baseTypeName.IndexOf('<');
                         if (genericMarkerIndex > 0)
@@ -1071,7 +1108,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         if (expandedBehaviors.Count > 0)
         {
             var nonValidationBehaviors = expandedBehaviors
-                .Where(b => !b.BehaviorTypeName.StartsWith("global::MediatorLite.FluentValidation.FluentValidationBehavior<"))
+                .Where(b => !b.BehaviorTypeName.StartsWith("global::MediatorLite.FluentValidation.FluentValidationBehavior<", StringComparison.Ordinal))
                 .ToList();
 
             if (nonValidationBehaviors.Count > 0)
@@ -1091,7 +1128,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         // --- Diagnostic counts ---
         var totalValidatorCount = validatorRegistrations.Count;
         var nonValidationBehaviorCount = expandedBehaviors
-            .Count(b => !b.BehaviorTypeName.StartsWith("global::MediatorLite.FluentValidation.FluentValidationBehavior<"));
+            .Count(b => !b.BehaviorTypeName.StartsWith("global::MediatorLite.FluentValidation.FluentValidationBehavior<", StringComparison.Ordinal));
 
         sb.AppendLine($"        /// <summary>Number of request handlers discovered at compile time.</summary>");
         sb.AppendLine($"        public static int RequestHandlerCount => {requestHandlers.Count};");
@@ -1139,7 +1176,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
             .ToDictionary(
                 g => g.Key,
                 g => g
-                    .OrderBy(b => b.BehaviorTypeName.StartsWith("global::MediatorLite.FluentValidation.FluentValidationBehavior<") ? 0 : 1)
+                    .OrderBy(b => b.BehaviorTypeName.StartsWith("global::MediatorLite.FluentValidation.FluentValidationBehavior<", StringComparison.Ordinal) ? 0 : 1)
                     .ThenBy(b => b.Order)
                     .ToList());
 
@@ -1293,7 +1330,21 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 sb.AppendLine("                    // so an IRequest<TResponse> reference can never originate from a");
                 sb.AppendLine("                    // value-type response interface — but IsAssignableTo alone would match");
                 sb.AppendLine("                    // one via boxing and silently run the wrong pipeline.");
-                foreach (var (_, iface) in group.Entries)
+                sb.AppendLine("                    // Candidates are emitted most-derived-first so a more specific response");
+                sb.AppendLine("                    // pipeline is preferred over a base one when both are assignable.");
+                // Order the covariant candidates most-derived-first: a candidate's depth is the
+                // number of its response base types that are themselves candidate response types
+                // (mirrors SortMostDerivedFirst). Ties keep discovery order (deterministic).
+                var covariantResponseNames = new HashSet<string>(
+                    group.Entries.Select(e => e.Interface.ResponseType!));
+                var covariantEntries = group.Entries
+                    .Select((e, idx) => (Entry: e, Index: idx,
+                        Depth: e.Interface.ResponseBaseTypes.Count(covariantResponseNames.Contains)))
+                    .OrderByDescending(x => x.Depth)
+                    .ThenBy(x => x.Index)
+                    .Select(x => x.Entry)
+                    .ToList();
+                foreach (var (_, iface) in covariantEntries)
                 {
                     var sendName = $"Send_{sendMethodSuffixes[(group.RequestType, iface.ResponseType!)]}";
                     sb.AppendLine($"                    if (!typeof({iface.ResponseType}).IsValueType && typeof({iface.ResponseType}).IsAssignableTo(typeof(TResponse)))");
@@ -1905,7 +1956,9 @@ internal sealed record HandlerInterfaceInfo(
     string InterfaceType,
     string RequestType,
     string? ResponseType,
-    EquatableArray<string> BaseTypes = default);
+    EquatableArray<string> BaseTypes = default,
+    bool RequestIsValueType = false,
+    EquatableArray<string> ResponseBaseTypes = default);
 
 internal sealed record NotificationHandlerInterfaceInfo(
     string InterfaceType,
@@ -1932,7 +1985,8 @@ internal sealed record BehaviorInfo(
     EquatableArray<BehaviorInterfaceInfo> BehaviorInterfaces,
     bool IsOpenGeneric,
     int Order = 0,
-    bool HasUnsupportedOpenShape = false);
+    bool HasUnsupportedOpenShape = false,
+    bool RequestMustBeReferenceType = false);
 
 internal sealed record BehaviorInterfaceInfo(
     string InterfaceType,
