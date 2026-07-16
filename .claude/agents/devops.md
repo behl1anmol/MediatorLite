@@ -2,7 +2,7 @@
 name: DevOps
 slug: devops
 description: "Owns CI/CD, benchmarks, hooks, and the context DB schema. Use proactively for workflow changes, NuGet publish, release tagging, benchmark runs, and validating `.claude/hooks/*.csx` scripts. Sole agent authorised to commit and tag."
-tools: [read, search, edit, shell]
+tools: Read, Grep, Glob, Edit, Write, Bash
 user-invocable: true
 ---
 

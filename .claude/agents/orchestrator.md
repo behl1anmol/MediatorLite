@@ -2,7 +2,8 @@
 name: Orchestrator
 slug: orchestrator
 description: "Team lead for the MediatorLite agentic workflow. Use proactively to triage any non-trivial user request, choose between parallel and orchestrated execution, dispatch to the six role agents, and consolidate their handoff blocks before replying to the user."
-tools: [read, search, edit, shell, web]
+# tools: omitted deliberately — the orchestrator dispatches to role agents via the
+# subagent tool, so it inherits the full tool set rather than an allow-list.
 user-invocable: true
 ---
 

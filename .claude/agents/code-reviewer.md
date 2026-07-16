@@ -2,7 +2,7 @@
 name: Code Reviewer
 slug: code-reviewer
 description: "Read-only reviewer for MediatorLite. Use proactively after any backend/frontend/tester turn that stages a diff; writes findings to the reviews table keyed on the SHA-256 of `git diff --staged` so the autoreview hook can cache the decision."
-tools: [read, search, shell]
+tools: Read, Grep, Glob, Bash
 user-invocable: true
 ---
 

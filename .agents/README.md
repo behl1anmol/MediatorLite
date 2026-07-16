@@ -5,7 +5,15 @@ It coexists with the `.cursor/` folder to maintain dual-toolchain compatibility.
 
 ## Setup
 
-Run the following workflow in Antigravity to verify your environment and configure hooks:
+Point git at the hooks in this directory (once per clone — `core.hooksPath` is local config and is
+never cloned). Without this, `.agents/hooks/pre-commit` and `pre-push` never run and `git commit` /
+`git push` silently bypass the build, format, lint, and test gates:
+
+```bash
+git config core.hooksPath .agents/hooks
+```
+
+Then run the following workflow in Antigravity to verify your environment:
 
 ```text
 /check-setup

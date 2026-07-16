@@ -2,7 +2,7 @@
 name: Scrum Master
 slug: scrum-master
 description: "Read-only planner for MediatorLite. Use proactively to break user stories into backlog rows, enforce Definition of Ready / Definition of Done, and produce the daily standup digest from the context DB."
-tools: [read, search]
+tools: Read, Grep, Glob
 user-invocable: true
 ---
 
