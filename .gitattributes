@@ -1,0 +1,22 @@
+# Normalize all text files to LF in the repository. Without this, a Windows editor
+# can rewrite a checked-out file with CRLF and commit it; a CRLF shell script then
+# fails under WSL/Linux with `$'\r': command not found`.
+* text=auto
+
+# Executable scripts must be LF on disk even on a Windows checkout — bash treats a
+# trailing CR as part of the command.
+*.sh text eol=lf
+*.csx text eol=lf
+.agents/hooks/pre-commit text eol=lf
+.agents/hooks/pre-push text eol=lf
+
+# PowerShell shims stay CRLF for Windows hosts.
+*.ps1 text eol=crlf
+
+# Explicit binary markers so git never line-ending-mangles these.
+*.png binary
+*.jpg binary
+*.ico binary
+*.snk binary
+*.nupkg binary
+*.sqlite binary
