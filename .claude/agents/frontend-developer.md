@@ -2,7 +2,7 @@
 name: Frontend Developer (Consumer-Support Engineer)
 slug: frontend-developer
 description: "Consumer-support engineer for MediatorLite. Use proactively when a user reports integration issues from Blazor, MAUI, WPF, or ASP.NET Core consumers; produces minimal reproductions and samples or REST-API harness tests."
-tools: [read, search, edit, shell, web]
+tools: Read, Grep, Glob, Edit, Write, Bash, WebFetch, WebSearch
 user-invocable: true
 ---
 

@@ -1039,12 +1039,20 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
 
         if (notificationHandlers.Count > 0)
         {
+            var emittedConcrete = new HashSet<string>(StringComparer.Ordinal);
             foreach (var (handler, iface) in notificationHandlers)
             {
                 // Register by interface for standard DI resolution
                 sb.AppendLine($"            services.AddTransient<{iface.InterfaceType}, {handler.ClassName}>();");
-                // Also register concrete type for unrolled pipeline resolution
-                sb.AppendLine($"            services.AddTransient<{handler.ClassName}>();");
+                // Also register concrete type for unrolled pipeline resolution.
+                // Emitted once per distinct handler class: a handler implementing
+                // multiple INotificationHandler<> interfaces appears once per interface
+                // here, and a duplicate concrete registration would add a duplicate
+                // ServiceDescriptor.
+                if (emittedConcrete.Add(handler.ClassName))
+                {
+                    sb.AppendLine($"            services.AddTransient<{handler.ClassName}>();");
+                }
             }
         }
 

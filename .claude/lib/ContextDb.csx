@@ -68,7 +68,12 @@ public static class ContextDb
             Directory.CreateDirectory(dbDir);
             _dbPath = Path.Combine(dbDir, "session.sqlite");
             _schemaPath = Path.Combine(dbDir, "schema.sql");
-            _connectionString = $"Data Source={_dbPath};Cache=Shared";
+            // Pooling=False is required, not a tuning choice. With pooling on, Microsoft.Data.Sqlite
+            // keeps connections alive and closes them from a ProcessExit handler. Under dotnet-script
+            // the native e_sqlite3 resolver is already torn down by then, so sqlite3_close_v2 throws
+            // DllNotFoundException and the hook exits 134 — which fails the PreToolUse gate and blocks
+            // the tool call it was guarding. Closing on Dispose keeps every close inside the run.
+            _connectionString = $"Data Source={_dbPath};Cache=Shared;Pooling=False";
 
             // Apply schema (idempotent).
             if (File.Exists(_schemaPath))

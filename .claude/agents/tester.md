@@ -2,7 +2,7 @@
 name: Tester
 slug: tester
 description: "Owns tests/** for MediatorLite. Use proactively for TDD (failing test first) on bug fixes, coverage gaps on new features, and keeping the source-gen vs unit-test split clean. Must run `dotnet test MediatorLite.sln` before handoff."
-tools: [read, search, edit, shell]
+tools: Read, Grep, Glob, Edit, Write, Bash
 user-invocable: true
 ---
 

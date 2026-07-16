@@ -38,8 +38,11 @@ public sealed class FluentValidationBehavior<TRequest, TResponse> : IPipelineBeh
     /// <param name="validators">
     /// The FluentValidation validators for <typeparamref name="TRequest"/>, supplied by DI.
     /// </param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="validators"/> is null.</exception>
     public FluentValidationBehavior(IEnumerable<global::FluentValidation.IValidator<TRequest>> validators)
     {
+        ArgumentNullException.ThrowIfNull(validators);
+
         // Avoid an extra allocation when DI already handed us an array.
         _validators = validators as global::FluentValidation.IValidator<TRequest>[] ?? validators.ToArray();
     }

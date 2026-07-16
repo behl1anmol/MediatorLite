@@ -952,6 +952,52 @@ public class SourceGeneratorDriverTests
         AssertGeneratedOutputCompiles(updatedCompilation);
     }
 
+    [Fact]
+    public void NotificationHandler_ImplementingSeveralInterfaces_RegistersConcreteTypeOnce()
+    {
+        // A handler class appears in the discovery list once per INotificationHandler<>
+        // interface it implements. The interface registration is correctly emitted per
+        // interface, but the concrete-type registration (used by the unrolled Publish_*
+        // methods) must be emitted once per class — emitting it per interface added a
+        // duplicate ServiceDescriptor for every extra interface.
+        const string source = """
+            using MediatorLite;
+
+            namespace App
+            {
+                public record OrderPlaced(int Id) : INotification;
+                public record OrderShipped(int Id) : INotification;
+
+                public sealed class AuditHandler : INotificationHandler<OrderPlaced>, INotificationHandler<OrderShipped>
+                {
+                    public ValueTask HandleAsync(OrderPlaced notification, CancellationToken cancellationToken = default)
+                        => ValueTask.CompletedTask;
+
+                    public ValueTask HandleAsync(OrderShipped notification, CancellationToken cancellationToken = default)
+                        => ValueTask.CompletedTask;
+                }
+            }
+            """;
+
+        var (runResult, updatedCompilation) = RunGeneratorAndUpdateCompilation(source);
+
+        var generated = string.Join("\n", runResult.GeneratedTrees.Select(t => t.ToString()));
+
+        // One interface registration per implemented interface — both must survive.
+        generated.Should().Contain(
+            "services.AddTransient<global::MediatorLite.INotificationHandler<global::App.OrderPlaced>, global::App.AuditHandler>();");
+        generated.Should().Contain(
+            "services.AddTransient<global::MediatorLite.INotificationHandler<global::App.OrderShipped>, global::App.AuditHandler>();");
+
+        // Exactly one concrete registration despite the two interfaces.
+        const string concreteRegistration = "services.AddTransient<global::App.AuditHandler>();";
+        var concreteRegistrations = generated.Split(concreteRegistration).Length - 1;
+        concreteRegistrations.Should().Be(1,
+            "the concrete handler type must be registered once per class, not once per implemented interface");
+
+        AssertGeneratedOutputCompiles(updatedCompilation);
+    }
+
     private static (GeneratorDriverRunResult RunResult, Compilation Compilation) RunGenerator(params string[] sources)
     {
         var compilation = CreateCompilation(sources);

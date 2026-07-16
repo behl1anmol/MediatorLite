@@ -2,7 +2,7 @@
 name: Backend Developer
 slug: backend-developer
 description: "Primary author for src/MediatorLite*/**. Use proactively to implement features, fix bugs, and extend the mediator, source generator, validation, or pipeline behaviors. Must run `dotnet build` before handoff."
-tools: [read, search, edit, shell]
+tools: Read, Grep, Glob, Edit, Write, Bash
 user-invocable: true
 ---
 
