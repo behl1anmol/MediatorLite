@@ -17,7 +17,16 @@ public readonly record struct Unit : IEquatable<Unit>, IComparable<Unit>
     /// <summary>
     /// Returns a completed <see cref="ValueTask{Unit}"/> with the default <see cref="Unit"/> value.
     /// </summary>
-    public static ValueTask<Unit> CompletedTask { get; } = ValueTask.FromResult(Value);
+    /// <remarks>
+    /// Implemented as a computed (expression-bodied) property rather than a get-only auto-property so
+    /// that <see cref="Unit"/> does not declare a <c>static</c> field of type <see cref="ValueTask{Unit}"/>.
+    /// Such a self-referential static field (<c>Unit</c> statically holding a <c>ValueTask&lt;Unit&gt;</c>)
+    /// trips the Mono/WASM type loader's recursion detector while loading <c>ValueTask&lt;Unit&gt;</c>,
+    /// aborting the runtime (native <c>object.c</c> assertion / <c>TypeLoadException: Recursive type
+    /// definition detected</c>) on Blazor WebAssembly. A completed <see cref="ValueTask{Unit}"/> is a
+    /// cheap, allocation-free struct, so computing it on each access has no meaningful cost.
+    /// </remarks>
+    public static ValueTask<Unit> CompletedTask => ValueTask.FromResult(Value);
 
     /// <summary>
     /// Compares this instance with another <see cref="Unit"/> instance.
