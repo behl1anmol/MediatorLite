@@ -38,7 +38,9 @@ Cut a new MediatorLite release: bump semver on the three shipped packages, updat
    Select-String -Path src\**\*.csproj -Pattern '<Version>' -SimpleMatch
    ```
 
-3. **Update the changelog (if present).** If `CHANGELOG.md` exists at the repo root, prepend a new section with the version, date, and a bullet list grouped by `Added`, `Changed`, `Fixed`, `Breaking`. If it does not exist, skip — the GitHub Release is auto-generated from commits by the publish workflow:
+3. **Advance the analyzer release ledger.** Before tagging, move every diagnostic rule that ships in this version from `src/MediatorLite.SourceGeneration/AnalyzerReleases.Unshipped.md` into a `## Release X.Y.Z` section of `src/MediatorLite.SourceGeneration/AnalyzerReleases.Shipped.md` (create the section if it does not exist), then delete those rows from `Unshipped.md`. The RS2008 release-tracking analyzer reads the Shipped ledger to detect a *later* breaking change to a rule — a severity downgrade, a category change, a removal — so leaving rules permanently in `Unshipped.md` makes that protection inert. A rule declared in the generator but present in neither file fails the RS2008 build gate, so rebuild after moving and confirm the build stays clean.
+
+4. **Update the changelog (if present).** If `CHANGELOG.md` exists at the repo root, prepend a new section with the version, date, and a bullet list grouped by `Added`, `Changed`, `Fixed`, `Breaking`. If it does not exist, skip — the GitHub Release is auto-generated from commits by the publish workflow:
 
    ```94:100:.github/workflows/publish.yml
        - name: Create GitHub Release
@@ -50,7 +52,7 @@ Cut a new MediatorLite release: bump semver on the three shipped packages, updat
            tag_name: ${{ steps.release_tag.outputs.TAG_NAME }}
    ```
 
-4. **Verify benchmarks locally** on the release candidate commit:
+5. **Verify benchmarks locally** on the release candidate commit:
 
    ```powershell
    dotnet run -c Release --project tests/MediatorLite.Benchmarks -- --filter '*' --exporters json markdown --memory
@@ -58,15 +60,15 @@ Cut a new MediatorLite release: bump semver on the three shipped packages, updat
 
    Compare the summary to the previous release's snapshot (available in [docs/benchmarks.md](docs/benchmarks.md) or the prior release's artifact). No regression > 10% mean time / > 5% allocations without a documented reason.
 
-5. **Open a release PR** titled `chore(release): vX.Y.Z`. Required content:
+6. **Open a release PR** titled `chore(release): vX.Y.Z`. Required content:
    - Version bump diff on the three `.csproj`s.
    - Changelog delta (if applicable).
    - Benchmark comment from CI attached to the PR.
    - Link to any lessons or memories shipped in this release.
 
-6. **Merge to `main`** once the CI workflow is green and `code-reviewer` has approved.
+7. **Merge to `main`** once the CI workflow is green and `code-reviewer` has approved.
 
-7. **Create and push the tag** from the merge commit on `main`. The publish workflow keys off tags of the form `v*.*.*`:
+8. **Create and push the tag** from the merge commit on `main`. The publish workflow keys off tags of the form `v*.*.*`:
 
    ```6:10:.github/workflows/publish.yml
    on:
@@ -85,7 +87,7 @@ Cut a new MediatorLite release: bump semver on the three shipped packages, updat
    git push origin v1.2.3
    ```
 
-8. **Watch the publish workflow**. It performs, in order:
+9. **Watch the publish workflow**. It performs, in order:
    - Restore → build with `/p:Version=<X.Y.Z>` → run the full test suite.
    - `dotnet pack` on each of the three projects into `./artifacts/*.nupkg`.
    - Upload the artifact (`nuget-packages`).
@@ -94,7 +96,7 @@ Cut a new MediatorLite release: bump semver on the three shipped packages, updat
 
    Expected: workflow exit code `0`, three packages visible on nuget.org at the new version within a few minutes.
 
-9. **Post-publish verification** (smoke test from a clean working directory):
+10. **Post-publish verification** (smoke test from a clean working directory):
 
    ```powershell
    dotnet new console -n ReleaseSmoke -o /tmp/ReleaseSmoke

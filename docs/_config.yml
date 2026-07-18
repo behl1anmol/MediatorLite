@@ -19,6 +19,17 @@ search:
 # Navigation
 nav_enabled: true
 
+# Front-matter defaults — auto-apply the doc layout to every file under
+# docs/releases/ so a new release note renders correctly with zero config. Each
+# note nests under the "Releases" nav section via its own `parent: Releases` +
+# `title:` front matter (two lines; see docs/releases/index.md for the template).
+defaults:
+  - scope:
+      path: "releases"
+      type: "pages"
+    values:
+      layout: "default"
+
 # Footer
 footer_content: >
   Copyright &copy; 2026 <a href="https://github.com/behl1anmol">behl1anmol</a>.

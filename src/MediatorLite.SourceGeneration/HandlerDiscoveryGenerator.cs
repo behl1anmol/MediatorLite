@@ -92,6 +92,28 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
 
+    /// <summary>
+    /// Reported when a discovered open generic pipeline behavior expands to zero closed
+    /// registrations — every discovered request was filtered out during expansion. The only
+    /// such filter today is the reference-type guard: an open behavior constrained
+    /// <c>where TRequest : class</c> cannot be closed over a value-type request (CS0452), so if
+    /// every request in the compilation is a value type the behavior applies to nothing. The
+    /// build is clean and no other diagnostic fires, so the author can wrongly believe the
+    /// behavior runs (the same silent-skip failure mode MEDL1002/MEDL1004 exist to prevent).
+    /// Surface it here instead of registering nothing in silence.
+    /// </summary>
+    private static readonly DiagnosticDescriptor OpenBehaviorRegisteredAgainstNoRequest = new(
+        id: "MEDL1005",
+        title: "Open pipeline behavior is registered against no request",
+        messageFormat: "Open pipeline behavior '{0}' matched no request type in this compilation, so it "
+            + "was not registered and will never run. This happens when a behavior constrained "
+            + "'where TRequest : class' is the only shape but every discovered request is a value type "
+            + "(a value type cannot satisfy the class constraint). Make at least one target request a "
+            + "reference type, or close the behavior over a concrete request type.",
+        category: "MediatorLite.Behaviors",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         // Find all class declarations that might be handlers
@@ -730,7 +752,16 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                 handlerNames[handlerNames.Count - 1]));
         }
 
-        var expandedBehaviors = ExpandBehaviors(validBehaviors, validHandlers);
+        var expandedBehaviors = ExpandBehaviors(
+            validBehaviors, validHandlers, out var openBehaviorsWithoutExpansion);
+
+        // A discovered open behavior that expanded to nothing registers against no request and
+        // will never run — surface it (MEDL1005) rather than let the author believe it is active.
+        foreach (var behaviorName in openBehaviorsWithoutExpansion)
+        {
+            context.ReportDiagnostic(Diagnostic.Create(
+                OpenBehaviorRegisteredAgainstNoRequest, Location.None, StripGlobalPrefix(behaviorName)));
+        }
 
         // Determine which request types need validation
         var requestTypesWithValidation = DetermineValidationTargets(validHandlers, validValidators);
@@ -816,9 +847,11 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
     /// </summary>
     private static List<ExpandedBehaviorInfo> ExpandBehaviors(
         List<BehaviorInfo> behaviors,
-        List<HandlerInfo> handlers)
+        List<HandlerInfo> handlers,
+        out List<string> openBehaviorsWithoutExpansion)
     {
         var expanded = new List<ExpandedBehaviorInfo>();
+        openBehaviorsWithoutExpansion = new List<string>();
 
         var requestResponsePairs = handlers
             .SelectMany(h => h.RequestHandlers.Select(r => (r.RequestType, r.ResponseType!)))
@@ -836,10 +869,18 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
 
         foreach (var behavior in behaviors)
         {
+            // Track whether this behavior contributes an expandable open interface, and how many
+            // registrations (open OR closed) it produced in total, so a behavior that matches no
+            // request at all can be surfaced via MEDL1005 instead of vanishing silently.
+            var hasOpenInterface = false;
+            var registrationCount = 0;
+
             foreach (var behaviorInterface in behavior.BehaviorInterfaces)
             {
                 if (behaviorInterface.IsOpenGeneric && behavior.IsOpenGeneric)
                 {
+                    hasOpenInterface = true;
+
                     foreach (var (requestType, responseType) in requestResponsePairs)
                     {
                         if (behavior.RequestMustBeReferenceType && valueTypeRequests.Contains(requestType))
@@ -861,6 +902,7 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                             ResponseType: responseType,
                             InterfaceType: closedInterfaceType,
                             Order: behavior.Order));
+                        registrationCount++;
                     }
                 }
                 else if (!behaviorInterface.IsOpenGeneric)
@@ -877,7 +919,29 @@ public sealed class HandlerDiscoveryGenerator : IIncrementalGenerator
                         ResponseType: behaviorInterface.ResponseType!,
                         InterfaceType: behaviorInterface.InterfaceType,
                         Order: behavior.Order));
+                    registrationCount++;
                 }
+            }
+
+            // The behavior declared an expandable open interface, requests exist to expand over,
+            // yet it registered nothing — every candidate pair was filtered out. The only filter
+            // that can empty a supported open behavior today is the reference-type guard, so this
+            // is precisely the `where TRequest : class` behavior over an all-value-type request set;
+            // the emitted message names that cause. Guards:
+            //  - requestResponsePairs.Count > 0 keeps the cause accurate: a compilation with no
+            //    request handlers at all (e.g. notification-only) is out of scope — the behavior has
+            //    nothing to apply to for a reason MEDL1005's message does not describe, so skip it.
+            //  - registrationCount counts BOTH branches, so a behavior that also registers a closed
+            //    interface is never falsely flagged.
+            //  - !HasUnsupportedOpenShape skips behaviors already reported via MEDL1002 (a generic
+            //    class can carry a supported open interface AND trip the unsupported-shape flag via a
+            //    closed-on-generic interface), so MEDL1005 and MEDL1002 never double-fire.
+            if (hasOpenInterface
+                && registrationCount == 0
+                && requestResponsePairs.Count > 0
+                && !behavior.HasUnsupportedOpenShape)
+            {
+                openBehaviorsWithoutExpansion.Add(behavior.ClassName);
             }
         }
 

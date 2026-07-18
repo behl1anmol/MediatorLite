@@ -899,6 +899,54 @@ public class SourceGeneratorDriverTests
             "the class-constrained behavior must expand over the reference-type request");
         generated.Should().NotContain("RefOnlyBehavior<global::DriverTests.StructQuery, int>",
             "a `where TRequest : class` behavior must not be expanded over a value-type request");
+        runResult.Diagnostics.Should().NotContain(d => d.Id == "MEDL1005",
+            "the behavior still expands over the reference-type PingQuery, so it registers against something");
+
+        AssertGeneratedOutputCompiles(updatedCompilation);
+    }
+
+    [Fact]
+    public void ClassConstrainedOpenBehavior_OverOnlyValueTypeRequests_ReportsMedl1005_AndRegistersNothing()
+    {
+        // A `where TRequest : class` open behavior is a supported shape, but a value-type request
+        // cannot satisfy the class constraint, so when EVERY discovered request is a value type the
+        // behavior expands to zero closed registrations — it applies to nothing and never runs.
+        // Without a diagnostic the author has no signal (clean build, no MEDL1002 since the shape is
+        // supported), so this must surface MEDL1005. HandlerSource is deliberately omitted so the
+        // struct is the only request; the struct handler keeps validHandlers non-empty (otherwise
+        // the generator early-returns an empty registration before expansion ever runs).
+        const string source = """
+            using MediatorLite;
+
+            namespace DriverTests;
+
+            public readonly record struct StructQuery(int Value) : IRequest<int>;
+
+            public sealed class StructQueryHandler : IRequestHandler<StructQuery, int>
+            {
+                public ValueTask<int> HandleAsync(StructQuery request, CancellationToken cancellationToken = default)
+                    => ValueTask.FromResult(request.Value);
+            }
+
+            public sealed class RefOnlyBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
+                where TRequest : class, IRequest<TResponse>
+            {
+                public ValueTask<TResponse> HandleAsync(
+                    TRequest request,
+                    RequestHandlerDelegate<TResponse> next,
+                    CancellationToken cancellationToken = default)
+                    => next();
+            }
+            """;
+
+        var (runResult, updatedCompilation) = RunGeneratorAndUpdateCompilation(source);
+
+        runResult.Diagnostics.Should().ContainSingle(d => d.Id == "MEDL1005")
+            .Which.GetMessage().Should().Contain("RefOnlyBehavior");
+
+        var generated = string.Join("\n", runResult.GeneratedTrees.Select(t => t.ToString()));
+        generated.Should().NotContain("RefOnlyBehavior<",
+            "an open behavior that matched no request must register nothing, not emit a closed type");
 
         AssertGeneratedOutputCompiles(updatedCompilation);
     }
