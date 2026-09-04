@@ -1,0 +1,6 @@
+# Source-generated files are emitted here for inspection only (EmitCompilerGeneratedFiles).
+# They are regenerated on every build and must never be committed.
+Generated/
+
+# BenchmarkDotNet run output. Curated baselines live in results/ instead.
+BenchmarkDotNet.Artifacts/

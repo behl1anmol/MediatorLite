@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>MediatorLite.CompetitiveBenchmarks.GeneratorThroughput</AssemblyName>
+    <RootNamespace>CompetitiveBenchmarks.GeneratorThroughput</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Referenced as a plain library (NOT as an Analyzer) so the generator can be driven
+      directly through CSharpGeneratorDriver and timed.
+    -->
+    <ProjectReference Include="..\..\..\src\MediatorLite.SourceGeneration\MediatorLite.SourceGeneration.csproj" />
+    <ProjectReference Include="..\..\..\src\MediatorLite\MediatorLite.csproj" />
+  </ItemGroup>
+
+</Project>

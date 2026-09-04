@@ -1,0 +1,26 @@
+<Project>
+
+  <!--
+    Inherit the repository-wide properties (net10.0, LangVersion, package metadata) but relax
+    the strict analysis gates: these projects deliberately compile third-party mediator
+    libraries' generated code alongside MediatorLite's, and benchmark fixtures are not
+    production source.
+  -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <PropertyGroup>
+    <Nullable>disable</Nullable>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+
+    <!-- Versions of the libraries under comparison, bumped in one place. -->
+    <BenchmarkDotNetVersion>0.15.8</BenchmarkDotNetVersion>
+    <MediatRVersion>12.5.0</MediatRVersion>
+    <MartinothamarMediatorVersion>3.0.2</MartinothamarMediatorVersion>
+    <MicrosoftExtensionsVersion>10.0.0</MicrosoftExtensionsVersion>
+  </PropertyGroup>
+
+</Project>
