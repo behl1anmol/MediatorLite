@@ -37,7 +37,19 @@ static CSharpCompilation CreateCompilation(string source)
         new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable));
 }
 
-Console.WriteLine("| Handlers | Cold run (ms) | Warm rerun, unrelated edit (ms) | Output re-executed? |");
+// A single Stopwatch sample is far too noisy to compare sizes against each other
+// (observed: a "warm" sample beating the cold one). Report the median of N runs.
+const int Samples = 7;
+
+static double Median(List<double> xs)
+{
+    xs.Sort();
+    return xs.Count % 2 == 1 ? xs[xs.Count / 2] : (xs[xs.Count / 2 - 1] + xs[xs.Count / 2]) / 2.0;
+}
+
+Console.WriteLine($"Median of {Samples} runs per cell.");
+Console.WriteLine();
+Console.WriteLine("| Handlers | Cold run (ms) | Rerun after unrelated edit (ms) | Output re-executed? |");
 Console.WriteLine("|---------:|--------------:|--------------------------------:|---------------------|");
 
 foreach (var n in new[] { 25, 100, 400 })
@@ -50,33 +62,41 @@ foreach (var n in new[] { 25, 100, 400 })
                 driverOptions: new GeneratorDriverOptions(default, trackIncrementalGeneratorSteps: true))
         .RunGenerators(compilation);
 
-    var driver = CSharpGeneratorDriver.Create(
-        [new HandlerDiscoveryGenerator().AsSourceGenerator()],
-        driverOptions: new GeneratorDriverOptions(default, trackIncrementalGeneratorSteps: true));
-
-    var sw = Stopwatch.StartNew();
-    driver = (CSharpGeneratorDriver)driver.RunGenerators(compilation);
-    sw.Stop();
-    var cold = sw.Elapsed.TotalMilliseconds;
-
-    // Add a syntax tree that contains no MediatorLite types at all. A well-cached
-    // generator should serve the output node from cache (Cached/Unchanged).
+    // A syntax tree containing no MediatorLite types at all. A well-cached generator
+    // should serve the output node from cache rather than re-running Execute.
     var edited = compilation.AddSyntaxTrees(
         CSharpSyntaxTree.ParseText("namespace Unrelated; public class Irrelevant { public int X => 42; }"));
 
-    sw.Restart();
-    var driver2 = (CSharpGeneratorDriver)driver.RunGenerators(edited);
-    sw.Stop();
-    var warm = sw.Elapsed.TotalMilliseconds;
+    var colds = new List<double>();
+    var warms = new List<double>();
+    var allReasons = new HashSet<IncrementalStepRunReason>();
 
-    var result = driver2.GetRunResult().Results[0];
-    var reasons = result.TrackedOutputSteps
-        .SelectMany(kv => kv.Value)
-        .SelectMany(s => s.Outputs)
-        .Select(o => o.Reason)
-        .Distinct()
-        .ToList();
-    var reExecuted = reasons.Any(r => r is IncrementalStepRunReason.New or IncrementalStepRunReason.Modified);
+    for (int sample = 0; sample < Samples; sample++)
+    {
+        var driver = CSharpGeneratorDriver.Create(
+            [new HandlerDiscoveryGenerator().AsSourceGenerator()],
+            driverOptions: new GeneratorDriverOptions(default, trackIncrementalGeneratorSteps: true));
 
-    Console.WriteLine($"| {n * 2} | {cold:F1} | {warm:F1} | {(reExecuted ? "YES (" : "no (")}{string.Join(",", reasons)}) |");
+        var sw = Stopwatch.StartNew();
+        driver = (CSharpGeneratorDriver)driver.RunGenerators(compilation);
+        sw.Stop();
+        colds.Add(sw.Elapsed.TotalMilliseconds);
+
+        sw.Restart();
+        var driver2 = (CSharpGeneratorDriver)driver.RunGenerators(edited);
+        sw.Stop();
+        warms.Add(sw.Elapsed.TotalMilliseconds);
+
+        foreach (var reason in driver2.GetRunResult().Results[0].TrackedOutputSteps
+                     .SelectMany(kv => kv.Value)
+                     .SelectMany(step => step.Outputs)
+                     .Select(o => o.Reason))
+        {
+            allReasons.Add(reason);
+        }
+    }
+
+    var reExecuted = allReasons.Any(r => r is IncrementalStepRunReason.New or IncrementalStepRunReason.Modified);
+
+    Console.WriteLine($"| {n * 2} | {Median(colds):F1} | {Median(warms):F1} | {(reExecuted ? "YES (" : "no (")}{string.Join(",", allReasons)}) |");
 }
