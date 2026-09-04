@@ -34,11 +34,22 @@ of the consuming assembly, so they cannot be varied inside a single benchmark pr
 
 ## Running
 
-These projects are part of `MediatorLite.sln` and are **built** by CI (the
-`Competitive Benchmarks (build only)` job in `.github/workflows/ci.yml`), so a refactor in `src/`
-cannot silently break the harness. They are never **run** by CI: a full sweep takes tens of
-minutes and shared runners are too noisy to produce numbers worth keeping. `dotnet test` ignores
-them — they are console executables, not test projects.
+These projects are part of `MediatorLite.sln`, so they open and build in the IDE and with
+`dotnet build MediatorLite.sln`, but they are **excluded from CI**.
+
+CI builds and tests `MediatorLite.CI.slnf`, a solution filter that lists every project except this
+directory. Nothing about the pipeline changed when the harness was added: `dotnet test` still
+discovers exactly one test assembly, and the third-party mediator packages are never restored on a
+CI runner.
+
+> **Trade-off, stated plainly:** because CI does not build these projects, a refactor in `src/`
+> can break the harness without anyone noticing until someone runs it. If you change a public
+> signature in `src/`, build this directory before you push:
+> `dotnet build MediatorLite.sln -c Release`.
+
+A `Verify CI solution filter covers every project` step in the build job fails if a project exists
+in `MediatorLite.sln` but is absent from the filter and is not under `tests/CompetitiveBenchmarks/`
+— so a newly added `src/` project cannot silently escape CI the way this harness deliberately does.
 
 Run them locally:
 
