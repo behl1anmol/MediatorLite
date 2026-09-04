@@ -101,3 +101,26 @@ jobs:
 
     - name: Build and run analyzers
       run: dotnet build --configuration Release --no-restore /p:EnforceCodeStyleInBuild=true /p:TreatWarningsAsErrors=true
+
+  competitive-benchmarks:
+    name: Competitive Benchmarks (build only)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    # Builds tests/CompetitiveBenchmarks so that a refactor in src/ cannot silently
+    # break the harness. The benchmarks themselves are NOT run here: they take tens of
+    # minutes and shared CI runners are far too noisy to produce numbers worth keeping.
+    # Run them locally and record results under tests/CompetitiveBenchmarks/results/.
+    - name: Build competitive benchmark harness
+      run: |
+        for project in SmallProject LargeProject DefaultDiagnostics GeneratorThroughput; do
+          dotnet build "tests/CompetitiveBenchmarks/$project" --configuration Release
+        done

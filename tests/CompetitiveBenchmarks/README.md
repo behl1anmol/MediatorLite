@@ -34,9 +34,13 @@ of the consuming assembly, so they cannot be varied inside a single benchmark pr
 
 ## Running
 
-These projects are **not** part of `MediatorLite.sln`, so CI and `dotnet test MediatorLite.sln`
-are unaffected by them and the main build does not pull third-party mediator packages. Run them
-explicitly:
+These projects are part of `MediatorLite.sln` and are **built** by CI (the
+`Competitive Benchmarks (build only)` job in `.github/workflows/ci.yml`), so a refactor in `src/`
+cannot silently break the harness. They are never **run** by CI: a full sweep takes tens of
+minutes and shared runners are too noisy to produce numbers worth keeping. `dotnet test` ignores
+them — they are console executables, not test projects.
+
+Run them locally:
 
 ```bash
 # Per-dispatch overhead and cold start, small project
