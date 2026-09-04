@@ -1,13 +1,31 @@
-# Performance discovery — issue draft, 2026-09-04
+# Performance discovery — 2026-09-04
 
-Draft only. Nothing here has been filed. Review, then file in the order given: the numbering is
-the intended execution order, and later issues depend on earlier ones.
+**Filed as #31-#41 on 2026-09-04.** This document is the working source; the GitHub issues are
+self-contained copies. Edit here and mirror changes to the issue, or edit the issue directly and
+treat this as historical — pick one, do not let them drift silently.
+
+| Draft | Issue | Title |
+|---|---|---|
+| 1 | [#31](https://github.com/behl1anmol/MediatorLite/issues/31) | Add competitive benchmark harness |
+| 2 | [#32](https://github.com/behl1anmol/MediatorLite/issues/32) | Correct the performance claims in README and docs |
+| 3 | [#33](https://github.com/behl1anmol/MediatorLite/issues/33) | Default observability costs +170 ns / +64 B |
+| 4 | [#34](https://github.com/behl1anmol/MediatorLite/issues/34) | [SPIKE] Handler lifetime hard-coded Transient |
+| 5 | [#35](https://github.com/behl1anmol/MediatorLite/issues/35) | Dispatch is O(n), not O(1) |
+| 6 | [#36](https://github.com/behl1anmol/MediatorLite/issues/36) | Notification publish resolves per handler per publish |
+| 7 | [#37](https://github.com/behl1anmol/MediatorLite/issues/37) | [BREAKING/v3] RequestHandlerDelegate carries the request |
+| 8 | [#38](https://github.com/behl1anmol/MediatorLite/issues/38) | No monomorphized concrete-typed send path |
+| 9 | [#39](https://github.com/behl1anmol/MediatorLite/issues/39) | Acceptance gate: scoped end-to-end must beat MediatR |
+| 10 | [#40](https://github.com/behl1anmol/MediatorLite/issues/40) | No streaming support — scope decision |
+| 11 | [#41](https://github.com/behl1anmol/MediatorLite/issues/41) | AOT and trimming neither declared nor verified |
+
+The numbering is the intended execution order, and later issues depend on earlier ones.
 
 **Every claim below is measured.** Raw numbers, environment and caveats:
 [`tests/CompetitiveBenchmarks/results/2026-09-04-baseline.md`](../../tests/CompetitiveBenchmarks/results/2026-09-04-baseline.md).
 Reproduce with `tests/CompetitiveBenchmarks`. Nothing was filed on the basis of a code smell
-alone — two hypotheses I held going in (broken generator incrementality, and a pathology in the
-four syntax providers sharing one predicate) were **refuted by measurement and are not issues**.
+alone — two hypotheses held going in (broken generator incrementality, and a pathology in the
+four syntax providers sharing one predicate) were **refuted by measurement and were deliberately
+not filed**.
 
 ## The headline
 
