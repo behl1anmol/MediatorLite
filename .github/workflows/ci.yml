@@ -37,14 +37,38 @@ jobs:
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
 
+    - name: Verify CI solution filter covers every project
+      shell: bash
+      run: |
+        python3 - <<'PY'
+        import json, subprocess, sys
+        sln = [l.strip().replace("\\", "/")
+               for l in subprocess.run(["dotnet", "sln", "MediatorLite.sln", "list"],
+                                       capture_output=True, text=True, check=True).stdout.splitlines()
+               if l.strip().endswith(".csproj")]
+        flt = {p.replace("\\", "/")
+               for p in json.load(open("MediatorLite.CI.slnf"))["solution"]["projects"]}
+        # The competitive benchmark harness is intentionally excluded from CI.
+        intentional = "tests/CompetitiveBenchmarks/"
+        missing = [p for p in sln if p not in flt and intentional not in p]
+        stale = [p for p in flt if p not in sln]
+        for p in missing:
+            print(f"::error::{p} is in MediatorLite.sln but not in MediatorLite.CI.slnf - it would silently skip CI")
+        for p in stale:
+            print(f"::error::{p} is in MediatorLite.CI.slnf but no longer in MediatorLite.sln")
+        if missing or stale:
+            sys.exit(1)
+        print(f"OK: {len(flt)} projects built by CI, {len(sln) - len(flt)} intentionally excluded")
+        PY
+
     - name: Restore dependencies
-      run: dotnet restore
+      run: dotnet restore MediatorLite.CI.slnf
 
     - name: Build
-      run: dotnet build --configuration Release --no-restore
+      run: dotnet build MediatorLite.CI.slnf --configuration Release --no-restore
 
     - name: Run tests
-      run: dotnet test --configuration Release --no-build --verbosity normal --logger trx --logger "junit;LogFilePath=TestResults/junit-results.xml" --collect:"XPlat Code Coverage"
+      run: dotnet test MediatorLite.CI.slnf --configuration Release --no-build --verbosity normal --logger trx --logger "junit;LogFilePath=TestResults/junit-results.xml" --collect:"XPlat Code Coverage"
 
     - name: Upload test results
       uses: actions/upload-artifact@v6
@@ -91,13 +115,14 @@ jobs:
         dotnet-version: ${{ env.DOTNET_VERSION }}
 
     - name: Restore dependencies
-      run: dotnet restore
+      run: dotnet restore MediatorLite.CI.slnf
 
     - name: Check code formatting (whitespace)
-      run: dotnet format whitespace --verify-no-changes --verbosity diagnostic --no-restore
+      run: dotnet format whitespace --verify-no-changes --verbosity diagnostic --no-restore MediatorLite.CI.slnf
 
     - name: Check code formatting (style)
-      run: dotnet format style --verify-no-changes --verbosity diagnostic --no-restore
+      run: dotnet format style --verify-no-changes --verbosity diagnostic --no-restore MediatorLite.CI.slnf
 
     - name: Build and run analyzers
-      run: dotnet build --configuration Release --no-restore /p:EnforceCodeStyleInBuild=true /p:TreatWarningsAsErrors=true
+      run: dotnet build MediatorLite.CI.slnf --configuration Release --no-restore /p:EnforceCodeStyleInBuild=true /p:TreatWarningsAsErrors=true
+

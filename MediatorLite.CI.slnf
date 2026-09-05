@@ -1,0 +1,14 @@
+{
+  "solution": {
+    "path": "MediatorLite.sln",
+    "projects": [
+      "samples\\MediatorLite.Sample.SourceGen\\MediatorLite.Sample.SourceGen.csproj",
+      "src\\MediatorLite.Abstractions\\MediatorLite.Abstractions.csproj",
+      "src\\MediatorLite.FluentValidation\\MediatorLite.FluentValidation.csproj",
+      "src\\MediatorLite.SourceGeneration\\MediatorLite.SourceGeneration.csproj",
+      "src\\MediatorLite\\MediatorLite.csproj",
+      "tests\\MediatorLite.Benchmarks\\MediatorLite.Benchmarks.csproj",
+      "tests\\MediatorLite.Tests\\MediatorLite.Tests.csproj"
+    ]
+  }
+}

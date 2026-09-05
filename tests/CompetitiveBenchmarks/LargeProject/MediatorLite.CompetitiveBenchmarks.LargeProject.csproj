@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>MediatorLite.CompetitiveBenchmarks.LargeProject</AssemblyName>
+    <RootNamespace>CompetitiveBenchmarks.LargeProject</RootNamespace>
+    <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+    <CompilerGeneratedFilesOutputPath>Generated</CompilerGeneratedFilesOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Generated sources are emitted for inspection only; the compiler already includes them. -->
+    <Compile Remove="Generated/**/*.cs" />
+    <None Include="Generated/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" Version="$(BenchmarkDotNetVersion)" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="$(MicrosoftExtensionsVersion)" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="$(MicrosoftExtensionsVersion)" />
+    <PackageReference Include="MediatR" Version="$(MediatRVersion)" />
+    <PackageReference Include="Mediator.Abstractions" Version="$(MartinothamarMediatorVersion)" />
+    <PackageReference Include="Mediator.SourceGenerator" Version="$(MartinothamarMediatorVersion)">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\MediatorLite.SourceGeneration\MediatorLite.SourceGeneration.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\..\src\MediatorLite\MediatorLite.csproj" />
+  </ItemGroup>
+
+</Project>
